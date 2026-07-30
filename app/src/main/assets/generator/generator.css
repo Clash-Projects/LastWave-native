@@ -1,0 +1,380 @@
+/* ════════════════════════════════════════════════════════════
+   generator.css — Generator screen styles  ·  Material You
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Page root ────────────────────────────────────────────── */
+.gen-screen {
+  background: var(--bg);
+  padding: 20px 16px calc(var(--nav-height, 76px) + var(--safe-bottom, 0px) + 24px);
+  box-sizing: border-box;
+}
+
+/* ── Section heading ──────────────────────────────────────── */
+.gen-heading {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text3);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  padding-left: 2px;
+}
+
+/* ══════════════════════════════════════════════════════════
+   MODE LIST — vertical rows, card-surface wrapper
+   ══════════════════════════════════════════════════════════ */
+.gen-mode-list {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.14);
+  overflow: hidden;
+}
+
+.gen-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 15px 16px;
+  cursor: pointer;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+}
+.gen-mode-row:active { background: var(--ripple); }
+
+/* Selected state — tonal highlight using secondaryContainer */
+.gen-mode-row.selected {
+  background: color-mix(in srgb, var(--md-secondary-container) 40%, transparent);
+}
+
+/* Mode icon container — fixed-size tonal chip */
+.gen-mode-icon-wrap {
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  background: var(--md-surface-container-high);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.gen-mode-row.selected .gen-mode-icon-wrap {
+  background: var(--md-secondary-container);
+}
+
+.gen-mode-icon {
+  font-size: 22px;
+  color: var(--md-on-surface-variant);
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  transition: color 0.15s, font-variation-settings 0.15s;
+}
+.gen-mode-row.selected .gen-mode-icon {
+  color: var(--md-on-secondary-container);
+  font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+}
+
+.gen-mode-text { flex: 1; min-width: 0; }
+.gen-mode-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+  line-height: 1.2;
+}
+.gen-mode-desc {
+  font-size: 12px;
+  color: var(--text3);
+  line-height: 1.3;
+}
+.gen-mode-row.selected .gen-mode-name { color: var(--text); }
+
+/* Chevron arrow on each row */
+.gen-mode-chevron {
+  font-size: 18px;
+  color: var(--text3);
+  flex-shrink: 0;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.15s;
+}
+.gen-mode-row.selected .gen-mode-chevron {
+  transform: rotate(90deg);
+  color: var(--md-on-secondary-container);
+}
+
+/* ══════════════════════════════════════════════════════════
+   OPTIONS PANEL
+   ══════════════════════════════════════════════════════════ */
+.gen-options {
+  margin-top: 14px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px 20px 32px;   /* extra bottom clears tick labels */
+  border: none;
+  overflow: visible;           /* never clip tick labels at card edges */
+  box-shadow: 0 1px 4px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.14);
+  animation: slideUp 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.opt-section { margin-bottom: 16px; }
+
+.opt-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+
+.opt-common {
+  margin-top: 16px;
+  padding-top: 16px;
+  /* Increased from 8px → 20px so the tick labels below the slider
+     are never clipped by the card bottom edge on any screen size. */
+  padding-bottom: 20px;
+  box-shadow: inset 0 1px 0 var(--divider);
+}
+
+.generate-btn {
+  margin-top: 20px;
+}
+
+/* ── Chips ────────────────────────────────────────────────── */
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
+.chip {
+  padding: 8px 16px;
+  border-radius: 100px;
+  border: none;
+  background: var(--md-surface-container-high);
+  color: var(--md-on-surface-variant);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.chip.active,
+.chip:active {
+  color: var(--md-on-secondary-container);
+  background: var(--md-secondary-container);
+}
+
+.tag-suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
+/* ── Inputs inside options — inherits M3 filled style ────── */
+.gen-options .text-input {
+  background: var(--bg3);
+}
+
+/* ── Seed pickers ────────────────────────────────────────── */
+.seed-list { margin-top: 10px; max-height: 200px; overflow-y: auto; }
+.seed-list::-webkit-scrollbar { display: none; }
+
+.seed-item {
+  padding: 11px 14px;
+  background: var(--bg3);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border: none;
+}
+.seed-item:active { background: var(--bg4); }
+.seed-item.selected {
+  background: color-mix(in srgb, var(--md-secondary-container) 55%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--md-secondary-container) 80%, transparent);
+}
+.seed-item-track {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.seed-item-artist {
+  font-size: 12px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+
+/* ── Fix 5: Recent Tracks icon spin — ANTI-CLOCKWISE, 600ms ease-in-out ─── */
+@keyframes gen-icon-rotate-ccw {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(-360deg); }
+}
+.gen-icon-spin {
+  animation: gen-icon-rotate-ccw 0.6s ease-in-out forwards;
+  display: inline-block;
+}
+
+/* ══════════════════════════════════════════════════════════
+   TRACK COUNT SLIDER
+   ══════════════════════════════════════════════════════════ */
+.opt-common .opt-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text2);
+  text-transform: none;
+  letter-spacing: 0;
+  margin-bottom: 14px;
+}
+.opt-common .opt-label span {
+  color: var(--md-primary);
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.gen-slider-wrap {
+  display: flex;
+  align-items: center;
+  /* Increased from 6px → 10px for a little extra breathing room
+     between the slider thumb and the tick labels below it. */
+  margin-bottom: 10px;
+}
+
+/* Native range input — themed for Material You dark */
+.gen-slider {
+  flex: 1;
+  width: 100%;            /* ensure full-width within flex container */
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  /* Base track colour — ONLY the ::webkit-slider-runnable-track pseudo
+     gets the filled gradient (via --slider-pct).  Do NOT set a
+     background shorthand here: it would override the track pseudo rule
+     in some Android WebView versions and cause the filled portion to
+     render in a different coordinate space from the thumb. */
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+  position: relative;
+}
+/* Filled portion (left of thumb) — WebKit */
+.gen-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--md-primary) 0%,
+    var(--md-primary) var(--slider-pct, 66%),
+    var(--md-outline-variant) var(--slider-pct, 66%),
+    var(--md-outline-variant) 100%
+  );
+}
+.gen-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--md-primary);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+  margin-top: -9px;
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.34,1.56,0.64,1);
+}
+.gen-slider:active::-webkit-slider-thumb {
+  transform: scale(1.25);
+}
+/* Firefox */
+.gen-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--md-outline-variant);
+}
+.gen-slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--md-primary);
+}
+.gen-slider::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: var(--md-primary);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.45);
+  cursor: pointer;
+}
+
+/* Tick labels below slider
+ *
+ * KEY ALIGNMENT FIX:
+ *   Each <span> has width:0 so space-between distributes them by
+ *   their zero-width points, not their text boxes.  The first span
+ *   is placed at the left padding edge (= thumb-radius = 11px) and
+ *   the last at the right padding edge, matching EXACTLY where the
+ *   browser positions the thumb at min and max values.
+ *   text-align:center + overflow:visible lets the label text float
+ *   symmetrically on both sides of the tick point, so "15" reads
+ *   centred under the thumb at value 15, with zero left/right drift.
+ */
+.gen-slider-ticks {
+  display: flex;
+  justify-content: space-between;
+  /* padding-left/right = thumb-radius (22px ÷ 2 = 11px) so the
+     first and last tick points sit directly under the min/max
+     thumb stop, matching the exact coordinates the browser uses. */
+  padding: 0 11px;
+  padding-bottom: 24px;    /* extra room so "5"/"35" are never clipped */
+  margin-top: 2px;
+  margin-bottom: 0;
+  overflow: visible;       /* never clip tick text against parent edges */
+}
+.gen-slider-ticks span {
+  font-size: 10px;
+  color: var(--text3);
+  font-weight: 500;
+  /* width:0 — tick point has no physical width so space-between
+     places centers at perfectly equal intervals that match the
+     slider thumb's horizontal travel.  Text overflows visually
+     via overflow:visible + white-space:nowrap. */
+  width: 0;
+  text-align: center;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+/* ══════════════════════════════════════════════════════════
+   SEED SEARCH ROW
+   ══════════════════════════════════════════════════════════ */
+.gen-seed-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.gen-seed-row .text-input {
+  flex: 1;
+}
+.gen-seed-search-btn {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, transform 0.15s cubic-bezier(0.34,1.56,0.64,1);
+}
+.gen-seed-search-btn:active {
+  transform: scale(0.9);
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+}
+.gen-seed-search-btn .material-symbols-rounded { font-size: 20px; }
+
+.seed-search-loading {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0;
+}
+.seed-search-empty {
+  padding: 16px 14px;
+  font-size: 13px;
+  color: var(--text3);
+  text-align: center;
+}

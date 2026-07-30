@@ -1,0 +1,233 @@
+<!-- ════════════════════════════════════════════════════════
+     generator.html — Generator screen markup
+     Styles → generator.css   |   Logic → generator.js
+     ════════════════════════════════════════════════════════ -->
+
+<div class="page-scroll gen-screen">
+
+  <!-- Heading -->
+  <div class="gen-heading">Choose a mode</div>
+
+  <!-- Mode list — vertical rows inside a card surface -->
+  <div class="gen-mode-list">
+
+    <div class="gen-mode-row" data-mode="top" onclick="selectMode('top')">
+      <div class="gen-mode-icon-wrap">
+        <span class="material-symbols-rounded gen-mode-icon">leaderboard</span>
+      </div>
+      <div class="gen-mode-text">
+        <div class="gen-mode-name">Top Tracks</div>
+        <div class="gen-mode-desc">Your most played tracks of all time</div>
+      </div>
+      <span class="material-symbols-rounded gen-mode-chevron">chevron_right</span>
+    </div>
+
+    <div class="gen-mode-row" data-mode="recent" onclick="selectMode('recent'); _animateRecentIcon(this)">
+      <div class="gen-mode-icon-wrap">
+        <span class="material-symbols-rounded gen-mode-icon" id="recentTracksIcon">history</span>
+      </div>
+      <div class="gen-mode-text">
+        <div class="gen-mode-name">Recent Tracks</div>
+        <div class="gen-mode-desc">What you've been listening to lately</div>
+      </div>
+      <span class="material-symbols-rounded gen-mode-chevron">chevron_right</span>
+    </div>
+
+    <div class="gen-mode-row" data-mode="similar-tracks" onclick="selectMode('similar-tracks')">
+      <div class="gen-mode-icon-wrap">
+        <span class="material-symbols-rounded gen-mode-icon">music_note</span>
+      </div>
+      <div class="gen-mode-text">
+        <div class="gen-mode-name">Similar Tracks</div>
+        <div class="gen-mode-desc">Tracks similar to one you love</div>
+      </div>
+      <span class="material-symbols-rounded gen-mode-chevron">chevron_right</span>
+    </div>
+
+    <div class="gen-mode-row" data-mode="similar-artists" onclick="selectMode('similar-artists')">
+      <div class="gen-mode-icon-wrap">
+        <span class="material-symbols-rounded gen-mode-icon">people</span>
+      </div>
+      <div class="gen-mode-text">
+        <div class="gen-mode-name">Similar Artists</div>
+        <div class="gen-mode-desc">Discover artists like your favourites</div>
+      </div>
+      <span class="material-symbols-rounded gen-mode-chevron">chevron_right</span>
+    </div>
+
+    <div class="gen-mode-row" data-mode="tag" onclick="selectMode('tag')">
+      <div class="gen-mode-icon-wrap">
+        <span class="material-symbols-rounded gen-mode-icon">sell</span>
+      </div>
+      <div class="gen-mode-text">
+        <div class="gen-mode-name">By Tag / Genre</div>
+        <div class="gen-mode-desc">Browse by genre like rock, lofi, jazz</div>
+      </div>
+      <span class="material-symbols-rounded gen-mode-chevron">chevron_right</span>
+    </div>
+
+    <div class="gen-mode-row" data-mode="mix" onclick="selectMode('mix')">
+      <div class="gen-mode-icon-wrap">
+        <span class="material-symbols-rounded gen-mode-icon">shuffle</span>
+      </div>
+      <div class="gen-mode-text">
+        <div class="gen-mode-name">My Mix</div>
+        <div class="gen-mode-desc">Smart blend of top, recent & similar</div>
+      </div>
+      <span class="material-symbols-rounded gen-mode-chevron">chevron_right</span>
+    </div>
+
+    <div class="gen-mode-row" data-mode="recommendations" onclick="selectMode('recommendations')">
+      <div class="gen-mode-icon-wrap">
+        <span class="material-symbols-rounded gen-mode-icon">auto_awesome</span>
+      </div>
+      <div class="gen-mode-text">
+        <div class="gen-mode-name">My Recommendations</div>
+        <div class="gen-mode-desc">30 fresh tracks for you to listen to next</div>
+      </div>
+      <span class="material-symbols-rounded gen-mode-chevron">chevron_right</span>
+    </div>
+
+    <div class="gen-mode-row" data-mode="library" onclick="selectMode('library')">
+      <div class="gen-mode-icon-wrap">
+        <span class="material-symbols-rounded gen-mode-icon">library_music</span>
+      </div>
+      <div class="gen-mode-text">
+        <div class="gen-mode-name">My Library</div>
+        <div class="gen-mode-desc">Re-discover the sounds of your past</div>
+      </div>
+      <span class="material-symbols-rounded gen-mode-chevron">chevron_right</span>
+    </div>
+
+  </div>
+
+  <!-- ── Mode options panel (hidden until a mode is selected) ── -->
+  <div id="modeOptions" class="gen-options hidden">
+
+    <!-- Top Tracks options -->
+    <div id="opts-top" class="opt-section hidden">
+      <div class="opt-label">Time Period</div>
+      <div class="chip-row">
+        <button class="chip active" data-period="overall"  onclick="selectChip(this,'period')">All Time</button>
+        <button class="chip"        data-period="12month" onclick="selectChip(this,'period')">12 Months</button>
+        <button class="chip"        data-period="6month"  onclick="selectChip(this,'period')">6 Months</button>
+        <button class="chip"        data-period="3month"  onclick="selectChip(this,'period')">3 Months</button>
+        <button class="chip"        data-period="1month"  onclick="selectChip(this,'period')">1 Month</button>
+        <button class="chip"        data-period="7day"    onclick="selectChip(this,'period')">7 Days</button>
+      </div>
+    </div>
+
+    <!-- Recent options — count handled by shared slider below -->
+    <div id="opts-recent" class="opt-section hidden">
+      <div class="opt-label" style="color:var(--text2);font-size:11px">Track count is set by the slider below</div>
+    </div>
+
+    <!-- Similar Tracks options -->
+    <div id="opts-similar-tracks" class="opt-section hidden">
+      <div class="opt-label">Seed Track</div>
+      <div class="gen-seed-row">
+        <input type="text" id="seedTrackName" class="text-input" placeholder="Track name…" />
+        <button class="gen-seed-search-btn" onclick="_searchSeedTrack()" aria-label="Search">
+          <span class="material-symbols-rounded">search</span>
+        </button>
+      </div>
+      <div class="opt-label" style="margin-top:14px">Seed Artist</div>
+      <div class="gen-seed-row">
+        <input type="text" id="seedArtistName" class="text-input" placeholder="Artist name…" />
+      </div>
+      <div class="opt-label" style="margin-top:14px">Or pick from your top tracks</div>
+      <button class="btn-secondary full-width" onclick="loadTopTracksForSeed()">
+        <span class="material-symbols-rounded">library_music</span>
+        Load My Top Tracks
+      </button>
+      <div id="seedTrackList" class="seed-list"></div>
+    </div>
+
+    <!-- Similar Artists options -->
+    <div id="opts-similar-artists" class="opt-section hidden">
+      <div class="opt-label">Seed Artist</div>
+      <div class="gen-seed-row">
+        <input type="text" id="seedArtistInput" class="text-input" placeholder="Artist name…" />
+        <button class="gen-seed-search-btn" onclick="_searchSeedArtist()" aria-label="Search">
+          <span class="material-symbols-rounded">search</span>
+        </button>
+      </div>
+      <div class="opt-label" style="margin-top:14px">Or pick from your top artists</div>
+      <button class="btn-secondary full-width" onclick="loadTopArtistsForSeed()">
+        <span class="material-symbols-rounded">people</span>
+        Load My Top Artists
+      </button>
+      <div id="seedArtistList" class="seed-list"></div>
+    </div>
+
+    <!-- Tag options -->
+    <div id="opts-tag" class="opt-section hidden">
+      <div class="opt-label">Genre / Tag</div>
+      <input type="text" id="tagInput" class="text-input" placeholder="e.g. rock, lofi, jazz…" />
+      <div class="tag-suggestions">
+        <button class="chip" onclick="setTag('pop')">pop</button>
+        <button class="chip" onclick="setTag('rock')">rock</button>
+        <button class="chip" onclick="setTag('hip-hop')">hip-hop</button>
+        <button class="chip" onclick="setTag('electronic')">electronic</button>
+        <button class="chip" onclick="setTag('jazz')">jazz</button>
+        <button class="chip" onclick="setTag('lofi')">lofi</button>
+        <button class="chip" onclick="setTag('metal')">metal</button>
+        <button class="chip" onclick="setTag('indie')">indie</button>
+        <button class="chip" onclick="setTag('classical')">classical</button>
+        <button class="chip" onclick="setTag('r&b')">r&b</button>
+        <button class="chip" onclick="setTag('ambient')">ambient</button>
+        <button class="chip" onclick="setTag('punk')">punk</button>
+      </div>
+    </div>
+
+    <!-- Mix options — count handled by shared slider below -->
+    <div id="opts-mix" class="opt-section hidden">
+      <div class="opt-label" style="color:var(--text2);font-size:11px">Mix includes: top tracks, recent plays & similar artists' tracks.</div>
+    </div>
+
+    <!-- Recommendations options — count handled by shared slider below -->
+    <div id="opts-recommendations" class="opt-section hidden">
+      <div class="opt-label" style="color:var(--text2);font-size:11px">Track count is set by the slider below</div>
+    </div>
+
+    <!-- Library options -->
+    <div id="opts-library" class="opt-section hidden">
+      <div class="opt-label">Time Period</div>
+      <div class="chip-row">
+        <button class="chip active" data-period="overall"  onclick="selectChip(this,'period')">All Time</button>
+        <button class="chip"        data-period="12month" onclick="selectChip(this,'period')">12 Months</button>
+        <button class="chip"        data-period="6month"  onclick="selectChip(this,'period')">6 Months</button>
+        <button class="chip"        data-period="3month"  onclick="selectChip(this,'period')">3 Months</button>
+        <button class="chip"        data-period="1month"  onclick="selectChip(this,'period')">1 Month</button>
+        <button class="chip"        data-period="7day"    onclick="selectChip(this,'period')">7 Days</button>
+      </div>
+    </div>
+
+    <!-- Unified track count slider — shown for ALL modes -->
+    <div class="opt-common">
+      <div class="opt-label">
+        Track Count: <span id="genSliderValue">25</span>
+      </div>
+      <div class="gen-slider-wrap">
+        <input
+          type="range"
+          id="genTrackSlider"
+          class="gen-slider"
+          min="5" max="35" step="1" value="25"
+          oninput="selectSliderCount(this.value)"
+          aria-label="Track count"
+        />
+      </div>
+      <div class="gen-slider-ticks" aria-hidden="true">
+        <span>5</span><span>10</span><span>15</span><span>20</span><span>25</span><span>30</span><span>35</span>
+      </div>
+    </div>
+
+    <button class="btn-primary full-width generate-btn" onclick="generatePlaylist()">
+      <span class="material-symbols-rounded">play_circle</span>
+      Generate Playlist
+    </button>
+
+  </div>
+
+</div>

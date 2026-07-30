@@ -1,0 +1,67 @@
+<!-- ════════════════════════════════════════════════════════
+     results.html — Results screen markup
+     Styles → results.css   |   Logic → results.js
+     ════════════════════════════════════════════════════════ -->
+
+<div class="page-scroll">
+
+  <!-- Empty state -->
+  <div id="resultsEmpty" class="empty-state">
+    <span class="material-symbols-rounded empty-icon">queue_music</span>
+    <div class="empty-title">No playlist yet</div>
+    <div class="empty-sub">Head to Generator to create one</div>
+    <button class="btn-primary" onclick="navigateTo('generator')" style="margin-top:16px">Go to Generator</button>
+  </div>
+
+  <!-- Playlist content (hidden until generated) -->
+  <div id="resultsContent" class="hidden">
+
+    <!-- Header row -->
+    <div class="results-header">
+      <div>
+        <div class="results-title" id="resultsTitle">Playlist</div>
+        <div class="results-count" id="resultsCount">0 tracks</div>
+      </div>
+      <button class="icon-btn" onclick="clearResults()">
+        <span class="material-symbols-rounded">close</span>
+      </button>
+    </div>
+
+    <!-- Export buttons -->
+    <div class="export-bar">
+      <button class="export-btn" onclick="exportCSV()">
+        <span class="material-symbols-rounded">csv</span>
+        CSV
+      </button>
+      <button class="export-btn" onclick="exportM3U()">
+        <span class="material-symbols-rounded">audio_file</span>
+        M3U
+      </button>
+      <button class="export-btn" onclick="shareText()">
+        <span class="material-symbols-rounded">share</span>
+        Share
+      </button>
+      <button class="export-btn streaming-btn" onclick="openInStreamingApp()" title="Open in streaming app">
+        <span class="material-symbols-rounded">play_circle</span>
+        Stream
+      </button>
+    </div>
+
+    <!-- Track list -->
+    <div id="trackList" class="track-list"></div>
+  </div>
+
+  <!-- Loading state -->
+  <div id="resultsLoading" class="loading-state hidden">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loadingText">Fetching tracks…</div>
+    <div class="skeleton-list">
+      <div class="skeleton-track"></div>
+      <div class="skeleton-track"></div>
+      <div class="skeleton-track"></div>
+      <div class="skeleton-track"></div>
+      <div class="skeleton-track"></div>
+    </div>
+  </div>
+
+</div>

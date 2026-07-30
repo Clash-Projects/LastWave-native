@@ -1,0 +1,87 @@
+<!-- ════════════════════════════════════════════════════════
+     search.html — Global Search screen
+     Styles → search.css   |   Logic → search.js
+     ════════════════════════════════════════════════════════ -->
+
+<div class="search-screen page-scroll">
+
+  <!-- ── Search bar ────────────────────────────────────────── -->
+  <div class="search-bar-wrap">
+    <div class="search-bar">
+      <span class="material-symbols-rounded search-bar-icon">search</span>
+      <input
+        id="searchInput"
+        class="search-input"
+        type="search"
+        placeholder="Tracks, artists, albums…"
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
+        enterkeyhint="search"
+      />
+      <button
+        id="searchClearBtn"
+        class="search-clear-btn hidden"
+        onclick="_searchClear()"
+        aria-label="Clear search"
+      >
+        <span class="material-symbols-rounded">close</span>
+      </button>
+      <button
+        id="searchGoBtn"
+        class="search-go-btn"
+        onclick="_flushSearch()"
+        aria-label="Search"
+      >
+        <span class="material-symbols-rounded">arrow_forward</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Tabs ──────────────────────────────────────────────── -->
+  <div class="search-tabs" id="searchTabs" role="tablist">
+    <button class="search-tab active" id="tabTracks"  onclick="_switchTab('tracks')"  role="tab" aria-selected="true">
+      <span class="material-symbols-rounded">music_note</span>Tracks
+    </button>
+    <button class="search-tab"        id="tabArtists" onclick="_switchTab('artists')" role="tab" aria-selected="false">
+      <span class="material-symbols-rounded">person</span>Artists
+    </button>
+    <button class="search-tab"        id="tabAlbums"  onclick="_switchTab('albums')"  role="tab" aria-selected="false">
+      <span class="material-symbols-rounded">album</span>Albums
+    </button>
+  </div>
+  <div class="search-tabs-indicator-wrap">
+    <div class="search-tabs-indicator" id="searchTabIndicator"></div>
+  </div>
+
+  <!-- ── Content area ──────────────────────────────────────── -->
+
+  <!-- Idle state — shown before any query -->
+  <div id="searchIdle" class="search-idle">
+    <span class="material-symbols-rounded search-idle-icon">travel_explore</span>
+    <p class="search-idle-text">Search Last.fm for tracks,<br>artists or albums</p>
+    <p class="search-idle-sub">Type and tap → or press Enter</p>
+  </div>
+
+  <!-- Loading state -->
+  <div id="searchLoading" class="search-loading hidden">
+    <div class="search-spinner">
+      <span class="material-symbols-rounded spinning">refresh</span>
+    </div>
+    <p class="search-loading-text">Searching…</p>
+  </div>
+
+  <!-- Empty state -->
+  <div id="searchEmpty" class="search-empty hidden">
+    <span class="material-symbols-rounded search-empty-icon">search_off</span>
+    <p class="search-empty-text">No results found</p>
+    <p class="search-empty-sub">Try a different search term</p>
+  </div>
+
+  <!-- Results list -->
+  <div id="searchResults" class="search-results hidden" role="list">
+    <!-- Populated by search.js -->
+  </div>
+
+</div>

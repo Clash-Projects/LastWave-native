@@ -1,0 +1,734 @@
+/* ═══════════════════════════════════════════════════════════
+   app.css — Shared styles  ·  Material You Premium Overhaul
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Material You Token System ────────────────────────────── */
+/*
+ * All --md-* variables are the canonical Material You color roles.
+ * The defaults below match a dark scheme seeded from hue 0° (red family).
+ * JavaScript's _applyTintedPalette() overwrites these at runtime with the
+ * correct hue derived from the user's chosen or wallpaper accent color —
+ * exactly like dynamicDarkColorScheme() on Android.
+ *
+ * Role mapping reference:
+ *   primary / onPrimary / primaryContainer / onPrimaryContainer
+ *   secondary / onSecondary / secondaryContainer / onSecondaryContainer
+ *   tertiary / onTertiary / tertiaryContainer / onTertiaryContainer
+ *   background / onBackground
+ *   surface / onSurface
+ *   surfaceContainer / surfaceContainerHigh / surfaceContainerHighest
+ *   surfaceVariant / onSurfaceVariant
+ *   outline / outlineVariant
+ */
+:root {
+  /* Prevent Android WebView algorithmic dark mode from recoloring
+     pseudo-elements. This page manages its own dark theme. */
+  color-scheme: dark;
+
+  /* ── M3 Semantic Color Roles (dark scheme, hue 0° defaults) ── */
+  --md-primary:                   hsl(0, 70%, 80%);   /* tone 80 */
+  --md-on-primary:                hsl(0, 70%, 15%);   /* tone 20 */
+  --md-primary-container:         hsl(0, 45%, 30%);   /* tone 30 */
+  --md-on-primary-container:      hsl(0, 35%, 90%);   /* tone 90 */
+
+  --md-secondary:                 hsl(0, 18%, 80%);
+  --md-on-secondary:              hsl(0, 15%, 15%);
+  --md-secondary-container:       hsl(0, 16%, 28%);
+  --md-on-secondary-container:    hsl(0, 10%, 90%);
+
+  --md-tertiary:                  hsl(60, 28%, 80%);
+  --md-on-tertiary:               hsl(60, 22%, 15%);
+  --md-tertiary-container:        hsl(60, 24%, 28%);
+  --md-on-tertiary-container:     hsl(60, 16%, 90%);
+
+  --md-error:                     hsl(0, 65%, 80%);
+  --md-error-container:           hsl(0, 40%, 25%);
+  --md-on-error-container:        hsl(0, 35%, 88%);
+
+  --md-background:                hsl(0, 5%, 6%);
+  --md-on-background:             hsl(0, 3%, 90%);
+  --md-surface:                   hsl(0, 5%, 6%);
+  --md-on-surface:                hsl(0, 3%, 90%);
+  --md-surface-container:         hsl(0, 5%, 12%);
+  --md-surface-container-high:    hsl(0, 5%, 17%);
+  --md-surface-container-highest: hsl(0, 5%, 22%);
+  --md-surface-variant:           hsl(0, 10%, 28%);
+  --md-on-surface-variant:        hsl(0, 10%, 80%);
+  --md-outline:                   hsl(0, 8%, 60%);
+  --md-outline-variant:           hsl(0, 8%, 28%);
+
+  /* ── Legacy bridge tokens — map to M3 roles ──────────────── */
+  --accent:        var(--md-primary);
+  --accent-light:  var(--md-primary-container);
+  --accent-dim:    color-mix(in srgb, var(--md-primary-container) 35%, transparent);
+  --accent-tonal:  color-mix(in srgb, var(--md-primary-container) 55%, transparent);
+  --bg:            var(--md-background);
+  --bg2:           var(--md-surface-container);
+  --bg3:           var(--md-surface-container-high);
+  --bg4:           var(--md-surface-container-highest);
+  --surface:       var(--md-surface-container);
+  --surface2:      var(--md-surface-container-high);
+  --text:          var(--md-on-surface);
+  --text2:         var(--md-on-surface-variant);
+  --text3:         var(--md-outline);
+  --divider:       color-mix(in srgb, var(--md-outline-variant) 50%, transparent);
+  --border:        color-mix(in srgb, var(--md-outline-variant) 65%, transparent);
+  --border-strong: var(--md-outline);
+  --ripple:        color-mix(in srgb, var(--md-on-surface) 7%, transparent);
+
+  /* Shadows */
+  --shadow-sm:     0 1px 3px rgba(0,0,0,0.40), 0 1px 2px rgba(0,0,0,0.30);
+  --shadow:        0 2px 10px rgba(0,0,0,0.55), 0 1px 3px rgba(0,0,0,0.40);
+  --shadow-lg:     0 8px 32px rgba(0,0,0,0.65), 0 2px 8px rgba(0,0,0,0.40);
+
+  /* Shape tokens */
+  --radius:        20px;
+  --radius-sm:     12px;
+  --radius-xs:     8px;
+
+  /* Layout */
+  --nav-height:    76px;
+  --topbar-height: 58px;
+  /* Insets are set by Platform.initSystemInsets() in bridge.js via Java's
+     ViewCompat inset listener — reliable on all Android versions.
+     Defaults to 0px for browser fallback. */
+  --safe-top:    var(--inset-top,    0px);
+  --safe-bottom: var(--inset-bottom, 0px);
+}
+
+/* ── AMOLED Mode ─────────────────────────────────────────── */
+/* JavaScript _applyTintedPalette(hex, amoled=true) regenerates all
+   surface tone tokens with darker tones. These CSS rules handle the
+   hard minimum guarantees and catch renders before JS has run. */
+body.amoled-mode {
+  --md-background: #000000;
+  --md-surface:    #000000;
+  --bg:            #000000;
+}
+
+/* ── Reset ────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: 'Google Sans Flex', 'Roboto', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+input, textarea { user-select: text; }
+
+/* ── Utilities ────────────────────────────────────────────── */
+.hidden { display: none !important; }
+.accent { color: var(--accent); }
+.mt0 { margin-top: 0; }
+.full-width { width: 100%; }
+.link { color: var(--accent); cursor: pointer; text-decoration: underline; }
+
+/* ── App Shell ────────────────────────────────────────────── */
+.app {
+  display: flex; flex-direction: column;
+  height: 100vh; height: 100dvh;
+  background: var(--bg);
+}
+
+/* ── Topbar ───────────────────────────────────────────────── */
+.topbar {
+  height: calc(var(--topbar-height) + var(--safe-top));
+  padding-top: var(--safe-top);
+  display: flex; align-items: center; justify-content: space-between;
+  padding-left: 18px; padding-right: 18px;
+  background: var(--bg);
+  box-shadow: 0 1px 0 var(--divider);
+  position: relative; z-index: 10;
+  flex-shrink: 0;
+}
+.topbar-left { display: flex; align-items: center; gap: 10px; }
+.topbar-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  color: var(--text);
+}
+.topbar-right { display: flex; gap: 4px; }
+
+/* ── Screen Container ─────────────────────────────────────── */
+.pages { flex: 1; overflow: hidden; position: relative; }
+.screen-container {
+  position: absolute; inset: 0;
+  overflow: hidden;
+}
+[data-screen]::-webkit-scrollbar { display: none; }
+[data-screen] { scrollbar-width: none; -ms-overflow-style: none; }
+/* Apply to both legacy .screen-container and [data-screen] wrappers nav.js uses */
+.screen-container.screen-in,
+.screen-in {
+  animation: screenIn 0.28s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  /* Force GPU layer before animation starts to prevent first-frame flash */
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.page-scroll {
+  min-height: 100%;
+  padding: 20px 16px calc(var(--nav-height) + var(--safe-bottom) + 16px);
+  box-sizing: border-box;
+}
+
+/* ── Material Symbols Rounded — local font ────────────────── */
+@font-face {
+  font-family: 'Material Symbols Rounded';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url(fonts/MaterialSymbols.woff2) format('woff2');
+}
+
+.material-symbols-rounded {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  /* Default: outlined / weight 400 */
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
+
+/* Filled variant utility */
+.icon-filled {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24 !important;
+}
+
+/* ── Bottom Navigation ────────────────────────────────────── */
+.bottom-nav {
+  height: calc(var(--nav-height) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
+  display: flex;
+  background: var(--bg2);
+  box-shadow: 0 -2px 12px rgba(0,0,0,0.35);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 100;
+  overflow: hidden;
+  transform: translateY(0);
+  opacity: 1;
+  /* Transition lives on the base rule (not just the hidden state) so it
+     animates smoothly both when collapsing AND when restoring — see
+     body.discover-open .bottom-nav in discover/discover.css */
+  transition: transform 0.32s cubic-bezier(0.2, 0, 0, 1),
+              height 0.32s cubic-bezier(0.2, 0, 0, 1),
+              padding-bottom 0.32s cubic-bezier(0.2, 0, 0, 1),
+              opacity 0.24s ease,
+              box-shadow 0.24s ease;
+}
+
+/*
+ * M3 NavigationBar item structure (in-flow, no absolute pill hacks):
+ *
+ *   nav-item (flex-column, items center, justify center, gap 4px)
+ *   ├── nav-indicator  ← the pill; wraps the icon; press highlight lives here
+ *   │   └── nav-icon
+ *   └── nav-label      ← always in flow; opacity-0 when inactive so layout
+ *                          is stable — no shifting when label appears
+ *
+ * The label is ALWAYS in flow (not position:absolute), so the indicator
+ * stays at a fixed Y coordinate whether or not the label is visible.
+ * This eliminates every source of vertical movement.
+ *
+ * Press feedback fills the indicator exactly — it's bounded by the pill
+ * shape automatically via overflow:hidden. No separate 60×60 circle needed.
+ */
+.nav-item {
+  flex: 1;
+  height: var(--nav-height);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: none; border: none; cursor: pointer;
+  color: var(--text3);
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Pill indicator — in-flow container for icon + press highlight ── */
+.nav-indicator {
+  width: 64px;
+  height: 32px;
+  border-radius: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;       /* stacking context for ripple inside */
+  overflow: hidden;         /* ripple bounded by pill shape — never square */
+  flex-shrink: 0;
+  background: transparent;
+  transition: background 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Material You press highlight — fills indicator, pill-clipped ── */
+/*
+ * 3-state: entering (120ms fade-in) → holding (static) → leaving (280ms fade-out)
+ * Lives inside .nav-indicator so it's automatically pill-shaped.
+ * No position math needed — inset:0 fills the container exactly.
+ */
+.nav-ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: 100px;
+  background: color-mix(in srgb, var(--md-on-surface) 14%, transparent);
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+}
+.nav-ripple.entering {
+  animation: nav-ripple-in 120ms ease-out forwards;
+}
+.nav-ripple.holding {
+  opacity: 0.32;
+  animation: none;
+}
+.nav-ripple.leaving {
+  animation: nav-ripple-out 280ms ease-in forwards;
+}
+
+@keyframes nav-ripple-in {
+  0%   { opacity: 0;    }
+  100% { opacity: 0.32; }
+}
+@keyframes nav-ripple-out {
+  0%   { opacity: 0.32; }
+  100% { opacity: 0;    }
+}
+
+.nav-icon {
+  font-size: 24px;
+  position: relative; z-index: 2; /* above ripple */
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  transition: font-variation-settings 0.22s ease;
+  /* NO transform/scale — icon stays flat always */
+}
+
+.nav-label {
+  font-size: 11px; font-weight: 600; line-height: 1;
+  letter-spacing: 0.15px;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+/* ── Active nav item ───────────────────────────────────────── */
+.nav-item.active {
+  color: var(--md-on-secondary-container);
+}
+
+.nav-item.active .nav-indicator {
+  background: var(--md-secondary-container);
+}
+
+.nav-item.active .nav-icon {
+  font-variation-settings: 'FILL' 1, 'wght' 500, 'GRAD' 0, 'opsz' 24;
+}
+
+.nav-item.active .nav-label {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.2s ease 0.06s, transform 0.2s ease 0.06s;
+}
+
+
+/* ── Icon buttons ──────────────────────────────────────────── */
+.icon-btn {
+  width: 40px; height: 40px;
+  background: transparent;
+  border: none;
+  border-radius: 50%; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text2);
+  transition: background 0.15s, transform 0.15s;
+}
+.icon-btn .material-symbols-rounded { font-size: 26px; }
+.icon-btn svg { width: 20px; height: 20px; }
+.icon-btn:active { background: var(--ripple); transform: scale(0.93); }
+
+.icon-btn-sm {
+  width: 36px; height: 36px;
+  background: var(--bg3);
+  border: none;
+  border-radius: 50%; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text2); transition: background 0.15s;
+}
+.icon-btn-sm .material-symbols-rounded { font-size: 18px; }
+.icon-btn-sm:active { background: var(--bg4); }
+
+/* ── Topbar user button ────────────────────────────────────── */
+.topbar-user-btn {
+  padding: 0;
+  overflow: visible;            /* allow ring to bleed outside bounds */
+  position: relative;
+  background: var(--bg3);
+  border: none;
+  border-radius: 50%;
+  width: 38px; height: 38px;
+}
+.topbar-avatar {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+  display: block;
+  /* Subtle Material You primary ring — thin stroke, slight alpha */
+  box-shadow:
+    0 0 0 1.5px color-mix(in srgb, var(--md-primary) 55%, transparent),
+    0 0 0 3px    color-mix(in srgb, var(--md-primary) 12%, transparent);
+  transition: box-shadow 0.3s ease;
+}
+/* Brighten ring slightly on press for tactile feedback */
+.topbar-user-btn:active .topbar-avatar {
+  box-shadow:
+    0 0 0 1.5px color-mix(in srgb, var(--md-primary) 80%, transparent),
+    0 0 0 4px    color-mix(in srgb, var(--md-primary) 20%, transparent);
+}
+/* When avatar is hidden (no profile photo), show icon without ring */
+.topbar-avatar.hidden {
+  box-shadow: none;
+}
+.topbar-user-btn .material-symbols-rounded {
+  font-size: 24px;
+  color: var(--text2);
+}
+
+/* ── Shared Cards ─────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.14);
+  margin-bottom: 16px;
+}
+
+/* ── Divider — M3 outlineVariant ──────────────────────────── */
+/* Single authoritative rule — matches rgba(255,255,255,0.08) at
+   the typical dark surface alpha.  All divider uses reference
+   var(--divider) so a single token change propagates everywhere. */
+.divider {
+  height: 1px;
+  background: var(--divider);
+  margin: 0;
+  border: none;
+  flex-shrink: 0;
+}
+
+/* ── Shared Buttons ───────────────────────────────────────── */
+/*
+ * M3 Tonal Button: containerColor = primaryContainer,
+ *                  contentColor   = onPrimaryContainer
+ * This gives a soft, premium look — NOT a harsh full-saturation accent.
+ */
+.btn-primary {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-container);
+  border: none; cursor: pointer;
+  padding: 13px 22px; border-radius: 100px;
+  font-size: 15px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: transform 0.15s, opacity 0.15s;
+  justify-content: center;
+  box-shadow: none;
+}
+.btn-primary:active { transform: scale(0.97); opacity: 0.88; }
+.btn-primary .material-symbols-rounded {
+  font-size: 20px;
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+.btn-secondary {
+  background: var(--md-surface-container-high); color: var(--md-on-surface);
+  border: none; cursor: pointer;
+  padding: 12px 20px; border-radius: 100px;
+  font-size: 14px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 8px;
+  transition: transform 0.15s, background 0.15s;
+  justify-content: center;
+}
+.btn-secondary:active { transform: scale(0.97); background: var(--md-surface-container-highest); }
+.btn-secondary .material-symbols-rounded { font-size: 18px; }
+
+.btn-danger {
+  background: color-mix(in srgb, var(--md-error-container) 50%, transparent);
+  color: var(--md-error);
+  border: none; cursor: pointer;
+  padding: 13px 20px; border-radius: 100px;
+  font-size: 15px; font-weight: 600;
+  transition: transform 0.15s, background 0.15s;
+  justify-content: center; display: flex; align-items: center; gap: 8px;
+}
+.btn-danger:active { transform: scale(0.97); background: color-mix(in srgb, var(--md-error-container) 75%, transparent); }
+.btn-danger .material-symbols-rounded { font-size: 18px; }
+
+/* ── Shared Inputs — M3 filled field style ────────────────── */
+.text-input {
+  width: 100%; background: var(--md-surface-container-high);
+  border: none;
+  border-bottom: 1.5px solid var(--md-outline-variant);
+  border-radius: var(--radius-sm) var(--radius-sm) 4px 4px;
+  padding: 13px 14px; color: var(--md-on-surface); font-size: 15px;
+  outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+  font-family: inherit;
+}
+.text-input::placeholder { color: var(--md-outline); }
+.text-input:focus {
+  border-bottom-color: var(--md-primary);
+  box-shadow: 0 1px 0 var(--md-primary);
+}
+
+/* ── Shared Section Title ─────────────────────────────────── */
+.section-title {
+  font-size: 11px; font-weight: 700; color: var(--text3);
+  text-transform: uppercase; letter-spacing: 1.4px;
+  margin: 24px 0 10px;
+  padding-left: 2px;
+}
+
+/* ── Toast ────────────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: calc(var(--nav-height) + var(--safe-bottom) + 16px);
+  left: 50%; transform: translateX(-50%) translateY(16px);
+  background: var(--bg4); color: var(--text);
+  padding: 11px 20px; border-radius: 100px;
+  font-size: 13px; font-weight: 500;
+  opacity: 0; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap; z-index: 1000;
+  pointer-events: none;
+  border: none;
+  box-shadow: var(--shadow);
+  max-width: 80vw; text-align: center;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.error   { background: var(--md-error-container); color: var(--md-on-error-container); }
+.toast.success { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+
+/* ── Modal ────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75); z-index: 2000;
+  display: flex; align-items: flex-end;
+  animation: fadeIn 0.2s;
+  backdrop-filter: blur(4px);
+}
+.modal-box {
+  width: 100%; background: var(--bg2);
+  border-radius: var(--radius) var(--radius) 0 0;
+  padding: 24px 20px calc(24px + var(--safe-bottom));
+  animation: slideUp 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  border: none;
+  box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
+}
+.modal-title { font-size: 17px; font-weight: 600; margin-bottom: 10px; letter-spacing: -0.2px; }
+.modal-body { font-size: 14px; color: var(--text2); margin-bottom: 24px; line-height: 1.55; }
+.modal-actions { display: flex; gap: 10px; }
+.modal-actions .btn-secondary, .modal-actions .btn-primary { flex: 1; }
+
+/* ── Animations ───────────────────────────────────────────── */
+@keyframes screenIn {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+/*
+ * slideInHorizontally(from right) — used by generator + genres screens.
+ * Duration 320ms, FastOutSlowIn (cubic-bezier(0.4,0,0.2,1)).
+ * Mirrors Compose: slideInHorizontally { it } + fadeIn.
+ */
+@keyframes screenSlideRight {
+  from { opacity: 0; transform: translate3d(36px, 0, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+.screen-slide-right {
+  animation: screenSlideRight 0.32s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* ── Material Ripple — reusable touch feedback ────────────────
+ * Apply .ripple-item to any tappable list row / card / button.
+ * JS calls _initRipples(root) to wire up the 3-state machine
+ * (entering → holding → leaving) — same approach as nav.js.
+ * ─────────────────────────────────────────────────────────── */
+.ripple-item {
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+.ripple-item .m-ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--md-primary);
+  opacity: 0;
+}
+.ripple-item .m-ripple.entering {
+  animation: rippleIn 120ms ease-out forwards;
+}
+.ripple-item .m-ripple.holding {
+  opacity: 0.10;
+}
+.ripple-item .m-ripple.leaving {
+  animation: rippleOut 280ms ease-in forwards;
+}
+@keyframes rippleIn  { from { opacity: 0; } to { opacity: 0.10; } }
+@keyframes rippleOut { from { opacity: 0.10; } to { opacity: 0; } }
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Global search button in topbar ──────────────────────── */
+.topbar-search-btn {
+  margin-right: 2px;
+}
+.topbar-search-btn .material-symbols-rounded {
+  font-size: 23px;
+  font-variation-settings: 'FILL' 0;
+  color: var(--md-on-surface-variant);
+}
+
+/* ── Discover button in topbar (left of Search) ───────────── */
+.topbar-discover-btn {
+  margin-right: 2px;
+}
+.topbar-discover-btn .material-symbols-rounded {
+  font-size: 23px;
+  font-variation-settings: 'FILL' 0;
+  color: var(--md-on-surface-variant);
+}
+
+/* ── Track dropdown (shared global, rendered by home.js) ─── */
+/* (Styles also live in home.css for colocation, but the
+    dropdown is appended to <body> so app.css covers it too.) */
+.track-dropdown-menu {
+  position: fixed;
+  z-index: 9999;
+  width: 224px;
+  background: var(--md-surface-container-highest);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  padding: 6px 0;
+  transform-origin: top right;
+  animation: dropdown-enter 0.18s cubic-bezier(0.34,1.4,0.64,1) both;
+}
+.track-dropdown-menu.track-dropdown-leaving {
+  animation: dropdown-leave 0.15s ease-out both;
+}
+@keyframes dropdown-enter {
+  from { opacity:0; transform:scale(0.88) translateY(-6px); }
+  to   { opacity:1; transform:scale(1)    translateY(0);    }
+}
+@keyframes dropdown-leave {
+  from { opacity:1; transform:scale(1)    translateY(0); }
+  to   { opacity:0; transform:scale(0.92) translateY(-4px); }
+}
+.track-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 13px 18px;
+  background: none;
+  border: none;
+  color: var(--md-on-surface);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: background 0.12s;
+  font-family: inherit;
+  letter-spacing: 0.01em;
+}
+.track-dropdown-item:active { background: var(--ripple); }
+.track-dropdown-icon {
+  font-size: 20px;
+  color: var(--md-primary);
+  flex-shrink: 0;
+  font-variation-settings: 'FILL' 1;
+}
+
+/* ── Dropdown genre info row (non-interactive) ───────────── */
+.track-dropdown-genre {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--md-on-surface-variant);
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  user-select: none;
+}
+.track-dropdown-genre .material-symbols-rounded {
+  font-size: 15px;
+  color: var(--md-primary);
+  font-variation-settings: 'FILL' 1;
+  flex-shrink: 0;
+}
+.track-dropdown-genre-label {
+  color: var(--md-outline);
+  font-weight: 500;
+  margin-right: 2px;
+}
+.track-dropdown-divider {
+  height: 1px;
+  margin: 0 12px 4px;
+  background: var(--md-outline-variant);
+  opacity: 0.5;
+}
+.track-dropdown-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--md-primary);
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  user-select: none;
+}
+.track-dropdown-header .material-symbols-rounded {
+  font-size: 16px;
+  font-variation-settings: 'FILL' 1;
+}

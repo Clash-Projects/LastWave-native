@@ -1,0 +1,91 @@
+/* ════════════════════════════════════════════════════════════
+   results.css — Results screen styles only
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Results header ───────────────────────────────────────── */
+.results-header {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 12px;
+}
+.results-title { font-size: 20px; font-weight: 800; }
+.results-count { font-size: 13px; color: var(--text2); margin-top: 2px; }
+
+/* ── Export bar ───────────────────────────────────────────── */
+.export-bar {
+  display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px;
+  margin-bottom: 16px;
+}
+.export-btn {
+  background: var(--md-surface-container); border: none;
+  border-radius: var(--radius-sm); padding: 10px 6px;
+  color: var(--md-on-surface); cursor: pointer;
+  font-size: 12px; font-weight: 600;
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  transition: all 0.15s;
+}
+.export-btn:active { transform: scale(0.95); background: var(--md-surface-container-high); }
+/* Streaming button (currently YouTube) — tertiary tonal treatment */
+.streaming-btn {
+  color: var(--md-tertiary);
+  background: color-mix(in srgb, var(--md-tertiary-container) 45%, transparent);
+}
+
+/* ── Track list ───────────────────────────────────────────── */
+.track-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 14px; background: var(--md-surface-container);
+  border-radius: var(--radius-sm); margin-bottom: 6px;
+  border: none;
+  animation: fadeIn 0.25s ease;
+}
+.track-num {
+  width: 24px; text-align: center;
+  font-size: 13px; color: var(--md-outline); font-weight: 600; flex-shrink: 0;
+}
+.track-info { flex: 1; min-width: 0; }
+.track-name {
+  font-size: 14px; font-weight: 600; color: var(--md-on-surface);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.track-artist { font-size: 12px; color: var(--md-on-surface-variant); margin-top: 2px; }
+.track-play-btn {
+  width: 32px; height: 32px;
+  background: var(--md-surface-container-high); border: none; border-radius: 50%;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  color: var(--md-on-surface-variant); flex-shrink: 0; transition: all 0.15s;
+}
+.track-play-btn:active {
+  transform: scale(0.9);
+  color: var(--md-on-primary-container);
+  background: var(--md-primary-container);
+}
+.track-play-btn svg { width: 14px; height: 14px; }
+
+/* ── Empty state ──────────────────────────────────────────── */
+.empty-state {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; height: 60vh;
+  text-align: center; gap: 8px;
+}
+.empty-icon { font-size: 72px; display: block; font-variation-settings: 'FILL' 1, 'wght' 200, 'GRAD' 0, 'opsz' 48; color: var(--text3); }
+.empty-title { font-size: 18px; font-weight: 700; }
+.empty-sub { color: var(--text2); font-size: 14px; }
+
+/* ── Loading state ────────────────────────────────────────── */
+.loading-state {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 32px 0; gap: 16px;
+}
+.loading-spinner {
+  width: 40px; height: 40px;
+  border: 3px solid var(--md-surface-variant); border-top-color: var(--md-primary);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+.loading-text { color: var(--text2); font-size: 14px; }
+.skeleton-list { width: 100%; }
+.skeleton-track {
+  height: 58px; border-radius: var(--radius-sm); margin-bottom: 6px;
+  animation: shimmer 1.5s infinite;
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface2) 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+}

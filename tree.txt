@@ -1,0 +1,101 @@
+.
+├── README.md
+├── Screenshot
+│   ├── Colour_Wheel.png
+│   ├── Create.png
+│   ├── Create_2.png
+│   ├── Generator.png
+│   ├── Genres.png
+│   ├── Genres_2.png
+│   ├── Home.png
+│   ├── Home_2.png
+│   ├── Playlist.png
+│   ├── Playlist_2.png
+│   ├── Playlist_3.png
+│   ├── Search.png
+│   ├── Search_2.png
+│   ├── Settings.jpg
+│   └── Settings_2.png
+├── app
+│   ├── build.gradle
+│   ├── proguard-rules.pro
+│   └── src
+│       └── main
+│           ├── AndroidManifest.xml
+│           ├── assets
+│           │   ├── app.css
+│           │   ├── app.js
+│           │   ├── bridge.js
+│           │   ├── fonts
+│           │   │   └── MaterialSymbols.woff2
+│           │   ├── generator
+│           │   │   ├── generator.css
+│           │   │   ├── generator.html
+│           │   │   └── generator.js
+│           │   ├── genres
+│           │   │   ├── genres.css
+│           │   │   ├── genres.html
+│           │   │   └── genres.js
+│           │   ├── home
+│           │   │   ├── home.css
+│           │   │   ├── home.html
+│           │   │   └── home.js
+│           │   ├── index.html
+│           │   ├── nav.js
+│           │   ├── playlist
+│           │   │   ├── playlist.css
+│           │   │   ├── playlist.html
+│           │   │   └── playlist.js
+│           │   ├── results
+│           │   │   ├── results.css
+│           │   │   ├── results.html
+│           │   │   └── results.js
+│           │   ├── search
+│           │   │   ├── search.css
+│           │   │   ├── search.html
+│           │   │   └── search.js
+│           │   └── settings
+│           │       ├── settings.css
+│           │       ├── settings.html
+│           │       └── settings.js
+│           ├── java
+│           │   └── com
+│           │       └── lastwave
+│           │           └── app
+│           │               └── MainActivity.java
+│           └── res
+│               ├── layout
+│               │   └── activity_main.xml
+│               ├── mipmap-hdpi
+│               │   ├── ic_launcher.png
+│               │   └── ic_launcher_round.png
+│               ├── mipmap-mdpi
+│               │   ├── ic_launcher.png
+│               │   └── ic_launcher_round.png
+│               ├── mipmap-xhdpi
+│               │   ├── ic_launcher.png
+│               │   └── ic_launcher_round.png
+│               ├── mipmap-xxhdpi
+│               │   ├── ic_launcher.png
+│               │   └── ic_launcher_round.png
+│               ├── mipmap-xxxhdpi
+│               │   ├── ic_launcher.png
+│               │   └── ic_launcher_round.png
+│               ├── values
+│               │   ├── strings.xml
+│               │   └── themes.xml
+│               └── xml
+│                   └── file_paths.xml
+├── build.gradle
+├── gradle
+│   └── wrapper
+│       ├── gradle-wrapper.jar
+│       └── gradle-wrapper.properties
+├── gradle.properties
+├── gradlew
+├── gradlew.bat
+├── local.properties
+├── settings.gradle
+└── tree.txt
+
+29 directories, 70 files

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- hsl(0, 5%, 6%): the same formula Md3SchemeBuilder uses for the md
+         background token, evaluated at the default hue so the splash screen
+         never flashes a mismatched color. -->
+    <color name="splash_background">#FF100F0F</color>
+</resources>

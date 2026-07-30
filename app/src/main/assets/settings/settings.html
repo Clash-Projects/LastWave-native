@@ -1,0 +1,330 @@
+<!-- ════════════════════════════════════════════════════════
+     settings.html — Settings screen markup
+     Styles → settings.css   |   Logic → settings.js
+     ════════════════════════════════════════════════════════ -->
+
+<div class="page-scroll">
+
+  <!-- ── Last.fm API Configuration ─────────────────────────── -->
+  <div class="section-title mt0">Last.fm Account</div>
+
+  <div class="card settings-card api-config-card">
+    <div class="api-config-header" id="apiConfigHeader">
+      <span class="material-symbols-rounded api-config-icon">api</span>
+      <div>
+        <div class="auth-signin-title">API Configuration</div>
+        <div class="auth-signin-sub" id="apiConfigSub">Enter your credentials to enable personalized data</div>
+      </div>
+    </div>
+
+    <!-- Input fields — hidden once credentials are saved -->
+    <div id="apiInputsSection">
+      <!-- Username -->
+      <div class="settings-label">Username</div>
+      <input
+        type="text"
+        id="settingsUsername"
+        class="text-input"
+        placeholder="Your Last.fm username"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+      />
+
+      <!-- API Key -->
+      <div class="settings-label" style="margin-top:14px">API Key</div>
+      <input
+        type="text"
+        id="settingsApiKey"
+        class="text-input"
+        placeholder="Paste your 32-char API key"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+      />
+
+      <!-- API Secret -->
+      <div class="settings-label" style="margin-top:14px">API Secret</div>
+      <input
+        type="password"
+        id="settingsApiSecret"
+        class="text-input"
+        placeholder="Paste your API secret"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+      />
+
+      <div class="settings-hint" style="margin-top:8px">
+        Get your key & secret at
+        <span class="link" onclick="openUrl('https://www.last.fm/api/account/create')">last.fm/api</span>
+      </div>
+
+      <button class="btn-primary full-width api-save-btn" onclick="saveApiCredentials()">
+        <span class="material-symbols-rounded">save</span>
+        Save API
+      </button>
+    </div>
+
+    <!-- Logged-in state — shown after credentials are saved -->
+    <div id="apiLoggedInSection" class="hidden">
+      <div class="api-signed-in-block">
+        <span class="material-symbols-rounded api-signed-in-avatar">account_circle</span>
+        <div class="api-signed-in-info">
+          <div class="api-signed-in-label">Signed in as</div>
+          <div class="api-signed-in-name" id="apiLoggedInUser"></div>
+        </div>
+      </div>
+      <button class="btn-secondary full-width api-logout-btn" onclick="logoutApiCredentials()">
+        <span class="material-symbols-rounded">logout</span>
+        Logout
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Appearance ─────────────────────────────────────────── -->
+  <div class="section-title">Appearance</div>
+
+  <!--
+    appearance-group: transparent flex wrapper — provides combined
+    drop-shadow for the whole block; no background of its own.
+    Each row carries its own surface bg + per-corner border-radius
+    so the group looks like one continuous Material 3 list surface.
+  -->
+  <div class="appearance-group">
+
+    <!-- AMOLED Mode — rounded top, square bottom -->
+    <div class="appearance-item-card appearance-item-card--first"
+         onclick="toggleAmoled()" style="cursor:pointer">
+      <div class="settings-toggle-row">
+        <div>
+          <div class="settings-toggle-label">AMOLED Mode</div>
+          <div class="settings-hint">Pure black background for OLED screens</div>
+        </div>
+        <div class="toggle-wrap">
+          <div class="toggle" id="amoledToggle"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dynamic Color — all square -->
+    <div class="appearance-item-card appearance-item-card--middle"
+         onclick="toggleDynamicTheme()" style="cursor:pointer">
+      <div class="settings-toggle-row">
+        <div>
+          <div class="settings-toggle-label">Dynamic Color</div>
+          <div class="settings-hint">Adapts to your wallpaper (Android 12+)</div>
+        </div>
+        <div class="toggle-wrap">
+          <div class="toggle" id="dynamicThemeToggle"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- iTunes Artwork — all square -->
+    <div class="appearance-item-card appearance-item-card--middle"
+         onclick="toggleItunesArtwork()" style="cursor:pointer">
+      <div class="settings-toggle-row">
+        <div>
+          <div class="settings-toggle-label">iTunes Artwork</div>
+          <div class="settings-hint">Use iTunes to load missing cover art</div>
+        </div>
+        <div class="toggle-wrap">
+          <div class="toggle" id="itunesArtworkToggle"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ListenBrainz Artwork — square top, rounded bottom -->
+    <div class="appearance-item-card appearance-item-card--last"
+         onclick="toggleLbzArtwork()" style="cursor:pointer">
+      <div class="settings-toggle-row">
+        <div>
+          <div class="settings-toggle-label">ListenBrainz Artwork</div>
+          <div class="settings-hint">Fetch album art using ListenBrainz</div>
+        </div>
+        <div class="toggle-wrap">
+          <div class="toggle" id="lbzArtworkToggle"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.appearance-group -->
+  <!-- ── Theme ────────────────────────────────────────────── -->
+  <div class="section-title">Theme</div>
+  <div class="card settings-card settings-theme-card">
+    <div class="palette-grid" id="paletteGrid">
+
+      <!-- Crimson — hue 4° -->
+      <button class="palette-card" data-hue="4" onclick="setPaletteAccent(4)" title="Crimson">
+        <div class="palette-swatches">
+          <div class="ps" style="background:hsl(4,30%,80%)"></div>
+          <div class="ps" style="background:hsl(4,14%,28%)"></div>
+          <div class="ps" style="background:hsl(64,22%,78%)"></div>
+          <div class="ps" style="background:hsl(4,5%,13%)"></div>
+        </div>
+        <span class="palette-label">Crimson</span>
+      </button>
+
+      <!-- Violet — hue 262° -->
+      <button class="palette-card" data-hue="262" onclick="setPaletteAccent(262)" title="Violet">
+        <div class="palette-swatches">
+          <div class="ps" style="background:hsl(262,30%,80%)"></div>
+          <div class="ps" style="background:hsl(262,14%,28%)"></div>
+          <div class="ps" style="background:hsl(322,22%,78%)"></div>
+          <div class="ps" style="background:hsl(262,5%,13%)"></div>
+        </div>
+        <span class="palette-label">Violet</span>
+      </button>
+
+      <!-- Ocean — hue 204° -->
+      <button class="palette-card" data-hue="204" onclick="setPaletteAccent(204)" title="Ocean">
+        <div class="palette-swatches">
+          <div class="ps" style="background:hsl(204,30%,80%)"></div>
+          <div class="ps" style="background:hsl(204,14%,28%)"></div>
+          <div class="ps" style="background:hsl(264,22%,78%)"></div>
+          <div class="ps" style="background:hsl(204,5%,13%)"></div>
+        </div>
+        <span class="palette-label">Ocean</span>
+      </button>
+
+      <!-- Sage — hue 152° -->
+      <button class="palette-card" data-hue="152" onclick="setPaletteAccent(152)" title="Sage">
+        <div class="palette-swatches">
+          <div class="ps" style="background:hsl(152,28%,78%)"></div>
+          <div class="ps" style="background:hsl(152,14%,26%)"></div>
+          <div class="ps" style="background:hsl(212,22%,78%)"></div>
+          <div class="ps" style="background:hsl(152,5%,13%)"></div>
+        </div>
+        <span class="palette-label">Sage</span>
+      </button>
+
+      <!-- Amber — hue 36° -->
+      <button class="palette-card" data-hue="36" onclick="setPaletteAccent(36)" title="Amber">
+        <div class="palette-swatches">
+          <div class="ps" style="background:hsl(36,30%,80%)"></div>
+          <div class="ps" style="background:hsl(36,14%,28%)"></div>
+          <div class="ps" style="background:hsl(96,22%,78%)"></div>
+          <div class="ps" style="background:hsl(36,5%,13%)"></div>
+        </div>
+        <span class="palette-label">Amber</span>
+      </button>
+
+      <!-- Rose — hue 340° -->
+      <button class="palette-card" data-hue="340" onclick="setPaletteAccent(340)" title="Rose">
+        <div class="palette-swatches">
+          <div class="ps" style="background:hsl(340,30%,80%)"></div>
+          <div class="ps" style="background:hsl(340,14%,28%)"></div>
+          <div class="ps" style="background:hsl(40,22%,78%)"></div>
+          <div class="ps" style="background:hsl(340,5%,13%)"></div>
+        </div>
+        <span class="palette-label">Rose</span>
+      </button>
+
+      <!-- Mono — pure grayscale -->
+      <button class="palette-card" id="paletteMono" onclick="setMonochromeAccent()" title="Monochrome">
+        <div class="palette-swatches">
+          <div class="ps" style="background:hsl(0,0%,82%)"></div>
+          <div class="ps" style="background:hsl(0,0%,28%)"></div>
+          <div class="ps" style="background:hsl(0,0%,75%)"></div>
+          <div class="ps" style="background:hsl(0,0%,11%)"></div>
+        </div>
+        <span class="palette-label">Mono</span>
+      </button>
+
+      <!-- Custom — modern color wheel -->
+      <button class="palette-card palette-card-custom" id="paletteCustom" onclick="openColorWheel()" title="Custom color">
+        <div class="palette-swatches palette-swatches-custom">
+          <span class="material-symbols-rounded palette-custom-icon">palette</span>
+        </div>
+        <span class="palette-label">Custom</span>
+      </button>
+
+    </div>
+  </div>
+
+  <!-- ── Data Management ────────────────────────────────────── -->
+  <div class="section-title">Data Management</div>
+  <div class="card settings-card">
+    <button class="btn-secondary full-width" onclick="clearSeenTracksUI()" style="margin-bottom:10px">
+      <span class="material-symbols-rounded">history_toggle_off</span>
+      Clear Discovery History
+    </button>
+    <div class="settings-hint settings-hint-oneline" style="margin-bottom:16px;text-align:center">
+      Resets the "seen tracks" list — (<span id="seenCount">…</span> tracks remembered)
+    </div>
+    <button class="btn-danger full-width" onclick="clearAllData()">
+      <span class="material-symbols-rounded">delete_forever</span>
+      Clear All Saved Data
+    </button>
+    <div class="settings-hint settings-hint-oneline" style="margin-top:10px;margin-bottom:16px;text-align:center">
+      Removes credentials, playlists and all cached data
+    </div>
+  </div>
+
+  <!-- ── Backup & Restore ───────────────────────────────────── -->
+  <div class="section-title">Backup & Restore</div>
+  <div class="card settings-card">
+    <button class="btn-secondary full-width" onclick="backupData()" style="margin-bottom:10px">
+      <span class="material-symbols-rounded">cloud_upload</span>
+      Backup Data
+    </button>
+    <div class="settings-hint settings-hint-oneline" style="margin-bottom:16px;text-align:center">
+      Back up remembered songs and playlists.
+    </div>
+    <button class="btn-secondary full-width" onclick="triggerRestoreData()" style="margin-bottom:10px">
+      <span class="material-symbols-rounded">cloud_download</span>
+      Restore Data
+    </button>
+    <input type="file" id="restoreFileInput" accept="application/json,.json" style="display:none" onchange="handleRestoreFileSelected(event)" />
+    <div class="settings-hint settings-hint-oneline" style="margin-bottom:16px;text-align:center">
+      Restore remembered songs and playlists.
+    </div>
+  </div>
+
+  <!-- ── App info ───────────────────────────────────────────── -->
+  <div class="card settings-card app-info">
+    <div class="info-row">
+      <span>Version</span>
+      <span>1.0.0</span>
+    </div>
+    <div class="info-row">
+      <span>Built with</span>
+      <span>Last.fm API</span>
+    </div>
+    <div class="info-row">
+      <span>Source</span>
+      <span class="link info-link gh-source" onclick="openUrl('https://github.com/AmanRajAryan/LastWave')">
+        <svg class="gh-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        <span>GitHub</span>
+      </span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     COLOR WHEEL DIALOG — rendered outside page-scroll
+     ══════════════════════════════════════════════════════════ -->
+<div id="colorWheelDialog" class="cw-overlay hidden" onclick="_cwOverlayClick(event)">
+  <div class="cw-dialog">
+    <div class="cw-title">Pick Color</div>
+
+    <canvas
+      id="colorWheelCanvas"
+      class="cw-canvas"
+      width="240"
+      height="240"
+    ></canvas>
+
+    <div class="cw-preview-row">
+      <div class="cw-preview-swatch" id="cwPreviewSwatch"></div>
+      <div class="cw-hex-display" id="cwHexDisplay">#E03030</div>
+    </div>
+
+    <div class="cw-actions">
+      <button class="btn-secondary" onclick="closeColorWheel()">Cancel</button>
+      <button class="btn-primary"   onclick="applyColorWheel()">Apply</button>
+    </div>
+  </div>
+</div>

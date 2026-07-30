@@ -1,0 +1,164 @@
+<!-- ════════════════════════════════════════════════════════
+     genres.html — Genre analytics screen
+     v3: A-Z sort replaces Mix · Styles → genres.css   Logic → genres.js
+     ════════════════════════════════════════════════════════ -->
+
+<div class="page-scroll genres-screen" id="genresPageRoot">
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <div class="genres-header">
+    <div class="genres-header-text">
+      <div class="genres-title">Your Genres</div>
+      <div class="genres-sub" id="genresSub">Based on your listening history</div>
+    </div>
+
+    <div class="genres-filter-wrap" id="genresFilterWrap">
+      <button
+        class="genres-filter-btn"
+        id="genresFilterBtn"
+        onclick="toggleGenreFilter()"
+        aria-label="Filter by time period"
+        aria-haspopup="true"
+      >
+        <span class="material-symbols-rounded">tune</span>
+        <span class="genres-filter-label" id="genresFilterLabel">Overall</span>
+        <span class="material-symbols-rounded genres-filter-chevron" id="genresFilterChevron">expand_more</span>
+      </button>
+
+      <div class="genres-filter-menu hidden" id="genresFilterMenu" role="menu">
+        <button class="genres-filter-option" id="gfOpt7day"     onclick="setGenrePeriod('7day')"    role="menuitem">
+          <span class="material-symbols-rounded">today</span>Past 7 Days
+          <span class="material-symbols-rounded genres-filter-check hidden" id="gfCheck7day">check</span>
+        </button>
+        <button class="genres-filter-option" id="gfOpt1month"   onclick="setGenrePeriod('1month')"  role="menuitem">
+          <span class="material-symbols-rounded">date_range</span>This Month
+          <span class="material-symbols-rounded genres-filter-check hidden" id="gfCheck1month">check</span>
+        </button>
+        <button class="genres-filter-option" id="gfOpt12month"  onclick="setGenrePeriod('12month')" role="menuitem">
+          <span class="material-symbols-rounded">calendar_today</span>Last 12 Months
+          <span class="material-symbols-rounded genres-filter-check hidden" id="gfCheck12month">check</span>
+        </button>
+        <button class="genres-filter-option active" id="gfOptOverall" onclick="setGenrePeriod('overall')" role="menuitem">
+          <span class="material-symbols-rounded">all_inclusive</span>Overall
+          <span class="material-symbols-rounded genres-filter-check" id="gfCheckOverall">check</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Loading skeleton ────────────────────────────────────── -->
+  <div id="genresSkeleton" class="genres-skeleton hidden">
+    <div class="genre-skel-row" style="--w:78%"></div>
+    <div class="genre-skel-row" style="--w:62%"></div>
+    <div class="genre-skel-row" style="--w:55%"></div>
+    <div class="genre-skel-row" style="--w:48%"></div>
+    <div class="genre-skel-row" style="--w:44%"></div>
+    <div class="genre-skel-row" style="--w:38%"></div>
+    <div class="genre-skel-row" style="--w:31%"></div>
+    <div class="genre-skel-row" style="--w:24%"></div>
+  </div>
+
+  <!-- ── Empty / error state ─────────────────────────────────── -->
+  <div id="genresEmpty" class="genres-empty hidden">
+    <span class="material-symbols-rounded genres-empty-icon">equalizer</span>
+    <div class="genres-empty-msg">No genre data yet</div>
+    <div class="genres-empty-sub">Listen to more music on Last.fm, then come back!</div>
+  </div>
+
+  <!-- ── Bar chart list ──────────────────────────────────────── -->
+  <div id="genresList" class="genres-list hidden">
+    <!-- Populated by genres.js — each row is clickable -->
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     GENRE DETAIL OVERLAY (bottom-sheet style)
+     ══════════════════════════════════════════════════════════ -->
+<div id="genreDetailOverlay" class="gd-overlay hidden" onclick="_gdOverlayBackdropClick(event)">
+  <div class="gd-sheet">
+
+    <!-- Sheet handle -->
+    <div class="gd-handle"></div>
+
+    <!-- Header top row: back · title · Sort By pill -->
+    <div class="gd-header">
+      <div class="gd-header-top">
+        <button class="gd-back-btn" onclick="_closeGenreDetail()" aria-label="Close">
+          <span class="material-symbols-rounded">arrow_back</span>
+        </button>
+        <div class="gd-header-text">
+          <div class="gd-title" id="genreDetailTitle">Genre</div>
+          <div class="gd-sub" id="genreDetailSub">Your Tracks</div>
+        </div>
+
+        <!-- Sort By pill -->
+        <div class="gd-sortby-wrap" id="gdSortByWrap">
+          <button class="gd-sortby-btn" onclick="_toggleGDSortMenu()" aria-label="Sort by"
+                  aria-haspopup="true" aria-expanded="false" id="gdSortByBtn">
+            <span class="material-symbols-rounded">sort</span>
+            <span id="gdSortByLabel">Popular</span>
+            <span class="material-symbols-rounded gd-sortby-chevron" id="gdSortByChevron">expand_more</span>
+          </button>
+          <div class="gd-sortby-menu hidden" id="gdSortByMenu" role="menu">
+            <button class="gd-sortby-option active" id="gdSortOptPopular"
+                    onclick="_setGDSort('popular')" role="menuitem">
+              <span class="material-symbols-rounded">bar_chart</span>
+              Popular
+              <span class="material-symbols-rounded gd-sortby-check" id="gdSortCheckPopular">check</span>
+            </button>
+            <button class="gd-sortby-option" id="gdSortOptNewest"
+                    onclick="_setGDSort('newest')" role="menuitem">
+              <span class="material-symbols-rounded">schedule</span>
+              Newest
+              <span class="material-symbols-rounded gd-sortby-check hidden" id="gdSortCheckNewest">check</span>
+            </button>
+            <button class="gd-sortby-option" id="gdSortOptAZ"
+                    onclick="_setGDSort('az')" role="menuitem">
+              <span class="material-symbols-rounded">sort_by_alpha</span>
+              A–Z
+              <span class="material-symbols-rounded gd-sortby-check hidden" id="gdSortCheckAZ">check</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action buttons: Start Mix · Discover More -->
+      <div class="gd-action-row">
+        <button class="gd-action-btn gd-action-btn--primary"
+                onclick="_genreStartMix(_gDetailName)"
+                aria-label="Generate playlist from this genre">
+          <span class="material-symbols-rounded">queue_music</span>
+          Start Mix
+        </button>
+        <button class="gd-action-btn gd-action-btn--secondary"
+                onclick="_genreDiscoverMore(_gDetailName)"
+                aria-label="Discover new tracks in this genre">
+          <span class="material-symbols-rounded">travel_explore</span>
+          Discover More
+        </button>
+      </div>
+    </div>
+
+    <div class="gd-divider"></div>
+
+    <!-- Loading state -->
+    <div id="genreDetailLoading" class="gd-loading hidden">
+      <span class="material-symbols-rounded gd-loading-icon">refresh</span>
+      <span class="gd-loading-label">Loading tracks…</span>
+    </div>
+
+    <!-- Empty state -->
+    <div id="genreDetailEmpty" class="gd-empty hidden">
+      <span class="material-symbols-rounded gd-empty-icon">music_off</span>
+      <div class="gd-empty-msg">No tracks found</div>
+      <div class="gd-empty-sub">Try a different genre or period</div>
+    </div>
+
+    <!-- Track list (scrollable) -->
+    <div id="genreDetailBody" class="gd-body">
+      <div id="genreDetailList" class="gd-track-list"></div>
+    </div>
+
+  </div>
+</div>

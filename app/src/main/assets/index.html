@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#0B0B0B" />
+<meta name="color-scheme" content="dark" />
+<title>LastWave</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@8..144,100..1000&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="app.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     APP SHELL
+     ═══════════════════════════════════════════ -->
+<div id="app" class="app">
+
+  <!-- Top Bar -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <button id="topbarBackBtn" class="icon-btn" style="display:none" onclick="window._lwHandleBack()">
+        <span class="material-symbols-rounded">arrow_back</span>
+      </button>
+      <svg width="28" height="28" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="256" cy="256" r="256" fill="#CCFF00"/>
+        <path fill="#0D1F1A" d="M 193.275 466.406 C 187.197 464.168 179.71 457.029 176.886 450.779 L 174.5 445.5 L 174.5 259.5 C 174.5 78.5653 174.552 73.3646 176.417 68.5282 C 184.308 48.0687 211.426 43.1809 225.889 59.6116 C 233.591 68.3606 233 51.7588 233 259.518 L 233 445.681 L 229.942 451.8 C 226.676 458.336 223.217 461.817 216.616 465.213 C 211.209 467.996 199.251 468.607 193.275 466.406 M 309 431.125 C 300.416 428.299 293.989 422.885 289.858 415 L 287.5 410.5 L 287.5 256 L 287.5 101.5 L 290.172 96.4365 C 301.469 75.031 331.859 75.0029 343.3 96.3874 L 345.5 100.5 L 345.5 256 L 345.5 411.5 L 343.348 415.5 C 340.436 420.913 334.638 426.513 329.242 429.125 C 324.428 431.455 313.333 432.551 309 431.125 M 77.2075 397.416 C 70.6106 394.129 64.803 387.546 62.6681 380.935 C 60.2507 373.45 60.1039 172.381 62.5099 164.279 C 65.4338 154.433 75.2855 146.392 86.7131 144.525 C 98.635 142.577 113.58 152.63 116.985 164.887 C 118.849 171.598 118.321 375.702 116.425 381.266 C 111.143 396.767 91.8495 404.713 77.2075 397.416 M 405.5 382.608 C 396.547 379.791 389.857 373.968 385.845 365.5 L 383.002 359.5 L 383.002 256 L 383.002 152.5 L 385.845 146.5 C 397.464 121.978 431.62 122.199 443.738 146.875 L 446.5 152.5 L 446.5 256 L 446.5 359.5 L 443.738 365.125 C 436.637 379.584 420.027 387.178 405.5 382.608"/>
+      </svg>
+      <span class="topbar-title" id="pageTitle">LastWave</span>
+    </div>
+    <div class="topbar-right">
+      <button class="icon-btn topbar-discover-btn" id="headerDiscoverBtn" onclick="navigateTo('discover')" title="Discover" aria-label="Discover">
+        <span class="material-symbols-rounded">auto_awesome</span>
+      </button>
+      <button class="icon-btn topbar-search-btn" id="headerSearchBtn" onclick="navigateTo('search')" title="Search" aria-label="Search">
+        <span class="material-symbols-rounded">search</span>
+      </button>
+      <button class="icon-btn topbar-user-btn" id="headerUserBtn" onclick="navigateTo('settings')" title="Settings">
+        <img id="topbarAvatar" class="topbar-avatar hidden" alt="Profile" />
+        <span class="material-symbols-rounded" id="topbarAvatarIcon">account_circle</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Screen Container -->
+  <main class="pages">
+    <div id="screen-container" class="screen-container"></div>
+  </main>
+
+  <!-- ═══════════════════════════════════════════
+       BOTTOM NAVIGATION
+       ═══════════════════════════════════════════ -->
+  <nav class="bottom-nav">
+
+    <!-- Home -->
+    <button class="nav-item active" data-page="home" onclick="navigateTo('home')">
+      <div class="nav-indicator">
+        <span class="material-symbols-rounded nav-icon">home</span>
+      </div>
+      <span class="nav-label">Home</span>
+    </button>
+
+    <!-- Create — simple add icon, behaves like other tabs -->
+    <button class="nav-item" data-page="generator" onclick="navigateTo('generator')">
+      <div class="nav-indicator">
+        <span class="material-symbols-rounded nav-icon">add</span>
+      </div>
+      <span class="nav-label">Create</span>
+    </button>
+
+    <!-- Playlist -->
+    <button class="nav-item" data-page="playlist" onclick="navigateTo('playlist')">
+      <div class="nav-indicator">
+        <span class="material-symbols-rounded nav-icon">queue_music</span>
+      </div>
+      <span class="nav-label">Playlist</span>
+    </button>
+
+  </nav>
+
+</div>
+
+<!-- Toast & Modal -->
+<div id="toast" class="toast"></div>
+
+<div id="modal" class="modal-overlay hidden" onclick="closeModal()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title" id="modalTitle"></div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeModal()">Close</button>
+      <button class="btn-primary" id="modalConfirm" onclick="closeModal()">OK</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  /* ── Apply persisted AMOLED & dynamic theme before first paint ── */
+  (function () {
+    try {
+      if (localStorage.getItem('lw_amoled') === '1') {
+        document.body.classList.add('amoled-mode');
+      }
+    } catch (e) {}
+
+    /* Default inset values — overwritten by Platform.initSystemInsets()
+       once bridge.js loads. 0px is correct for browser fallback. */
+    document.documentElement.style.setProperty('--inset-top',    '0px');
+    document.documentElement.style.setProperty('--inset-bottom', '0px');
+  })();
+</script>
+
+<script src="bridge.js"></script>
+<script>Platform.initSystemInsets();</script>
+<!-- Bump this ?v= whenever app.js or nav.js changes — mirrors nav.js's
+     BUILD_VERSION convention. These two files load on every launch and
+     previously had no cache-busting at all, so a rebuilt app.js could
+     silently keep running the WebView's old cached copy. -->
+<script src="app.js?v=9"></script>
+<script src="nav.js?v=9"></script>
+
+</body>
+</html>

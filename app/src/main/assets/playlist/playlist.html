@@ -1,0 +1,113 @@
+<!-- ════════════════════════════════════════════════════════
+     playlist.html — Playlist screen
+     v2: Export dialog with CSV/M3U + Share
+     Styles → playlist.css   |   Logic → playlist.js
+     ════════════════════════════════════════════════════════ -->
+
+<div class="page-scroll pl-screen">
+
+  <!-- ── Loading state ──────────────────────────────────────── -->
+  <div id="plLoading" class="pl-loading hidden">
+    <div class="pl-loading-spinner-wrap">
+      <div class="pl-loading-spinner"></div>
+      <span class="material-symbols-rounded pl-loading-icon">auto_awesome</span>
+    </div>
+    <div class="pl-loading-label">Generating unique playlist…</div>
+    <div class="pl-loading-text" id="plLoadingText">Building your playlist…</div>
+  </div>
+
+  <!-- ── Empty state ────────────────────────────────────────── -->
+  <div id="plEmpty" class="pl-empty hidden">
+    <span class="material-symbols-rounded pl-empty-icon">queue_music</span>
+    <div class="pl-empty-title">No playlists yet</div>
+    <div class="pl-empty-sub">Tap Create to generate your first playlist from your Last.fm history.</div>
+    <button class="pl-empty-btn" onclick="navigateTo('generator')">
+      <span class="material-symbols-rounded">add</span>
+      Create playlist
+    </button>
+  </div>
+
+  <!-- ── Playlist list ─────────────────────────────────────── -->
+  <div id="plList" class="pl-list hidden">
+
+    <div id="plNewBanner" class="pl-new-banner hidden">
+      <span class="material-symbols-rounded pl-banner-icon">check_circle</span>
+      <span class="pl-banner-text">Playlist saved!</span>
+    </div>
+
+    <div id="plRegenBar" class="pl-regen-bar hidden">
+      <button class="pl-regen-btn" onclick="regeneratePlaylist()">
+        <span class="material-symbols-rounded">refresh</span>
+        Generate Fresh
+      </button>
+      <button class="pl-regen-btn secondary" onclick="navigateTo('generator')">
+        <span class="material-symbols-rounded">tune</span>
+        Change Mode
+      </button>
+    </div>
+
+    <div id="plCards"></div>
+
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     EXPORT DIALOG
+     ══════════════════════════════════════════════════════════ -->
+<div id="plExportDialog" class="pl-export-overlay hidden" onclick="_plExportBackdropClick(event)">
+  <div class="pl-export-sheet">
+
+    <div class="pl-export-handle"></div>
+
+    <div class="pl-export-title">Export Playlist</div>
+
+    <!-- Format options -->
+    <div class="pl-export-options">
+
+      <label class="pl-export-option" id="plExportOptCSV">
+        <input type="radio" name="plExportFmt" value="csv" checked
+               onchange="_plExportSetFormat('csv')">
+        <div class="pl-export-option-inner">
+          <span class="material-symbols-rounded pl-export-opt-icon">table_chart</span>
+          <div class="pl-export-opt-text">
+            <div class="pl-export-opt-title">Export as CSV</div>
+            <div class="pl-export-opt-sub">Spreadsheet-compatible, easy to import</div>
+          </div>
+          <span class="material-symbols-rounded pl-export-opt-check">check_circle</span>
+        </div>
+      </label>
+
+      <label class="pl-export-option" id="plExportOptM3U">
+        <input type="radio" name="plExportFmt" value="m3u"
+               onchange="_plExportSetFormat('m3u')">
+        <div class="pl-export-option-inner">
+          <span class="material-symbols-rounded pl-export-opt-icon">playlist_play</span>
+          <div class="pl-export-opt-text">
+            <div class="pl-export-opt-title">Export as M3U</div>
+            <div class="pl-export-opt-sub">Playlist file for media players</div>
+          </div>
+          <span class="material-symbols-rounded pl-export-opt-check">check_circle</span>
+        </div>
+      </label>
+
+    </div>
+
+    <!-- Buttons -->
+    <div class="pl-export-actions">
+      <button class="pl-export-btn cancel" onclick="_plExportClose()">
+        <span class="material-symbols-rounded">close</span>
+        Cancel
+      </button>
+      <button class="pl-export-btn save" onclick="_plExportSave()">
+        <span class="material-symbols-rounded">download</span>
+        Save
+      </button>
+      <button class="pl-export-btn share" id="plExportShareBtn" onclick="_plExportShare()">
+        <span class="material-symbols-rounded">share</span>
+        Share
+      </button>
+    </div>
+
+  </div>
+</div>
