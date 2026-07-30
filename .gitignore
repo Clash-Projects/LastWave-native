@@ -1,4 +1,41 @@
-**/*/build
-.git/
-.acside/
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated build files
+build/
+**/build/
 .gradle/
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Local configuration file (contains SDK location, private tokens)
+local.properties
+
+# Log files
+*.log
+
+# Keystore files
+*.jks
+*.keystore
+*.p12
+*.pem
+
+# OS & Tooling
+.DS_Store
+Thumbs.db
+.acside/
