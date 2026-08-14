@@ -26,7 +26,7 @@ enum class GenerateMode(val label: String, val description: String, val storageV
     SIMILAR_ARTISTS("Similar Artists", "Discover artists like your favourites", "similar-artists"),
     TAG("By Tag / Genre", "Browse by genre like rock, lofi, jazz", "tag"),
     MIX("My Mix", "Smart blend of top, recent & similar", "mix"),
-    RECOMMENDATIONS("My Recommendations", "30 fresh tracks for you to listen to next", "recommendations"),
+    RECOMMENDATIONS("My Recommendation", "35 fresh tracks for you", "recommendations"),
     LIBRARY("My Library", "Re-discover the sounds of your past", "library"),
 }
 
@@ -71,6 +71,7 @@ class GenerateViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val artworkRepository: com.lastwave.app.data.artwork.ArtworkRepository,
     private val generationStatus: GenerationStatus,
+    private val mixLauncher: MixLauncher,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GenerateUiState())
@@ -80,6 +81,26 @@ class GenerateViewModel @Inject constructor(
     val navEvents: SharedFlow<GenerateNavEvent> = _navEvents
 
     val lastSavedPlaylistId = MutableStateFlow<Long?>(null)
+
+    init {
+        // "Start Mix with this Song" (§6) landing here from any screen's
+        // track menu: pre-fill Similar Tracks with the tapped song and
+        // generate immediately — a real one-tap mix, not just a
+        // pre-filled form waiting for another tap.
+        viewModelScope.launch {
+            mixLauncher.requests.collect { seed ->
+                _uiState.update {
+                    it.copy(
+                        selectedMode = GenerateMode.SIMILAR_TRACKS,
+                        seedTrackName = seed.trackName,
+                        seedArtistName = seed.artistName,
+                        error = null,
+                    )
+                }
+                generate()
+            }
+        }
+    }
 
     fun selectMode(mode: GenerateMode) {
         if (_uiState.value.isGenerating) return

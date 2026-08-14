@@ -2,7 +2,11 @@ package com.lastwave.app.ui.generate
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
@@ -33,6 +39,7 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -41,21 +48,43 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.lastwave.app.ui.common.ExpressiveGroup
+import com.lastwave.app.ui.common.ExpressiveGroupSelectRow
+import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.wobbleOverscroll
 import com.lastwave.app.ui.shell.FloatingNavDefaults
+import com.lastwave.app.ui.theme.ExpressivePillShape
 
+// Local expressive shape scale, matching the Settings screen's redesign so
+// Generator feels like part of the same premium visual language.
+private val GeneratorCardShape = RoundedCornerShape(20.dp)
+private val GeneratorOuterCardShape = RoundedCornerShape(24.dp)
+private val IconBadgeShape = RoundedCornerShape(14.dp)
+
+/**
+ * Playlist generation itself (GenerateViewModel: mode selection, options,
+ * track count, the generate call) is completely untouched here — this file
+ * only changes how it's presented: expressive mode cards with icon badges
+ * and press feedback, a cleaner options card, and Material 3 Expressive
+ * typography/spacing throughout.
+ */
 @Composable
 fun GenerateScreen(
     onNavigateToPlaylist: () -> Unit = {},
@@ -71,44 +100,75 @@ fun GenerateScreen(
         }
     }
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
     ) {
-        LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            item(key = "header") {
-                Column(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
-                    Text("Generator", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text("Choose a mode to generate a playlist", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+        ExpressiveHeader(
+            title = "Generator",
+            subtitle = "Choose a mode to generate a playlist",
+        )
 
+        com.lastwave.app.ui.common.WithoutPlatformOverscroll {
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth().wobbleOverscroll(),
+        ) {
             if (state.isGenerating) {
                 item(key = "loadingOverlay") {
                     com.lastwave.app.ui.common.GenerationProgressCard(message = state.loadingMessage)
                 }
             }
 
-            items(GenerateMode.entries.toList(), key = { it.name }) { mode ->
-                ModeRow(
-                    label = mode.label,
-                    description = mode.description,
-                    icon = iconFor(mode),
-                    selected = state.selectedMode == mode,
-                    onClick = { if (!state.isGenerating) viewModel.selectMode(mode) },
-                )
+            item(key = "modeGroup") {
+                val modes = GenerateMode.entries.toList()
+                ExpressiveGroup(rowCount = modes.size) { index, position ->
+                    val mode = modes[index]
+                    val (badgeContainer, badgeTint) = badgeColorsFor(iconFor(mode))
+                    ExpressiveGroupSelectRow(
+                        icon = iconFor(mode),
+                        title = mode.label,
+                        subtitle = mode.description,
+                        selected = state.selectedMode == mode,
+                        position = position,
+                        onClick = { if (!state.isGenerating) viewModel.selectMode(mode) },
+                        badgeContainer = badgeContainer,
+                        badgeTint = badgeTint,
+                    )
+                }
             }
 
             state.selectedMode?.let { mode ->
                 if (!state.isGenerating) {
                     item(key = "options") {
-                        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
-                            Column(Modifier.padding(16.dp)) {
+                        Card(
+                            shape = GeneratorOuterCardShape,
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(Modifier.padding(20.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        Modifier
+                                            .size(36.dp)
+                                            .clip(IconBadgeShape)
+                                            .background(MaterialTheme.colorScheme.primaryContainer),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Tune,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    Text("Options", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                }
+                                Spacer(Modifier.height(16.dp))
+
                                 when (mode) {
                                     GenerateMode.TOP, GenerateMode.LIBRARY -> PeriodOptions(state.period, viewModel::setPeriod)
                                     GenerateMode.RECENT -> HintText("Uses your most recent scrobbles")
@@ -119,8 +179,8 @@ fun GenerateScreen(
                                     GenerateMode.RECOMMENDATIONS -> HintText("Track count is set by the slider below")
                                 }
 
-                                Spacer(Modifier.height(16.dp))
-                                Text("Track count: ${state.trackCount}", style = MaterialTheme.typography.labelLarge)
+                                Spacer(Modifier.height(20.dp))
+                                Text("Track count: ${state.trackCount}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
                                 Slider(
                                     value = state.trackCount.toFloat(),
                                     onValueChange = { viewModel.setTrackCount(it.toInt()) },
@@ -128,9 +188,16 @@ fun GenerateScreen(
                                     steps = 29,
                                     enabled = !state.isGenerating,
                                 )
-                                Spacer(Modifier.height(8.dp))
-                                Button(onClick = viewModel::generate, enabled = !state.isGenerating, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Generate Playlist")
+                                Spacer(Modifier.height(10.dp))
+                                Button(
+                                    onClick = viewModel::generate,
+                                    enabled = !state.isGenerating,
+                                    shape = ExpressivePillShape,
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                ) {
+                                    Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Generate Playlist", fontWeight = FontWeight.Medium)
                                 }
                             }
                         }
@@ -140,14 +207,27 @@ fun GenerateScreen(
 
             state.error?.let { error ->
                 item(key = "error") {
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                        Row(Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text(error, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
+                    Card(
+                        shape = GeneratorCardShape,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            Modifier.padding(16.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(Icons.Filled.ErrorOutline, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                                Spacer(Modifier.width(10.dp))
+                                Text(error, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
+                            }
                             TextButton(onClick = viewModel::dismissError) { Text("Dismiss") }
                         }
                     }
                 }
             }
+        }
         }
     }
 }
@@ -163,45 +243,29 @@ private fun iconFor(mode: GenerateMode): ImageVector = when (mode) {
     GenerateMode.LIBRARY -> Icons.Filled.LibraryMusic
 }
 
+/** Rotates through a few tonal container/content pairs so the mode list
+ *  doesn't read as one flat column of identical badges — purely a visual
+ *  rhythm device, no meaning attached to which mode gets which tone. */
+@Composable
+private fun badgeColorsFor(mode: ImageVector): Pair<Color, Color> {
+    val palette = listOf(
+        MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer,
+        MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer,
+        MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer,
+    )
+    val index = (mode.name.hashCode().let { if (it < 0) -it else it }) % palette.size
+    return palette[index]
+}
+
 @Composable
 private fun HintText(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
-private fun ModeRow(label: String, description: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit) {
-    val containerColor by animateColorAsState(
-        targetValue = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "modeCardBg",
-    )
-    Card(
-        onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = containerColor),
-        shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(Modifier.padding(14.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (selected) Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        }
-    }
-}
-
-@Composable
 private fun PeriodOptions(period: String, onPeriodChange: (String) -> Unit) {
-    Text("Time Period", style = MaterialTheme.typography.labelLarge)
-    Spacer(Modifier.height(6.dp))
+    Text("Time Period", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Spacer(Modifier.height(8.dp))
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(GENERATE_PERIODS, key = { it.first }) { (value, label) ->
             FilterChip(selected = period == value, onClick = { onPeriodChange(value) }, label = { Text(label) })
@@ -211,9 +275,15 @@ private fun PeriodOptions(period: String, onPeriodChange: (String) -> Unit) {
 
 @Composable
 private fun TagOptions(tag: String, onTagChange: (String) -> Unit, onChipPick: (String) -> Unit) {
-    Text("Genre or Tag", style = MaterialTheme.typography.labelLarge)
-    Spacer(Modifier.height(6.dp))
-    OutlinedTextField(value = tag, onValueChange = onTagChange, placeholder = { Text("e.g. rock, lofi, jazz\u2026") }, modifier = Modifier.fillMaxWidth())
+    Text("Genre or Tag", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Spacer(Modifier.height(8.dp))
+    OutlinedTextField(
+        value = tag,
+        onValueChange = onTagChange,
+        placeholder = { Text("e.g. rock, lofi, jazz\u2026") },
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    )
     Spacer(Modifier.height(10.dp))
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(GENRE_QUICK_CHIPS, key = { it }) { chip ->
@@ -224,27 +294,29 @@ private fun TagOptions(tag: String, onTagChange: (String) -> Unit, onChipPick: (
 
 @Composable
 private fun SimilarTrackSeedOptions(state: GenerateUiState, viewModel: GenerateViewModel) {
-    Text("Seed Track", style = MaterialTheme.typography.labelLarge)
-    Spacer(Modifier.height(6.dp))
+    Text("Seed Track", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Spacer(Modifier.height(8.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = state.seedTrackName,
             onValueChange = viewModel::setSeedTrackName,
             placeholder = { Text("Track name\u2026") },
             singleLine = true,
+            shape = RoundedCornerShape(16.dp),
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
         TextButton(onClick = viewModel::searchSeedTrack) { Text("Search") }
     }
     Spacer(Modifier.height(10.dp))
-    Text("Seed Artist", style = MaterialTheme.typography.labelLarge)
-    Spacer(Modifier.height(6.dp))
+    Text("Seed Artist", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Spacer(Modifier.height(8.dp))
     OutlinedTextField(
         value = state.seedArtistName,
         onValueChange = viewModel::setSeedArtistName,
         placeholder = { Text("Artist name\u2026") },
         singleLine = true,
+        shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth(),
     )
     Spacer(Modifier.height(10.dp))
@@ -264,14 +336,15 @@ private fun SimilarTrackSeedOptions(state: GenerateUiState, viewModel: GenerateV
 
 @Composable
 private fun SimilarArtistSeedOptions(state: GenerateUiState, viewModel: GenerateViewModel) {
-    Text("Seed Artist", style = MaterialTheme.typography.labelLarge)
-    Spacer(Modifier.height(6.dp))
+    Text("Seed Artist", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Spacer(Modifier.height(8.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = state.seedArtistQuery,
             onValueChange = viewModel::setSeedArtistQuery,
             placeholder = { Text("Artist name\u2026") },
             singleLine = true,
+            shape = RoundedCornerShape(16.dp),
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))

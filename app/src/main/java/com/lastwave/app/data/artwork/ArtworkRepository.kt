@@ -44,7 +44,6 @@ class ArtworkRepository @Inject constructor(
     private val cacheDao: ArtworkCacheDao,
     private val lastFm: LastFmTrackInfoProvider,
     private val itunes: ITunesArtworkProvider,
-    private val settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
 ) {
     private val _resolved = MutableStateFlow<Map<String, String>>(emptyMap())
     val resolved: StateFlow<Map<String, String>> = _resolved.asStateFlow()
@@ -128,17 +127,14 @@ class ArtworkRepository @Inject constructor(
                 return
             }
 
-            // 4. iTunes — only tried because Last.fm returned nothing, and
-            //    only if the "iTunes Artwork" setting is enabled (default
-            //    ON — §8.2's toggle).
-            val itunesEnabled = try { settingsPreferences.settings.first().iTunesArtworkEnabled } catch (e: Exception) { true }
-            if (itunesEnabled) {
-                val fromItunes = safeFetch("iTunes", name, artist) { itunes.fetchArtworkUrl(name, artist) }
-                if (!fromItunes.isNullOrBlank()) {
-                    Log.d(TAG, "Image loaded successfully | Provider: itunes | Track: $name | Artist: $artist | Downloaded artwork URL: $fromItunes")
-                    save(key, "itunes", fromItunes)
-                    return
-                }
+            // 4. iTunes — only tried because Last.fm returned nothing.
+            //    Always on: the Settings toggle for this was removed, the
+            //    fallback itself stays unconditional.
+            val fromItunes = safeFetch("iTunes", name, artist) { itunes.fetchArtworkUrl(name, artist) }
+            if (!fromItunes.isNullOrBlank()) {
+                Log.d(TAG, "Image loaded successfully | Provider: itunes | Track: $name | Artist: $artist | Downloaded artwork URL: $fromItunes")
+                save(key, "itunes", fromItunes)
+                return
             }
 
             // 5. Every provider missed — cache "" so we don't re-hit the
@@ -203,8 +199,7 @@ class ArtworkRepository @Inject constructor(
                 save(key, "lastfm", fromLastFm)
                 fromLastFm
             } else {
-                val itunesEnabled = try { settingsPreferences.settings.first().iTunesArtworkEnabled } catch (e: Exception) { true }
-                val fromItunes = if (itunesEnabled) safeFetch("iTunes (force)", name, artist) { itunes.fetchArtworkUrl(name, artist) } else null
+                val fromItunes = safeFetch("iTunes (force)", name, artist) { itunes.fetchArtworkUrl(name, artist) }
                 if (!fromItunes.isNullOrBlank()) {
                     save(key, "itunes", fromItunes)
                     fromItunes
@@ -224,7 +219,11 @@ class ArtworkRepository @Inject constructor(
      *  render (§4.2, §4.7). Each item runs through the normal cached
      *  resolve() path, not forceRefresh(). */
     suspend fun enrichBatch(items: List<Pair<String, String>>) {
-        items.chunked(5).forEach { batch ->
+        // Chunk size matched to the OkHttp client's now-higher
+        // maxRequestsPerHost (see NetworkModule) — the old chunk of 5 was
+        // sized for the previous default limit, artificially throttling
+        // batch pre-warms even after the client itself could handle more.
+        items.chunked(10).forEach { batch ->
             coroutineScope {
                 batch.map { (name, artist) -> launch { resolve(name, artist) } }.forEach { it.join() }
             }

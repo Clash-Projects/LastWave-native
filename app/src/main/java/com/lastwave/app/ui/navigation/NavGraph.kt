@@ -9,8 +9,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.runtime.remember
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -18,17 +18,41 @@ import androidx.navigation.compose.rememberNavController
 import com.lastwave.app.data.model.AuthState
 import com.lastwave.app.ui.auth.AuthViewModel
 import com.lastwave.app.ui.auth.LoginScreen
-import com.lastwave.app.ui.auth.openAuthorizeUrl
 import com.lastwave.app.ui.settings.SettingsScreen
 import com.lastwave.app.ui.search.SearchScreen
 import com.lastwave.app.ui.discover.DiscoverScreen
 import com.lastwave.app.ui.genres.GenresScreen
 import com.lastwave.app.ui.shell.MainShell
+import com.lastwave.app.ui.common.PredictiveBackScreen
+import com.lastwave.app.ui.genres.GenreExplorer
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+
+/** Thin bridge so LastWaveNavHost (a plain composable, no direct Hilt
+ *  singleton access) can observe GenreExplorer's pending genre and
+ *  navigate — same reasoning as MainShellViewModel's bridge to
+ *  MixLauncher. */
+@HiltViewModel
+class GenreExplorerNavBridge @Inject constructor(genreExplorer: GenreExplorer) : androidx.lifecycle.ViewModel() {
+    val pendingGenre = genreExplorer.pendingGenre
+}
 
 @Composable
 fun LastWaveNavHost(
     navController: NavHostController = rememberNavController(),
 ) {
+    // "Explore this genre" from any track's context menu, anywhere in the
+    // app — Home, Discover, Playlist, Search — routes here since Genres
+    // is a pushed destination on THIS nav controller and none of those
+    // screens hold a reference to it. See GenreExplorer's doc comment.
+    val genreExplorerBridge: GenreExplorerNavBridge = hiltViewModel()
+    val pendingGenre by genreExplorerBridge.pendingGenre.collectAsState()
+    LaunchedEffect(pendingGenre) {
+        if (pendingGenre != null) {
+            navController.navigate(Screen.Genres.route)
+        }
+    }
+
     NavHost(navController = navController, startDestination = Screen.Splash.route) {
 
         // Resolves the persisted session BEFORE showing any interactive UI.
@@ -64,22 +88,11 @@ fun LastWaveNavHost(
         composable(Screen.Login.route) {
             val authViewModel: AuthViewModel = hiltViewModel()
             val authState by authViewModel.authState.collectAsState()
-            val authorizeUrl by authViewModel.authorizeUrl.collectAsState()
-            val credentials by authViewModel.credentials.collectAsState()
-            val context = LocalContext.current
+            val webAuthState by authViewModel.webAuthState.collectAsState()
 
-            // Fires exactly once per new URL — matches startLastFmAuth()'s
-            // single Platform.openAuthBrowser(authUrl) call in app.js. This
-            // only ever runs from an explicit "Connect with Last.fm" tap
-            // (see AuthViewModel.startAuth), never automatically on launch —
-            // browser auth is a first-login-only step once a session persists.
-            LaunchedEffect(authorizeUrl) {
-                authorizeUrl?.let { openAuthorizeUrl(context, it) }
-            }
-
-            // Handles the case where auth succeeds while already sitting on
-            // Login (e.g. finishing the OAuth flow) — moves to MainShell and
-            // pops Login off the back stack.
+            // Real one-tap sign-in now: tap Connect, approve in an
+            // embedded WebView, done — see AuthViewModel/LoginScreen for
+            // the full flow. No credentials form to fill in here anymore.
             LaunchedEffect(authState) {
                 if (authState is AuthState.SignedIn) {
                     navController.navigate(Screen.MainShell.route) {
@@ -90,11 +103,10 @@ fun LastWaveNavHost(
 
             LoginScreen(
                 authState = authState,
-                initialApiKey = credentials.first,
-                initialApiSecret = credentials.second,
-                onSaveCredentials = authViewModel::saveCredentials,
-                onStartAuth = authViewModel::startAuth,
-                onContinueAfterAuth = authViewModel::continueAfterAuth,
+                webAuthState = webAuthState,
+                onBeginSignIn = authViewModel::beginSignIn,
+                onReturnedFromBrowser = authViewModel::onReturnedFromBrowser,
+                onCancelWebAuth = authViewModel::cancelSignIn,
                 onSignOut = authViewModel::signOut,
                 onDismissError = authViewModel::dismissError,
             )
@@ -112,40 +124,100 @@ fun LastWaveNavHost(
                 onOpenSearch = { navController.navigate(Screen.Search.route) },
                 onOpenDiscover = { navController.navigate(Screen.Discover.route) },
                 onOpenGenres = { navController.navigate(Screen.Genres.route) },
+                onOpenFriends = { navController.navigate(Screen.Friends.route) },
             )
         }
 
+        // Friends is a real pushed screen (not a Dialog/ModalBottomSheet) —
+        // both of those were tried first and both had the same underlying
+        // problem: getting a Compose overlay to genuinely claim the full
+        // real window (not just "as tall as its own content measured
+        // itself to be", which is all either API reliably guarantees
+        // without extra low-level workarounds) turned out to be fragile
+        // enough, even after direct fixes, that it kept regressing. A
+        // normal NavHost destination gets full-screen sizing for free —
+        // every other pushed screen here (Settings, Search, Discover,
+        // Genres, ScrobblerApps) already renders correctly edge-to-edge —
+        // so Friends now works exactly like those instead of being a
+        // special case. It shares Home's own HomeViewModel (scoped to
+        // MainShell's back stack entry) rather than getting a fresh one,
+        // since the friends list / switch-profile state already lives
+        // there and switching profile needs to affect the Home tab
+        // underneath once you pop back.
+        composable(Screen.Friends.route) { backStackEntry ->
+            val parentEntry = remember(backStackEntry) {
+                navController.getBackStackEntry(Screen.MainShell.route)
+            }
+            val homeViewModel: com.lastwave.app.ui.home.HomeViewModel = hiltViewModel(parentEntry)
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.home.FriendsScreen(
+                    viewModel = homeViewModel,
+                    onBack = { navController.popBackStack() },
+                )
+            }
+        }
+
+        // Every pushed-on-top destination below is wrapped in
+        // PredictiveBackScreen so Android's predictive back gesture (drag
+        // in from the edge) scales/rounds/dims the screen in real time
+        // instead of using a canned pop transition — see its doc comment
+        // for exactly what it does and does not animate. The screen's own
+        // onBack (its toolbar back button) still pops directly; the wrap
+        // only adds the gesture-driven path, it doesn't replace the
+        // button's.
         composable(Screen.Genres.route) {
-            GenresScreen(
-                onBack = { navController.popBackStack() },
-                onNavigateToPlaylist = {
-                    navController.popBackStack()
-                    // Playlist tab already re-reads on resume (PlaylistViewModel's
-                    // LifecycleResumeEffect), so popping back to MainShell is
-                    // sufficient — no separate "switch tab" signal is needed here
-                    // since MainShell always shows Playlists as one of its tabs
-                    // and the user lands back wherever they left MainShell.
-                },
-            )
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                GenresScreen(
+                    onBack = { navController.popBackStack() },
+                    onNavigateToPlaylist = {
+                        navController.popBackStack()
+                        // Playlist tab already re-reads on resume (PlaylistViewModel's
+                        // LifecycleResumeEffect), so popping back to MainShell is
+                        // sufficient — no separate "switch tab" signal is needed here
+                        // since MainShell always shows Playlists as one of its tabs
+                        // and the user lands back wherever they left MainShell.
+                    },
+                )
+            }
         }
 
         composable(Screen.Settings.route) {
-            SettingsScreen(
-                onBack = { navController.popBackStack() },
-                onLoggedOut = {
-                    navController.navigate(Screen.Login.route) {
-                        popUpTo(Screen.MainShell.route) { inclusive = true }
-                    }
-                },
-            )
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                SettingsScreen(
+                    onBack = { navController.popBackStack() },
+                    onLoggedOut = {
+                        navController.navigate(Screen.Login.route) {
+                            popUpTo(Screen.MainShell.route) { inclusive = true }
+                        }
+                    },
+                    onOpenChooseApps = { navController.navigate(Screen.ScrobblerApps.route) },
+                    onOpenScrobblerDebugLog = { navController.navigate(Screen.ScrobblerDebugLog.route) },
+                )
+            }
+        }
+
+        composable(Screen.ScrobblerApps.route) {
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.settings.ScrobblerAppsScreen(onBack = { navController.popBackStack() })
+            }
+        }
+
+        composable(Screen.ScrobblerDebugLog.route) {
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.settings.ScrobblerDebugLogScreen(onBack = { navController.popBackStack() })
+            }
         }
 
         composable(Screen.Search.route) {
-            SearchScreen(onBack = { navController.popBackStack() })
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                SearchScreen(onBack = { navController.popBackStack() })
+            }
         }
 
         composable(Screen.Discover.route) {
-            DiscoverScreen(onBack = { navController.popBackStack() })
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                DiscoverScreen(onBack = { navController.popBackStack() })
+            }
         }
     }
 }

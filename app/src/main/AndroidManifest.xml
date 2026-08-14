@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackages" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -15,7 +18,8 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.LastWave.Splash"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        android:enableOnBackInvokedCallback="true">
 
         <activity
             android:name=".MainActivity"
@@ -31,17 +35,38 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Last.fm OAuth deep-link callback (lastwave://auth?token=...) -->
+            <!-- Last.fm's web-auth flow redirects here after approval
+                 (see AuthRepository.authUrl's cb= param). Opened via Chrome
+                 Custom Tabs (real Chrome, not this app's own WebView), so
+                 this is what brings the app back to the foreground
+                 automatically the moment the person approves — singleTop
+                 above means it reuses this same MainActivity instance
+                 rather than creating a new one, so Login's in-progress
+                 AwaitingApproval state survives the round trip and its
+                 onResume check (see LoginScreen.kt) picks up right away. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="${authDeepLinkScheme}"
-                    android:host="${authDeepLinkHost}" />
+                <data android:scheme="lastwave" android:host="auth-callback" />
             </intent-filter>
 
         </activity>
+
+        <!-- LastWave's own local scrobbler (see service/MediaScrobbleListenerService.kt).
+             Requires the user to grant Notification Listener access from
+             Settings' Scrobbler section — the OS won't let this run without
+             it, and the app can't grant it to itself, only send the user
+             to the system screen that does. -->
+        <service
+            android:name=".service.MediaScrobbleListenerService"
+            android:exported="true"
+            android:label="LastWave Scrobbler"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
 
         <!-- Retained for the Playlist module's M3U export (SAF/legacy write) -->
         <provider

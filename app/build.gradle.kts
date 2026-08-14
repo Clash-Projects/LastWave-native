@@ -8,18 +8,14 @@ plugins {
 
 android {
     namespace = "com.lastwave.app"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.lastwave.app"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 2
+        targetSdk = 35
+        versionCode = 3
         versionName = "2.0.0-native"
-
-        // Last.fm OAuth deep-link callback: lastwave://auth?token=...
-        manifestPlaceholders["authDeepLinkScheme"] = "lastwave"
-        manifestPlaceholders["authDeepLinkHost"] = "auth"
     }
 
     buildTypes {

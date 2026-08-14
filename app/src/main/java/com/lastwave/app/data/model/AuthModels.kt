@@ -1,29 +1,8 @@
 package com.lastwave.app.data.model
 
-import kotlinx.serialization.Serializable
-
-@Serializable
-data class TokenResponse(
-    val token: String? = null,
-    val error: Int? = null,
-    val message: String? = null,
-)
-
-@Serializable
-data class SessionEnvelope(
-    val session: SessionDto? = null,
-    val error: Int? = null,
-    val message: String? = null,
-)
-
-@Serializable
-data class SessionDto(
-    val name: String,
-    val key: String,
-    val subscriber: Int = 0,
-)
-
-/** Screen-facing auth state — mirrors state.authState in app.js ('idle' | 'pending' | 'authenticated'). */
+/** Screen-facing auth state. No browser/WebView step anywhere in this flow
+ *  anymore — signing in is just API key + API secret + username, verified
+ *  with one unsigned Last.fm read call (user.getInfo). */
 sealed interface AuthState {
     /** Not yet resolved — DataStore hasn't emitted its first read. Distinct
      *  from [SignedOut] on purpose: without this, the app can't tell "we
@@ -32,9 +11,7 @@ sealed interface AuthState {
      *  a valid session exists. */
     data object Unknown : AuthState
     data object SignedOut : AuthState
-    data object RequestingToken : AuthState
-    data object AwaitingAuthorization : AuthState
-    data object ExchangingToken : AuthState
+    data object SigningIn : AuthState
     data class SignedIn(val username: String) : AuthState
     data class Error(val message: String) : AuthState
 }

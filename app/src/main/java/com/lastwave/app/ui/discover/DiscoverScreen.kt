@@ -1,12 +1,12 @@
 package com.lastwave.app.ui.discover
 
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,12 +30,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BookmarkAdd
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shuffle
@@ -66,31 +66,54 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.ui.common.ArtworkImage
+import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.GroupGap
+import com.lastwave.app.ui.common.GroupPosition
+import com.lastwave.app.ui.common.HeaderActionIcon
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
+import com.lastwave.app.ui.common.groupShape
 import com.lastwave.app.ui.theme.ExpressivePillShape
 
 @Composable
 private fun shimmerBrush(): Brush {
+    val base = MaterialTheme.colorScheme.surfaceContainerHighest
+    // A touch of the live accent color mixed into the highlight band
+    // instead of plain grey-on-grey — reads as a tinted premium sweep
+    // rather than a generic loading placeholder.
+    val highlight = androidx.compose.ui.graphics.lerp(base, MaterialTheme.colorScheme.primary, 0.22f)
     val shimmerColors = listOf(
-        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
-        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.2f),
-        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+        base.copy(alpha = 0.35f),
+        highlight.copy(alpha = 0.85f),
+        base.copy(alpha = 0.35f),
     )
     val transition = rememberInfiniteTransition(label = "shimmer")
     val translateAnim by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1000f,
+        initialValue = -400f,
+        targetValue = 1200f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
+            // Was tween(1400, FastOutSlowIn) with no gap between sweeps —
+            // FastOutSlowIn front-loads speed (fast out), and restarting
+            // immediately at the end of every cycle made it read as
+            // "fast fast" rather than a calm, premium sweep. This holds
+            // at the start for a beat, sweeps at a slower constant pace,
+            // then holds again before repeating — closer to the
+            // pause-then-sweep rhythm real shimmer placeholders use.
+            animation = keyframes {
+                durationMillis = 2200
+                -400f at 0 using LinearEasing
+                -400f at 500 using LinearEasing
+                1200f at 2000 using LinearEasing
+                1200f at 2200
+            },
             repeatMode = RepeatMode.Restart,
         ),
         label = "shimmerAnim",
     )
     return Brush.linearGradient(
         colors = shimmerColors,
-        start = Offset(translateAnim - 200f, translateAnim - 200f),
+        start = Offset(translateAnim - 300f, translateAnim - 300f),
         end = Offset(translateAnim, translateAnim),
     )
 }
@@ -112,31 +135,58 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
     }
 
     Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Back") }
-            Column(Modifier.weight(1f)) {
-                Text("Discover", style = MaterialTheme.typography.headlineSmall)
-                Text("Fresh tracks, powered by Last.fm", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            IconButton(onClick = viewModel::saveAsPlaylist) { Icon(Icons.Filled.BookmarkAdd, contentDescription = "Save as playlist") }
-            IconButton(onClick = viewModel::surpriseMe) { Icon(Icons.Filled.Shuffle, contentDescription = "Shuffle Recommendations") }
-        }
+        ExpressiveHeader(
+            title = "Discover",
+            subtitle = "Fresh tracks, powered by Last.fm",
+            onBack = onBack,
+            actions = {
+                HeaderActionIcon(Icons.Filled.BookmarkAdd, "Save as playlist", viewModel::saveAsPlaylist)
+                HeaderActionIcon(Icons.Filled.Shuffle, "Shuffle Recommendations", viewModel::surpriseMe)
+            },
+        )
 
         Box(Modifier.fillMaxSize()) {
             val shimmer = shimmerBrush()
             Crossfade(targetState = state.isLoading && state.tracks.isEmpty(), label = "discoverState") { isLoading ->
                 if (isLoading) {
                     LazyColumn(
-                        contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 16.dp,
+                            // Matches the real feed's own bottom inset below
+                            // (nav bar / gesture area) — this skeleton had a
+                            // flat 16dp instead, so its last row or two could
+                            // sit right against, or under, the system bar.
+                            bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                        ),
+                        // Same grouped-surface language as the real feed
+                        // below (GroupGap, position-based rounding) instead
+                        // of separate fully-rounded cards with gaps — the
+                        // skeleton should already look like the layout
+                        // it's about to become, not a visually different
+                        // placeholder style. Unlike the real (endless) feed,
+                        // this is a fixed 10-row batch, so the last row gets
+                        // a real BOTTOM-rounded close instead of staying
+                        // MIDDLE forever — it visually "finishes".
+                        verticalArrangement = Arrangement.spacedBy(GroupGap),
                     ) {
-                        items(10) { SkeletonCard(brush = shimmer) }
+                        items(10) { index ->
+                            SkeletonCard(
+                                brush = shimmer,
+                                position = when (index) {
+                                    0 -> GroupPosition.TOP
+                                    9 -> GroupPosition.BOTTOM
+                                    else -> GroupPosition.MIDDLE
+                                },
+                                // A few varied widths in rotation reads as
+                                // placeholder TEXT of differing lengths
+                                // rather than one uniform repeated block —
+                                // small touch, much less "obviously fake".
+                                titleWidthFraction = listOf(0.62f, 0.48f, 0.7f, 0.55f)[index % 4],
+                                subtitleWidthFraction = listOf(0.4f, 0.3f, 0.45f, 0.35f)[index % 4],
+                            )
+                        }
                     }
                 } else when {
                     state.error != null && state.tracks.isEmpty() -> Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
@@ -160,10 +210,27 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                             top = 12.dp,
                             bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                         ),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        // One continuous group for the whole feed — only
+                        // the very first row is rounded on top (TOP), every
+                        // row after that is MIDDLE (near-square, sitting
+                        // right against its neighbors) all the way down.
+                        // Chunking into repeated groups of 5 (each with its
+                        // own rounded top+bottom) made the surface visibly
+                        // "close" every 5-6 tracks while scrolling an
+                        // endless feed — wrong instinct for infinite
+                        // content: it should read as one unbroken container
+                        // that never closes off at the bottom.
+                        verticalArrangement = Arrangement.spacedBy(GroupGap),
+                        modifier = Modifier,
                     ) {
-                        items(state.tracks, key = { it.key }) { track ->
-                            DiscoverCard(track = track, onMenu = { menuTrack = track })
+                        itemsIndexed(state.tracks, key = { _, t -> t.key }) { index, track ->
+                            val position = if (index == 0) GroupPosition.TOP else GroupPosition.MIDDLE
+                            DiscoverCard(
+                                track = track,
+                                position = position,
+                                onMenu = { menuTrack = track },
+                                modifier = Modifier.animateItem(),
+                            )
                         }
                         if (state.isLoadingMore) {
                             item { Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(modifier = Modifier.size(24.dp)) } }
@@ -194,42 +261,51 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
 }
 
 @Composable
-private fun DiscoverCard(track: GeneratedTrack, onMenu: () -> Unit) {
+private fun DiscoverCard(
+    track: GeneratedTrack,
+    position: GroupPosition,
+    onMenu: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable {
-                val q = java.net.URLEncoder.encode("${track.name} ${track.artist}", "UTF-8")
-                try {
-                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/results?search_query=$q")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-                } catch (e: Exception) { }
-            },
-    ) {
-        Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    com.lastwave.app.ui.common.ExpressiveGroupTrackRow(
+        title = track.name,
+        subtitle = track.artist,
+        position = position,
+        onClick = {
+            val q = java.net.URLEncoder.encode("${track.name} ${track.artist}", "UTF-8")
+            try {
+                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/results?search_query=$q")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (e: Exception) { }
+        },
+        modifier = modifier,
+        leading = {
             ArtworkImage(name = track.name, artist = track.artist, embeddedUrl = track.artworkUrl, fallbackIcon = Icons.Filled.MusicNote, modifier = Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)))
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(track.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(track.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            IconButton(onClick = onMenu) { Icon(Icons.Filled.MoreVert, contentDescription = "More options") }
-        }
-    }
+        },
+        trailing = { com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenu) },
+    )
 }
 
 @Composable
-private fun SkeletonCard(brush: Brush) {
-    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+private fun SkeletonCard(
+    brush: Brush,
+    position: GroupPosition = GroupPosition.SINGLE,
+    titleWidthFraction: Float = 0.6f,
+    subtitleWidthFraction: Float = 0.4f,
+) {
+    Card(
+        shape = groupShape(position),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)).background(brush))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Box(Modifier.fillMaxWidth(0.6f).height(16.dp).clip(RoundedCornerShape(4.dp)).background(brush))
+                Box(Modifier.fillMaxWidth(titleWidthFraction).height(16.dp).clip(RoundedCornerShape(8.dp)).background(brush))
                 Spacer(Modifier.height(8.dp))
-                Box(Modifier.fillMaxWidth(0.4f).height(12.dp).clip(RoundedCornerShape(4.dp)).background(brush))
+                Box(Modifier.fillMaxWidth(subtitleWidthFraction).height(12.dp).clip(RoundedCornerShape(6.dp)).background(brush))
             }
         }
     }

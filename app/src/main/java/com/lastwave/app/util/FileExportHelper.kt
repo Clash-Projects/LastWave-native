@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -46,6 +47,23 @@ class FileExportHelper @Inject constructor(
         val file = File(documentsDir(), filename)
         file.writeText(content)
         return file
+    }
+
+    /** Writes [content] to a Uri the user picked via Storage Access
+     *  Framework (ACTION_CREATE_DOCUMENT / CreateDocument contract).
+     *
+     *  Used for Backup export instead of [saveToDocuments]: files written
+     *  under getExternalFilesDir() live in the app-private
+     *  Android/data/<package>/ tree, which the system's document picker
+     *  (the same picker Restore uses to open a file) does not browse into
+     *  on modern Android — the backup would exist but be unreachable from
+     *  Restore's file picker. Writing through a SAF Uri the user chose
+     *  themselves guarantees the file is somewhere they can navigate back
+     *  to later. */
+    fun writeTextToUri(uri: Uri, content: String) {
+        val resolver = context.contentResolver
+        resolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
+            ?: throw IOException("Couldn't open output stream for $uri")
     }
 
     /** Opens the system share sheet for [filename]/[content] via

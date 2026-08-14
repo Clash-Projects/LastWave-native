@@ -29,10 +29,17 @@ class GenresRepository @Inject constructor(
     private val sessionPreferences: SessionPreferences,
     private val generateRepository: GenerateRepository,
     private val tasteProfileProvider: TasteProfileProvider,
+    private val viewingProfileState: com.lastwave.app.data.repository.ViewingProfileState,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    private suspend fun username(): String = sessionPreferences.session.first().username
+    /** Whichever profile is currently being viewed on Home (a friend's, via
+     *  the friend-switcher, or your own by default) — same ViewingProfileState
+     *  GenerateRepository already reads, so tapping the stats card's arrow
+     *  into Genres while viewing a friend shows THEIR genre breakdown, not
+     *  always your own regardless of whose profile you're actually on. */
+    private suspend fun username(): String =
+        viewingProfileState.viewingUsername.value ?: sessionPreferences.session.first().username
 
     private suspend fun call(params: Map<String, String>): JsonObject = generateRepository.call(params)
 

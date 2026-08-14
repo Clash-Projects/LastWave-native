@@ -1,6 +1,8 @@
 package com.lastwave.app.data.repository
 
 import com.lastwave.app.data.local.SessionPreferences
+import com.lastwave.app.data.model.FriendEntry
+import com.lastwave.app.data.model.FriendsEnvelope
 import com.lastwave.app.data.model.RecentTrack
 import com.lastwave.app.data.model.RecentTracksEnvelope
 import com.lastwave.app.data.model.TopAlbumsEnvelope
@@ -62,12 +64,18 @@ class HomeRepository @Inject constructor(
         }
     }
 
-    suspend fun fetchRecentTracks(page: Int = 1, limit: Int = 50): Result<RecentTracksPage> = try {
+    /** Every fetch below takes an optional [username] override for viewing
+     *  a friend's profile (see fetchFriends/§ Home friend-switching) —
+     *  every one of these Last.fm methods is an unsigned read that only
+     *  ever needed a `user` param, so viewing someone else's data needs
+     *  nothing more than swapping that one parameter; api_key still comes
+     *  from the signed-in session either way. */
+    suspend fun fetchRecentTracks(page: Int = 1, limit: Int = 50, username: String? = null): Result<RecentTracksPage> = try {
         val session = requireSession()
         val response = api.get(
             mapOf(
                 "method" to "user.getrecenttracks",
-                "user" to session.username,
+                "user" to (username ?: session.username),
                 "limit" to limit.toString(),
                 "page" to page.toString(),
                 "extended" to "0",
@@ -97,9 +105,9 @@ class HomeRepository @Inject constructor(
 
     /** user.getinfo (scrobbles + timer base) + the three limit=1 stat totals —
      *  exactly the 4 calls _fetchHomeData() fires in parallel via Promise.allSettled. */
-    suspend fun fetchStats(): Result<HomeStats> = try {
+    suspend fun fetchStats(username: String? = null): Result<HomeStats> = try {
         val session = requireSession()
-        val base = mapOf("user" to session.username, "api_key" to session.apiKey, "format" to "json")
+        val base = mapOf("user" to (username ?: session.username), "api_key" to session.apiKey, "format" to "json")
 
         val infoBody = api.get(base + ("method" to "user.getinfo")).body()?.string().orEmpty()
         val tracksBody = api.get(base + ("method" to "user.gettoptracks") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty()
@@ -132,12 +140,12 @@ class HomeRepository @Inject constructor(
 
     /** user.gettoptracks(period=overall/7day/1month, limit=50) — real playcounts
      *  for home screen sorting modes. */
-    suspend fun fetchTopTracksForPeriod(period: String = "overall", limit: Int = 50): Result<List<HomeTrack>> = try {
+    suspend fun fetchTopTracksForPeriod(period: String = "overall", limit: Int = 50, username: String? = null): Result<List<HomeTrack>> = try {
         val session = requireSession()
         val response = api.get(
             mapOf(
                 "method" to "user.gettoptracks",
-                "user" to session.username,
+                "user" to (username ?: session.username),
                 "period" to period,
                 "limit" to limit.toString(),
                 "api_key" to session.apiKey,
@@ -165,17 +173,43 @@ class HomeRepository @Inject constructor(
 
     /** user.gettoptracks(period=overall, limit=50) — real playcounts, used
      *  for the Most Played tab and to merge counts onto Recent entries. */
-    suspend fun fetchTopTracksOverall(limit: Int = 50): Result<List<HomeTrack>> = fetchTopTracksForPeriod("overall", limit)
+    suspend fun fetchTopTracksOverall(limit: Int = 50, username: String? = null): Result<List<HomeTrack>> = fetchTopTracksForPeriod("overall", limit, username)
 
     /** Fires the full initial data-fetch set for the Home screen: recent
      *  tracks, stats, and all-time top tracks — mirrors the single
-     *  Promise.allSettled batch in _fetchHomeData(). */
-    suspend fun fetchInitialData(): Result<HomeInitialData> = try {
+     *  Promise.allSettled batch in _fetchHomeData(). [username] switches
+     *  whose data this loads — the signed-in user's own when null (default),
+     *  or a friend's when viewing their profile. */
+    suspend fun fetchInitialData(username: String? = null): Result<HomeInitialData> = try {
         requireSession()
-        val recent = fetchRecentTracks().getOrThrow()
-        val stats = fetchStats().getOrThrow()
-        val topTracks = fetchTopTracksOverall().getOrElse { emptyList() }
+        val recent = fetchRecentTracks(username = username).getOrThrow()
+        val stats = fetchStats(username = username).getOrThrow()
+        val topTracks = fetchTopTracksOverall(username = username).getOrElse { emptyList() }
         Result.success(HomeInitialData(stats, recent, topTracks))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /** user.getfriends — always the SIGNED-IN user's own friends list
+     *  (never a friend-of-a-friend's — Last.fm's `user` param here is
+     *  always the current session's username, unlike every fetch above). */
+    suspend fun fetchFriends(limit: Int = 50): Result<List<FriendEntry>> = try {
+        val session = requireSession()
+        val response = api.get(
+            mapOf(
+                "method" to "user.getfriends",
+                "user" to session.username,
+                "limit" to limit.toString(),
+                "api_key" to session.apiKey,
+                "format" to "json",
+            )
+        )
+        val body = response.body()?.string() ?: throw LastFmException("Empty response from Last.fm")
+        val parsed = json.decodeFromString<FriendsEnvelope>(body)
+        if (parsed.error != null) {
+            throw LastFmException(LastFmErrors.friendlyMessage(parsed.error, parsed.message), parsed.error)
+        }
+        Result.success(parsed.friends?.user.orEmpty())
     } catch (e: Exception) {
         Result.failure(e)
     }

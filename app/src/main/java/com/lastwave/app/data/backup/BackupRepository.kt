@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.lastwave.app.data.local.db.SavedPlaylistDao
 import com.lastwave.app.data.local.db.SavedPlaylistEntity
+import com.lastwave.app.data.local.db.SeenTrackDao
+import com.lastwave.app.data.local.db.SeenTrackEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -15,7 +17,7 @@ import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val SCHEMA_VERSION = 1
+private const val SCHEMA_VERSION = 2
 private const val BACKUP_TYPE = "lastwave-backup"
 
 @Serializable
@@ -32,6 +34,11 @@ data class BackupPlaylistSnapshot(
     val discoverSignature: String? = null,
 )
 
+/** Added in schema v2. Absent/empty on older backup files — restoring one
+ *  of those just leaves discovery history untouched rather than failing. */
+@Serializable
+data class BackupSeenTrackSnapshot(val trackKey: String, val lastSeenMillis: Long)
+
 @Serializable
 data class BackupFile(
     val type: String = BACKUP_TYPE,
@@ -40,10 +47,11 @@ data class BackupFile(
     val appVersion: String,
     val prefs: BackupPrefsSnapshot,
     val playlists: List<BackupPlaylistSnapshot>,
+    val seenTracks: List<BackupSeenTrackSnapshot> = emptyList(),
 )
 
 sealed interface RestoreResult {
-    data class Success(val playlistCount: Int) : RestoreResult
+    data class Success(val playlistCount: Int, val seenTrackCount: Int) : RestoreResult
     data object UnsupportedSchema : RestoreResult
     data object InvalidFile : RestoreResult
     data class Failed(val message: String) : RestoreResult
@@ -51,15 +59,22 @@ sealed interface RestoreResult {
 
 /**
  * Faithful port of settings.js's Backup & Restore (§8.6): serializes the
- * entire local storage (all DataStore prefs + all saved playlists) into one
- * JSON file, and restores it with a pre-restore snapshot so any failure
- * mid-apply rolls back automatically rather than leaving a half-restored
- * state.
+ * entire local storage (all DataStore prefs, all saved playlists, and
+ * discovery history) into one JSON file, and restores it with a
+ * pre-restore snapshot so any failure mid-apply rolls back automatically
+ * rather than leaving a half-restored state.
+ *
+ * v2 fix: v1 only captured DataStore prefs + playlists. Discovery history
+ * (seen_tracks, the same data Settings' "Clear Discovery History" row
+ * operates on) was silently left out of every backup — restoring a v1
+ * backup still works today, it just won't have discovery history to bring
+ * back, which is expected for a file that never contained it.
  */
 @Singleton
 class BackupRepository @Inject constructor(
     private val dataStore: DataStore<Preferences>,
     private val playlistDao: SavedPlaylistDao,
+    private val seenTrackDao: SeenTrackDao,
 ) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
 
@@ -78,11 +93,13 @@ class BackupRepository @Inject constructor(
         val playlists = playlistDao.getAll().map {
             BackupPlaylistSnapshot(it.id, it.title, it.subtitle, it.mode, it.tracksJson, it.createdAtMillis, it.discoverSignature)
         }
+        val seenTracks = seenTrackDao.getAll().map { BackupSeenTrackSnapshot(it.trackKey, it.lastSeenMillis) }
         val backup = BackupFile(
             createdAt = System.currentTimeMillis(),
             appVersion = appVersionName,
             prefs = BackupPrefsSnapshot(strings, booleans),
             playlists = playlists,
+            seenTracks = seenTracks,
         )
         return json.encodeToString(backup)
     }
@@ -98,6 +115,7 @@ class BackupRepository @Inject constructor(
 
         val previousPrefsSnapshot = try { buildBackup("rollback") } catch (e: Exception) { null }
         val previousPlaylists = try { playlistDao.getAll() } catch (e: Exception) { emptyList() }
+        val previousSeenTracks = try { seenTrackDao.getAll() } catch (e: Exception) { emptyList() }
 
         return try {
             dataStore.edit { mutablePrefs ->
@@ -109,12 +127,18 @@ class BackupRepository @Inject constructor(
             backup.playlists.forEach { p ->
                 playlistDao.upsert(SavedPlaylistEntity(p.id, p.title, p.subtitle, p.mode, p.tracksJson, p.createdAtMillis, p.discoverSignature))
             }
-            RestoreResult.Success(backup.playlists.size)
+            if (backup.seenTracks.isNotEmpty()) {
+                seenTrackDao.clear()
+                seenTrackDao.upsertAll(backup.seenTracks.map { SeenTrackEntity(it.trackKey, it.lastSeenMillis) })
+            }
+            RestoreResult.Success(backup.playlists.size, backup.seenTracks.size)
         } catch (e: Exception) {
             try {
                 previousPrefsSnapshot?.let { rollback(it) }
                 playlistDao.clear()
                 previousPlaylists.forEach { playlistDao.upsert(it) }
+                seenTrackDao.clear()
+                seenTrackDao.upsertAll(previousSeenTracks)
             } catch (rollbackError: Exception) {
                 // Nothing more we can safely do — surface the original failure.
             }

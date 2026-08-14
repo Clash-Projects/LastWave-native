@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -57,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.ui.common.ArtworkImage
+import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
@@ -86,28 +86,15 @@ fun GenresScreen(
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                    .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                    Column {
-                        Text("Your Genres", style = MaterialTheme.typography.headlineSmall)
-                        Text("Based on your listening history", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                PeriodDropdown(state.period, viewModel::setPeriod)
-            }
+            ExpressiveHeader(
+                title = "Your Genres",
+                subtitle = "Based on your listening history",
+                onBack = onBack,
+                actions = { PeriodDropdown(state.period, viewModel::setPeriod) },
+            )
 
             when {
-                state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { com.lastwave.app.ui.common.ExpressiveLoadingIndicator() }
                 state.stats.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("No genre data yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -272,6 +259,6 @@ private fun GenreTrackRow(track: GeneratedTrack, onMenu: () -> Unit) {
             Text(track.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(track.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        IconButton(onClick = onMenu) { Icon(Icons.Filled.MoreVert, contentDescription = "More options") }
+        com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenu)
     }
 }

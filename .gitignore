@@ -39,3 +39,6 @@ local.properties
 .DS_Store
 Thumbs.db
 .acside/
+
+# Screenshots
+Screenshot/

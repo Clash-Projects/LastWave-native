@@ -35,6 +35,7 @@ class GenerateRepository @Inject constructor(
     private val seenTrackDao: SeenTrackDao,
     private val tasteProfileProvider: TasteProfileProvider,
     private val playlistRepository: PlaylistRepository,
+    private val viewingProfileState: com.lastwave.app.data.repository.ViewingProfileState,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -72,7 +73,15 @@ class GenerateRepository @Inject constructor(
         return parsed
     }
 
-    private suspend fun username(): String = sessionPreferences.session.first().username
+    /** Whichever profile is currently being viewed on Home (see
+     *  ViewingProfileState) — a friend's username if the friend-switcher is
+     *  active there, otherwise the signed-in session's own username.
+     *  Generating playlists while viewing a friend's profile now generates
+     *  FROM that friend's top/recent/loved tracks, matching what Home
+     *  itself is showing, instead of always using your own data regardless
+     *  of whose profile you're actually looking at. */
+    private suspend fun username(): String =
+        viewingProfileState.viewingUsername.value ?: sessionPreferences.session.first().username
 
     // ── Shared helpers — exact ports of shuffleArray / deduplicateTracks / _precheckTracks ──
 

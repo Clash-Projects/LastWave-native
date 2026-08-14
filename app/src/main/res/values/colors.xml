@@ -4,4 +4,9 @@
          background token, evaluated at the default hue so the splash screen
          never flashes a mismatched color. -->
     <color name="splash_background">#FF100F0F</color>
+
+    <!-- LastWave app icon (Aug 2026 restore): the lime circle behind the
+         four bars in the official logo. Used as the adaptive icon's
+         background layer, paired with ic_launcher_foreground for the bars. -->
+    <color name="ic_launcher_background">#FFC9FB00</color>
 </resources>

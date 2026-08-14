@@ -3,11 +3,13 @@ package com.lastwave.app.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.local.SessionPreferences
+import com.lastwave.app.data.model.FriendEntry
 import com.lastwave.app.data.repository.HomeRepository
 import com.lastwave.app.data.repository.HomeSortMode
 import com.lastwave.app.data.repository.HomeStats
 import com.lastwave.app.data.model.RecentTrack
 import com.lastwave.app.data.repository.HomeTrack
+import com.lastwave.app.data.repository.ThemeRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -28,6 +30,12 @@ data class HomeUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val username: String = "",
+    /** The account whose data is currently loaded — equal to [username]
+     *  (the signed-in user) unless viewing a friend's profile via the
+     *  friend-switcher (tap the username pill), in which case this is the
+     *  friend's Last.fm username instead. Every list/stat on screen
+     *  reflects THIS account, not necessarily the signed-in one. */
+    val viewingUsername: String = "",
     val stats: HomeStats? = null,
     val nowPlaying: HomeTrack? = null,
     val listenElapsedSeconds: Int = 0,
@@ -39,7 +47,17 @@ data class HomeUiState(
     val page: Int = 1,
     val totalPages: Int = 1,
     val error: String? = null,
-)
+    val friends: List<FriendEntry> = emptyList(),
+    val isLoadingFriends: Boolean = false,
+    val showFriendsSheet: Boolean = false,
+    val pinnedFriends: Set<String> = emptySet(),
+) {
+    val isViewingFriend: Boolean get() = viewingUsername.isNotBlank() && viewingUsername != username
+
+    /** Pinned friends first (stable within each group — user.getfriends'
+     *  own order otherwise), for the friend-switcher sheet. */
+    val sortedFriends: List<FriendEntry> get() = friends.sortedByDescending { it.name in pinnedFriends }
+}
 
 @Immutable
 sealed interface HomeRow {
@@ -145,6 +163,9 @@ private const val LISTEN_TICK_MS = 1_000L
 class HomeViewModel @Inject constructor(
     private val homeRepository: HomeRepository,
     private val sessionPreferences: SessionPreferences,
+    private val themeRepository: ThemeRepository,
+    private val viewingProfileState: com.lastwave.app.data.repository.ViewingProfileState,
+    private val settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -154,6 +175,22 @@ class HomeViewModel @Inject constructor(
 
     init {
         loadInitial()
+        viewModelScope.launch {
+            settingsPreferences.settings.collect { misc ->
+                _uiState.update { it.copy(pinnedFriends = misc.pinnedFriends) }
+            }
+        }
+    }
+
+    /** Dynamic Now Playing Theme (§5): tells ThemeRepository what track is
+     *  currently playing so it can resolve real artwork (through the same
+     *  Last.fm -> iTunes fallback every other screen uses) and extract an
+     *  accent color from it. Cheap and safe to call every time nowPlaying is
+     *  (re)computed, including from every poll tick — ThemeRepository
+     *  dedupes on the track's cache key internally, so this only triggers
+     *  real work when the track actually changes. */
+    private fun notifyNowPlayingArtwork(track: HomeTrack?) {
+        themeRepository.updateNowPlayingArtwork(track?.name, track?.artist)
     }
 
     private fun mergeRecentWithTop(
@@ -196,10 +233,12 @@ class HomeViewModel @Inject constructor(
                 onSuccess = { data ->
                     cachedTopTracks = data.topTracks
                     val (nowPlaying, merged) = mergeRecentWithTop(data.recent.nowPlaying, data.recent.tracks, data.topTracks)
+                    notifyNowPlayingArtwork(nowPlaying)
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             username = username,
+                            viewingUsername = username,
                             stats = data.stats,
                             nowPlaying = nowPlaying,
                             allTracks = merged,
@@ -211,32 +250,35 @@ class HomeViewModel @Inject constructor(
                     preloadPeriodTracks()
                 },
                 onFailure = { e ->
-                    _uiState.update { it.copy(isLoading = false, username = username, error = e.message ?: "Couldn't load your data") }
+                    _uiState.update { it.copy(isLoading = false, username = username, viewingUsername = username, error = e.message ?: "Couldn't load your data") }
                 },
             )
         }
     }
 
     private fun preloadPeriodTracks() {
+        val target = _uiState.value.viewingUsername
         viewModelScope.launch(Dispatchers.IO) {
-            homeRepository.fetchTopTracksForPeriod("7day", 50).onSuccess { tracks ->
+            homeRepository.fetchTopTracksForPeriod("7day", 50, username = target).onSuccess { tracks ->
                 _uiState.update { it.copy(topTracks7Days = tracks) }
             }
         }
         viewModelScope.launch(Dispatchers.IO) {
-            homeRepository.fetchTopTracksForPeriod("1month", 50).onSuccess { tracks ->
+            homeRepository.fetchTopTracksForPeriod("1month", 50, username = target).onSuccess { tracks ->
                 _uiState.update { it.copy(topTracks30Days = tracks) }
             }
         }
     }
 
     fun refresh() {
+        val target = _uiState.value.viewingUsername
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isRefreshing = true) }
-            val recent = homeRepository.fetchRecentTracks()
+            val recent = homeRepository.fetchRecentTracks(username = target)
             recent.fold(
                 onSuccess = { page ->
                     val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
+                    notifyNowPlayingArtwork(nowPlaying)
                     _uiState.update {
                         it.copy(
                             isRefreshing = false,
@@ -258,7 +300,7 @@ class HomeViewModel @Inject constructor(
         val current = _uiState.value
         if (current.page >= current.totalPages) return
         viewModelScope.launch(Dispatchers.IO) {
-            homeRepository.fetchRecentTracks(page = current.page + 1).onSuccess { page ->
+            homeRepository.fetchRecentTracks(page = current.page + 1, username = current.viewingUsername).onSuccess { page ->
                 val (_, merged) = mergeRecentWithTop(null, page.tracks, cachedTopTracks)
                 _uiState.update { state ->
                     val existingKeys = state.allTracks.map { it.key to it.timestampMillis }.toSet()
@@ -275,30 +317,112 @@ class HomeViewModel @Inject constructor(
 
     fun setSortMode(mode: HomeSortMode) {
         _uiState.update { it.copy(sortMode = mode) }
+        val target = _uiState.value.viewingUsername
         if (mode == HomeSortMode.LAST_7_DAYS && _uiState.value.topTracks7Days.isEmpty()) {
             viewModelScope.launch(Dispatchers.IO) {
-                homeRepository.fetchTopTracksForPeriod("7day", 50).onSuccess { tracks ->
+                homeRepository.fetchTopTracksForPeriod("7day", 50, username = target).onSuccess { tracks ->
                     _uiState.update { it.copy(topTracks7Days = tracks) }
                 }
             }
         } else if (mode == HomeSortMode.LAST_30_DAYS && _uiState.value.topTracks30Days.isEmpty()) {
             viewModelScope.launch(Dispatchers.IO) {
-                homeRepository.fetchTopTracksForPeriod("1month", 50).onSuccess { tracks ->
+                homeRepository.fetchTopTracksForPeriod("1month", 50, username = target).onSuccess { tracks ->
                     _uiState.update { it.copy(topTracks30Days = tracks) }
                 }
             }
         }
     }
 
+    /** Opens the friend-switcher sheet — lazily loads the signed-in user's
+     *  own friends list (user.getfriends) the first time it's opened. */
+    fun openFriendsSheet() {
+        _uiState.update { it.copy(showFriendsSheet = true) }
+        if (_uiState.value.friends.isEmpty()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                _uiState.update { it.copy(isLoadingFriends = true) }
+                homeRepository.fetchFriends().fold(
+                    onSuccess = { list -> _uiState.update { it.copy(friends = list, isLoadingFriends = false) } },
+                    onFailure = { _uiState.update { it.copy(isLoadingFriends = false) } },
+                )
+            }
+        }
+    }
+
+    fun dismissFriendsSheet() {
+        _uiState.update { it.copy(showFriendsSheet = false) }
+    }
+
+    fun toggleFriendPinned(username: String) {
+        viewModelScope.launch { settingsPreferences.toggleFriendPinned(username) }
+    }
+
+    /** Switches the whole Home screen over to a friend's data — every
+     *  fetch (recent tracks, stats, top tracks for every period) re-runs
+     *  for [friend]'s username instead of the signed-in one. */
+    fun viewFriend(friend: FriendEntry) {
+        _uiState.update { it.copy(showFriendsSheet = false) }
+        viewingProfileState.set(friend.name)
+        loadForUsername(friend.name)
+    }
+
+    /** Switches back to the signed-in user's own data. */
+    fun returnToOwnProfile() {
+        viewingProfileState.set(null)
+        loadForUsername(_uiState.value.username)
+    }
+
+    private fun loadForUsername(username: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    error = null,
+                    viewingUsername = username,
+                    // Reset period caches from the previous account — the
+                    // 7-day/30-day tabs would otherwise briefly show the
+                    // last-viewed account's tracks under the new one's name.
+                    topTracks7Days = emptyList(),
+                    topTracks30Days = emptyList(),
+                )
+            }
+            val result = homeRepository.fetchInitialData(username = username)
+            result.fold(
+                onSuccess = { data ->
+                    cachedTopTracks = data.topTracks
+                    val (nowPlaying, merged) = mergeRecentWithTop(data.recent.nowPlaying, data.recent.tracks, data.topTracks)
+                    notifyNowPlayingArtwork(nowPlaying)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            stats = data.stats,
+                            nowPlaying = nowPlaying,
+                            allTracks = merged,
+                            topTracksOverall = data.topTracks,
+                            page = data.recent.page,
+                            totalPages = data.recent.totalPages,
+                        )
+                    }
+                    preloadPeriodTracks()
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(isLoading = false, error = e.message ?: "Couldn't load that profile") }
+                },
+            )
+        }
+    }
+
     /** Runs the now-playing + recent-tracks + listen-timer loops concurrently.
      *  Call from a lifecycle-aware LaunchedEffect(repeatOnLifecycle(STARTED))
-     *  so polling stops the moment the screen backgrounds. */
+     *  so polling stops the moment the screen backgrounds. Polls whichever
+     *  account is currently being viewed (yours, or a friend's). */
     suspend fun pollWhileActive() = coroutineScope {
         launch {
             while (true) {
                 delay(NOW_PLAYING_POLL_MS)
-                homeRepository.fetchRecentTracks(limit = 2).onSuccess { page ->
+                val target = _uiState.value.viewingUsername
+                homeRepository.fetchRecentTracks(limit = 2, username = target).onSuccess { page ->
                     val (nowPlaying, _) = mergeRecentWithTop(page.nowPlaying, emptyList(), cachedTopTracks)
+                    notifyNowPlayingArtwork(nowPlaying)
                     _uiState.update { state ->
                         val trackChanged = nowPlaying?.name != state.nowPlaying?.name || nowPlaying?.artist != state.nowPlaying?.artist
                         state.copy(nowPlaying = nowPlaying, listenElapsedSeconds = if (trackChanged) 0 else state.listenElapsedSeconds)
@@ -309,9 +433,35 @@ class HomeViewModel @Inject constructor(
         launch {
             while (true) {
                 delay(RECENT_TRACKS_POLL_MS)
-                homeRepository.fetchRecentTracks().onSuccess { page ->
+                val target = _uiState.value.viewingUsername
+                homeRepository.fetchRecentTracks(username = target).onSuccess { page ->
                     val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
-                    _uiState.update { it.copy(nowPlaying = nowPlaying, allTracks = merged, page = page.page, totalPages = page.totalPages) }
+                    notifyNowPlayingArtwork(nowPlaying)
+                    _uiState.update { state ->
+                        // This used to replace allTracks wholesale with
+                        // just this fresh page-1 fetch every single poll —
+                        // silently discarding every page the user had
+                        // already scrolled down and loaded via
+                        // loadNextPage(). That's exactly what looked like
+                        // "the list stops loading anything past a certain
+                        // point" / general glitchiness: infinite scroll
+                        // progress was being wiped out every ~8 seconds.
+                        // Now it only ever ADDS genuinely-new recent
+                        // tracks to the front, same dedup key
+                        // (name|artist + timestamp) loadNextPage already
+                        // uses, and leaves everything already loaded
+                        // alone. Filtered to timestampMillis != null so
+                        // the top-tracks "filler" entries mergeRecentWithTop
+                        // adds to pad out a short recent page (which have
+                        // no real timestamp) never get treated as if
+                        // they're freshly-played and prepended above
+                        // actually-recent tracks.
+                        val recentOnly = merged.filter { it.timestampMillis != null }
+                        val existingKeys = state.allTracks.map { it.key to it.timestampMillis }.toSet()
+                        val newOnes = recentOnly.filter { (it.key to it.timestampMillis) !in existingKeys }
+                        val combined = (newOnes + state.allTracks).distinctBy { it.key to it.timestampMillis }
+                        state.copy(nowPlaying = nowPlaying, allTracks = combined, totalPages = page.totalPages)
+                    }
                 }
             }
         }

@@ -8,6 +8,8 @@ import com.lastwave.app.data.backup.RestoreResult
 import com.lastwave.app.data.generate.GenerateRepository
 import com.lastwave.app.data.local.AccentMode
 import com.lastwave.app.data.local.MiscSettings
+import com.lastwave.app.data.local.ScrobblerPreferences
+import com.lastwave.app.data.local.ScrobblerSettings
 import com.lastwave.app.data.local.SessionData
 import com.lastwave.app.data.local.SessionPreferences
 import com.lastwave.app.data.local.SettingsPreferences
@@ -37,6 +39,9 @@ data class SettingsScreenState(
     val showRestoreConfirm: Boolean = false,
     val pendingRestoreContent: String? = null,
     val pendingRestorePlaylistCount: Int? = null,
+    val showSessionKeyDialog: Boolean = false,
+    val sessionKeyError: String? = null,
+    val sessionKeyLoading: Boolean = false,
 )
 
 @HiltViewModel
@@ -48,6 +53,7 @@ class SettingsViewModel @Inject constructor(
     private val generateRepository: GenerateRepository,
     private val backupRepository: BackupRepository,
     private val fileExportHelper: FileExportHelper,
+    private val scrobblerPreferences: ScrobblerPreferences,
 ) : ViewModel() {
 
     val session: StateFlow<SessionData> = sessionPreferences.session
@@ -57,6 +63,9 @@ class SettingsViewModel @Inject constructor(
 
     val misc: StateFlow<MiscSettings> = settingsPreferences.settings
         .stateIn(viewModelScope, SharingStarted.Eagerly, MiscSettings())
+
+    val scrobbler: StateFlow<ScrobblerSettings> = scrobblerPreferences.settings
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ScrobblerSettings())
 
     private val _uiState = MutableStateFlow(SettingsScreenState())
     val uiState: StateFlow<SettingsScreenState> = _uiState.asStateFlow()
@@ -102,8 +111,8 @@ class SettingsViewModel @Inject constructor(
         dismissColorWheel()
     }
 
-    fun setItunesArtwork(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setItunesArtwork(enabled) }
-    fun setListenBrainzArtwork(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setListenBrainzArtwork(enabled) }
+    fun setDynamicNowPlaying(enabled: Boolean) = viewModelScope.launch { themeRepository.setDynamicNowPlaying(enabled) }
+    fun setUseCustomFont(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setUseCustomFont(enabled) }
 
     // ── Data management (§8.5) ──
 
@@ -128,13 +137,12 @@ class SettingsViewModel @Inject constructor(
 
     // ── Backup & Restore (§8.6) ──
 
-    fun exportBackup(appVersionName: String) {
+    fun exportBackup(uri: android.net.Uri, appVersionName: String) {
         viewModelScope.launch {
             try {
                 val json = backupRepository.buildBackup(appVersionName)
-                val filename = "lastwave-backup-${System.currentTimeMillis()}.json"
-                fileExportHelper.saveToDocuments(filename, json)
-                _uiState.update { it.copy(toastMessage = "Saved $filename") }
+                fileExportHelper.writeTextToUri(uri, json)
+                _uiState.update { it.copy(toastMessage = "Backup saved") }
             } catch (e: Exception) {
                 _uiState.update { it.copy(toastMessage = "Backup failed: ${e.message}") }
             }
@@ -170,7 +178,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             when (val result = backupRepository.restore(content)) {
                 is RestoreResult.Success -> {
-                    _uiState.update { it.copy(showRestoreConfirm = false, pendingRestoreContent = null, toastMessage = "Restored ${result.playlistCount} playlist(s)") }
+                    val historyNote = if (result.seenTrackCount > 0) " and discovery history" else ""
+                    _uiState.update {
+                        it.copy(
+                            showRestoreConfirm = false,
+                            pendingRestoreContent = null,
+                            toastMessage = "Restored ${result.playlistCount} playlist(s)$historyNote",
+                        )
+                    }
                     kotlinx.coroutines.delay(900)
                     onComplete()
                 }
@@ -182,4 +197,39 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun dismissToast() = _uiState.update { it.copy(toastMessage = null) }
+
+    // ── Scrobbler ──
+
+    /** The master toggle only turns scrobbling on if a session key already
+     *  exists — track.scrobble/updateNowPlaying are signed calls this app
+     *  can't make without one. If it's missing, this opens the password
+     *  dialog instead of silently flipping a switch that wouldn't actually
+     *  do anything yet; the toggle itself gets set once that succeeds. */
+    fun setScrobblerEnabled(enabled: Boolean) {
+        if (enabled && session.value.sessionKey.isBlank()) {
+            _uiState.update { it.copy(showSessionKeyDialog = true) }
+            return
+        }
+        viewModelScope.launch { scrobblerPreferences.setEnabled(enabled) }
+    }
+
+    fun setSubmitNowPlaying(enabled: Boolean) = viewModelScope.launch { scrobblerPreferences.setSubmitNowPlaying(enabled) }
+    fun setScrobblePercent(percent: Int) = viewModelScope.launch { scrobblerPreferences.setScrobblePercent(percent) }
+
+    fun dismissSessionKeyDialog() = _uiState.update { it.copy(showSessionKeyDialog = false, sessionKeyError = null) }
+
+    fun submitPassword(password: String) {
+        _uiState.update { it.copy(sessionKeyLoading = true, sessionKeyError = null) }
+        viewModelScope.launch {
+            when (val result = authRepository.obtainSessionKey(password)) {
+                AuthRepository.SessionKeyResult.Success -> {
+                    scrobblerPreferences.setEnabled(true)
+                    _uiState.update { it.copy(showSessionKeyDialog = false, sessionKeyLoading = false, toastMessage = "Scrobbling enabled") }
+                }
+                is AuthRepository.SessionKeyResult.Failed -> {
+                    _uiState.update { it.copy(sessionKeyLoading = false, sessionKeyError = result.message) }
+                }
+            }
+        }
+    }
 }

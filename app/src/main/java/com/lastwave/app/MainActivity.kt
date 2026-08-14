@@ -1,6 +1,5 @@
 package com.lastwave.app
 
-import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,18 +8,20 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.lastwave.app.ui.auth.AuthDeepLinkDispatcher
 import com.lastwave.app.ui.navigation.LastWaveNavHost
 import com.lastwave.app.ui.theme.LastWaveTheme
 import com.lastwave.app.ui.theme.ThemeViewModel
 import dagger.hilt.android.AndroidEntryPoint
-import javax.inject.Inject
 
+// Sign-in opens Last.fm's real web-auth flow in Chrome Custom Tabs (see
+// ui/auth/LoginScreen.kt / AuthRepository.authUrl). The AndroidManifest
+// registers this Activity for lastwave://auth-callback (Last.fm's cb=
+// redirect target) so approving in the browser brings this app back to
+// the foreground automatically — singleTop reuses this same instance so
+// Compose/ViewModel state (the in-progress AwaitingApproval token) isn't
+// lost, and LoginScreen's own onResume check then completes sign-in.
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
-
-    @Inject
-    lateinit var deepLinkDispatcher: AuthDeepLinkDispatcher
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must be called before super.onCreate() and before setContent().
@@ -28,33 +29,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        handleAuthDeepLink(intent)
-
         setContent {
             val themeViewModel: ThemeViewModel = hiltViewModel()
             val themeState by themeViewModel.uiState.collectAsState()
 
             LastWaveTheme(themeState = themeState) {
                 LastWaveNavHost()
-            }
-        }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handleAuthDeepLink(intent)
-    }
-
-    /** Extracts `token` from `lastwave://auth?token=...` and forwards it to
-     *  whichever AuthViewModel is currently listening. Mirrors the Java
-     *  MainActivity's deep-link handling that used to call
-     *  webView.evaluateJavascript("window._lfmDeepLink('$token')"). */
-    private fun handleAuthDeepLink(intent: Intent?) {
-        val uri = intent?.data ?: return
-        if (uri.scheme == "lastwave" && uri.host == "auth") {
-            uri.getQueryParameter("token")?.let { token ->
-                deepLinkDispatcher.onTokenReceived(token)
             }
         }
     }

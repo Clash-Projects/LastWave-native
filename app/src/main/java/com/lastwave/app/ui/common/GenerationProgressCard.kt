@@ -1,9 +1,12 @@
 package com.lastwave.app.ui.common
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,11 +24,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -45,11 +51,32 @@ fun GenerationProgressCard(message: String, modifier: Modifier = Modifier) {
         ),
         label = "genRot",
     )
+    // A gentle spring-driven "breathe" on the icon container, layered on
+    // top of the rotation — this is the spring-physics motion signature
+    // Material 3 Expressive uses in place of purely linear/eased loops.
+    //
+    // infiniteRepeatable() only accepts a DurationBasedAnimationSpec
+    // (tween/keyframes) for its `animation` parameter — spring() is a
+    // SpringSpec, not duration-based (its length depends on the physics,
+    // not a fixed time), so infiniteRepeatable(spring(...)) is a compile
+    // error, not just a style choice. A manual Animatable + back-and-forth
+    // loop is the correct way to get a genuinely infinite spring animation.
+    val breathe = remember { Animatable(0.94f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            breathe.animateTo(1.06f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessVeryLow))
+            breathe.animateTo(0.94f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessVeryLow))
+        }
+    }
 
     Surface(
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 6.dp,
+        // 0dp deliberately: Surface/Card blend a primary-tinted alpha layer
+        // on top of `color` whenever tonalElevation is above 0dp — see the
+        // ModeCard/SettingsToggleCard fixes for the full explanation. The
+        // shadow below still gives real depth without that color shift.
+        tonalElevation = 0.dp,
         shadowElevation = 8.dp,
         modifier = modifier.fillMaxWidth().padding(vertical = 12.dp),
     ) {
@@ -60,7 +87,7 @@ fun GenerationProgressCard(message: String, modifier: Modifier = Modifier) {
             Surface(
                 shape = RoundedCornerShape(50),
                 color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(64.dp),
+                modifier = Modifier.size(64.dp).scale(breathe.value),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(

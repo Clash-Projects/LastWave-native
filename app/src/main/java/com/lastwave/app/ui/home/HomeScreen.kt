@@ -2,6 +2,7 @@ package com.lastwave.app.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -16,11 +18,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,7 +39,6 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headset
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -47,6 +53,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import com.lastwave.app.ui.common.ArtworkImage
+import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.HeaderActionIcon
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
@@ -61,13 +69,15 @@ import com.lastwave.app.ui.theme.StatPillShape
 import com.lastwave.app.ui.theme.TrackRowShape
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.People
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -90,6 +100,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -134,6 +145,7 @@ fun HomeScreen(
     onOpenSearch: () -> Unit,
     onOpenDiscover: () -> Unit,
     onOpenGenres: () -> Unit,
+    onOpenFriends: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -150,36 +162,23 @@ fun HomeScreen(
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            val headerLift = 6.dp
-            Column(
-                Modifier.layout { measurable, constraints ->
-                    val lift = headerLift.roundToPx()
-                    val placeable = measurable.measure(constraints)
-                    layout(placeable.width, (placeable.height - lift).coerceAtLeast(0)) {
-                        placeable.place(0, -lift)
+            // Item 1 (this pass): the header container itself is now the
+            // one shared ExpressiveHeader — full-bleed, only its bottom
+            // edge rounded, same as every other tab. The username pill and
+            // live-listen-timer pill are deliberately NOT part of this
+            // container anymore (they were folded in before) — they render
+            // as their own free-floating row in the scroll content below,
+            // same as the original layout.
+            ExpressiveHeader(
+                title = "LastWave",
+                actions = {
+                    HeaderActionIcon(Icons.Filled.Explore, "Discover", onOpenDiscover)
+                    HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
+                    IconButton(onClick = onOpenSettings) {
+                        ProfileAvatar(avatarUrl = uiState.stats?.avatarUrl, modifier = Modifier.size(30.dp))
                     }
                 },
-            ) {
-                TopAppBar(
-                    title = { Text("LastWave", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) },
-                    expandedHeight = 48.dp,
-                    actions = {
-                        IconButton(onClick = onOpenDiscover) {
-                            Icon(Icons.Filled.Explore, contentDescription = "Discover")
-                        }
-                        IconButton(onClick = onOpenSearch) {
-                            Icon(Icons.Filled.Search, contentDescription = "Search")
-                        }
-                        IconButton(onClick = onOpenSettings) {
-                            ProfileAvatar(avatarUrl = uiState.stats?.avatarUrl, modifier = Modifier.size(28.dp))
-                        }
-                    },
-                )
-                HeaderRow(
-                    username = uiState.username,
-                    viewModel = viewModel,
-                )
-            }
+            )
         },
     ) { scaffoldPadding ->
         if (uiState.isLoading) {
@@ -190,6 +189,14 @@ fun HomeScreen(
         }
 
         Column(Modifier.fillMaxSize().padding(scaffoldPadding)) {
+            HeaderRow(
+                displayUsername = if (uiState.isViewingFriend) uiState.viewingUsername else uiState.username,
+                isViewingFriend = uiState.isViewingFriend,
+                onClick = onOpenFriends,
+                viewModel = viewModel,
+            )
+            Spacer(Modifier.height(2.dp))
+
             uiState.stats?.let { stats ->
                 StatsCard(
                     scrobbles = stats.scrobbles,
@@ -197,9 +204,9 @@ fun HomeScreen(
                     artistCount = stats.artistCount,
                     albumCount = stats.albumCount,
                     onOpenGenres = onOpenGenres,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 0.dp),
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 0.dp),
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(12.dp))
             }
 
             PullToRefreshBox(
@@ -242,7 +249,51 @@ fun HomeScreen(
                             key = { row ->
                                 when (row) {
                                     is HomeRow.DateHeader -> "date_${row.label}"
-                                    is HomeRow.Track -> "track_${row.track.key}_${row.track.timestampMillis}_${row.track.isNowPlaying}"
+                                    // isNowPlaying deliberately left OUT of
+                                    // this key. Last.fm's own now-playing
+                                    // flag on user.getrecenttracks can
+                                    // flicker true/false/true across
+                                    // consecutive polls a few seconds apart
+                                    // for the same actual track — with it
+                                    // in the key, every flicker changed the
+                                    // key, which made Compose treat it as
+                                    // a brand new list item and remount the
+                                    // whole row from scratch, restarting
+                                    // its pulse animation each time. That's
+                                    // what read as "flickering" rather than
+                                    // one continuous loop — the animation
+                                    // itself was fine, it just kept getting
+                                    // torn down and recreated. Track
+                                    // identity (name/artist + timestamp)
+                                    // is stable across that flicker, so
+                                    // keying on that alone keeps the same
+                                    // composable instance (and its
+                                    // in-flight animation) across polls;
+                                    // isNowPlaying still reaches the row
+                                    // normally as a plain recomposition.
+                                    //
+                                    // The actual remaining blink: the
+                                    // synthetic "now playing" HomeTrack is
+                                    // rebuilt fresh on EVERY poll tick
+                                    // (NOW_PLAYING_POLL_MS / RECENT_TRACKS_
+                                    // POLL_MS) with timestampMillis set to
+                                    // System.currentTimeMillis() at poll
+                                    // time (see mergeRecentWithTop) — not
+                                    // the track's real scrobble time. Since
+                                    // that timestamp was part of this key,
+                                    // it changed every single poll even
+                                    // though the same song was still
+                                    // playing, so Compose tore down and
+                                    // recreated that row from scratch every
+                                    // few seconds — the actual blink. Give
+                                    // the now-playing row a stable
+                                    // identity-only key instead of pinning
+                                    // it to that synthetic timestamp.
+                                    is HomeRow.Track -> if (row.track.isNowPlaying) {
+                                        "nowplaying_${row.track.key}"
+                                    } else {
+                                        "track_${row.track.key}_${row.track.timestampMillis}"
+                                    }
                                 }
                             },
                             contentType = { row ->
@@ -252,9 +303,11 @@ fun HomeScreen(
                                 }
                             },
                         ) { row ->
-                            when (row) {
-                                is HomeRow.DateHeader -> DateHeaderRow(row.label)
-                                is HomeRow.Track -> TrackRow(row.track, row.badge, onMenuClick = { menuTrack = row.track })
+                            Box(Modifier.animateItem()) {
+                                when (row) {
+                                    is HomeRow.DateHeader -> DateHeaderRow(row.label)
+                                    is HomeRow.Track -> TrackRow(row.track, row.badge, onMenuClick = { menuTrack = row.track })
+                                }
                             }
                         }
 
@@ -281,6 +334,7 @@ fun HomeScreen(
             onDismiss = { menuTrack = null },
         )
     }
+
 }
 
 private suspend fun snapshotFlowNearEnd(listState: LazyListState, onNearEnd: () -> Unit) {
@@ -294,30 +348,53 @@ private suspend fun snapshotFlowNearEnd(listState: LazyListState, onNearEnd: () 
 
 @Composable
 private fun HeaderRow(
-    username: String,
+    displayUsername: String,
+    isViewingFriend: Boolean,
+    onClick: () -> Unit,
     viewModel: HomeViewModel,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Surface(
+            onClick = onClick,
             shape = BadgePillShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            // A distinct tone while viewing a friend's data — a quiet but
+            // real signal (not just the name text) that this isn't your
+            // own profile right now, visible even at a glance.
+            color = if (isViewingFriend) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
-            Text(
-                username.ifBlank { "—" },
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-            )
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    displayUsername.ifBlank { "—" },
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isViewingFriend) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                )
+                // Only shown while actually viewing a friend's data — no
+                // icon at all for your own profile, per explicit request
+                // (previously always showed, regardless of state).
+                if (isViewingFriend) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        Icons.Filled.People,
+                        contentDescription = "Switch profile",
+                        modifier = Modifier.size(15.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
         }
 
         LiveListenTimer(viewModel)
     }
 }
+
 
 @Composable
 private fun LiveListenTimer(viewModel: HomeViewModel) {
@@ -364,6 +441,11 @@ private fun ProfileAvatar(avatarUrl: String?, modifier: Modifier = Modifier) {
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.primaryContainer,
+        // A thin ring in the current accent color — matches the app theme
+        // (moves with Dynamic Color / manual accent / dynamic-now-playing
+        // the same way everything else does) instead of a plain flat
+        // avatar with no border at all.
+        border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
         modifier = modifier,
     ) {
         if (!avatarUrl.isNullOrBlank()) {
@@ -507,6 +589,27 @@ private fun formatCount(value: Long): String = if (value <= 0) "—" else "%,d".
 @Composable
 private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
+    val haptics = LocalHapticFeedback.current
+    // Real, felt tactile feedback: haptic now fires the instant the pill is
+    // pressed (finger down), not only after the click completes — firing it
+    // solely inside onClick meant it landed at the same moment the dropdown
+    // menu opened and covered the pill, which could read as "nothing
+    // happened" since the press-scale's own short spring had barely started
+    // by then. A dedicated LaunchedEffect on the raw pressed state decouples
+    // the haptic from whatever the click itself goes on to do.
+    val pillInteractionSource = remember { MutableInteractionSource() }
+    val pillPressed by pillInteractionSource.collectIsPressedAsState()
+    LaunchedEffect(pillPressed) {
+        if (pillPressed) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+    }
+    // A more pronounced dip than the shared rememberGroupPressScale (tuned
+    // for full-width group rows) — a small pill needs a bigger relative
+    // shrink to actually read as a press at this size.
+    val pillScale by animateFloatAsState(
+        targetValue = if (pillPressed) 0.90f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "sortPillPressScale",
+    )
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -524,7 +627,8 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
                 shape = BadgePillShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                 tonalElevation = 1.dp,
-                modifier = Modifier.heightIn(min = 34.dp),
+                interactionSource = pillInteractionSource,
+                modifier = Modifier.heightIn(min = 34.dp).scale(pillScale),
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
@@ -555,22 +659,33 @@ private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -
             DropdownMenu(
                 expanded = menuOpen,
                 onDismissRequest = { menuOpen = false },
-                shape = RoundedCornerShape(22.dp),
+                shape = RoundedCornerShape(24.dp),
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 4.dp,
-                shadowElevation = 10.dp,
+                // Lowered from 10dp: a heavy shadowElevation on a popup
+                // paints a mostly-rectangular drop shadow around the
+                // rounded card (the shadow's own corner falloff is much
+                // subtler than the card's actual corner radius), which is
+                // exactly what read as "squarish" — a light shadow plus a
+                // bit more tonalElevation for legibility fixes that
+                // without losing depth entirely.
+                tonalElevation = 3.dp,
+                shadowElevation = 3.dp,
                 modifier = Modifier.padding(vertical = 4.dp),
             ) {
                 SortOption(Icons.Filled.Schedule, "Recent", sortMode == HomeSortMode.RECENT) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.RECENT); menuOpen = false
                 }
                 SortOption(Icons.Filled.BarChart, "Most Played", sortMode == HomeSortMode.MOST_PLAYED) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.MOST_PLAYED); menuOpen = false
                 }
                 SortOption(Icons.Filled.DateRange, "Last 7 Days", sortMode == HomeSortMode.LAST_7_DAYS) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.LAST_7_DAYS); menuOpen = false
                 }
                 SortOption(Icons.Filled.CalendarMonth, "Last 30 Days", sortMode == HomeSortMode.LAST_30_DAYS) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSortModeChange(HomeSortMode.LAST_30_DAYS); menuOpen = false
                 }
             }
@@ -710,7 +825,15 @@ private fun TrackRow(track: HomeTrack, badge: String?, onMenuClick: () -> Unit) 
                     initialValue = 1.0f,
                     targetValue = 1.06f,
                     animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                        animation = androidx.compose.animation.core.tween(1200, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                        // FastOutSlowInEasing decelerates hard into each
+                        // endpoint — reversed every cycle (RepeatMode
+                        // .Reverse), that reads as a snap/bounce at the
+                        // turnaround rather than a smooth continuous
+                        // breathing loop. Linear easing on both legs is
+                        // what actually gives a proper, uniform pulse —
+                        // only the easing changed here, same duration,
+                        // same scale range, same everything else.
+                        animation = androidx.compose.animation.core.tween(1200, easing = androidx.compose.animation.core.LinearEasing),
                         repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
                     ),
                     label = "pulseScale"
@@ -747,9 +870,12 @@ private fun TrackRow(track: HomeTrack, badge: String?, onMenuClick: () -> Unit) 
                     )
                 }
             }
-            IconButton(onClick = onMenuClick) {
-                Icon(Icons.Filled.MoreVert, contentDescription = "More options")
-            }
+            // Home-only per item 7: a small filled tonal container around
+            // the overflow trigger. This composable is private to
+            // HomeScreen.kt, so this doesn't touch the three-dot button on
+            // Item 1 (consistency pass): the same OverflowMenuButton is now
+            // used on every screen's song list, not just Home.
+            com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenuClick)
         }
     }
 }

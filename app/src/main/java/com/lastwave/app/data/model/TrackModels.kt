@@ -152,3 +152,32 @@ data class TrackInfoEnvelope(
     val error: Int? = null,
     val message: String? = null,
 )
+
+// ── user.getfriends — unsigned, needs only api_key + user (the SIGNED-IN
+//    user's own friends list). Powers the friend-switching feature: tap
+//    the username pill on Home, pick a friend, and every Home fetch below
+//    (recent tracks, stats, top tracks) is re-run for that friend's
+//    username instead — same idea as Pano Scrobbler's friend switching.
+@Serializable
+data class FriendEntry(
+    val name: String = "",
+    val realname: String = "",
+    val image: List<ImageDto> = emptyList(),
+) {
+    val displayName: String get() = realname.ifBlank { name }
+    val avatarUrl: String? get() = ArtworkNormalizer.bestImageUrl(image)
+}
+
+@Serializable
+data class FriendsListDto(
+    @Serializable(with = FriendListSerializer::class)
+    @SerialName("user")
+    val user: List<FriendEntry> = emptyList(),
+)
+
+@Serializable
+data class FriendsEnvelope(
+    val friends: FriendsListDto? = null,
+    val error: Int? = null,
+    val message: String? = null,
+)

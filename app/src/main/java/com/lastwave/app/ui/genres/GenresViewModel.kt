@@ -43,6 +43,7 @@ class GenresViewModel @Inject constructor(
     private val genresRepository: GenresRepository,
     private val generateRepository: GenerateRepository,
     private val playlistRepository: PlaylistRepository,
+    private val genreExplorer: GenreExplorer,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GenresUiState())
@@ -50,6 +51,14 @@ class GenresViewModel @Inject constructor(
 
     init {
         load()
+        // A genre tapped from any track's context menu app-wide (Home,
+        // Discover, Playlist, Search) — see GenreExplorer's doc comment.
+        // Consumed immediately so navigating back to this screen normally
+        // afterwards doesn't reopen the same detail again.
+        genreExplorer.pendingGenre.value?.let { genre ->
+            openDetail(genre)
+            genreExplorer.consume()
+        }
     }
 
     fun setPeriod(period: String) {

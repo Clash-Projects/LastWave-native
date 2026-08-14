@@ -12,11 +12,17 @@ import javax.inject.Singleton
 data class SessionData(
     val apiKey: String = "",
     val apiSecret: String = "",
+    /** Left blank under the current sign-in method (API key + secret +
+     *  username, verified with an unsigned read call — no browser/WebView
+     *  OAuth step). Nothing else in the app needs a session key except
+     *  track.scrobble.delete, which already degrades gracefully
+     *  (AuthRepository.DeleteScrobbleResult.AuthorizationRequired) when
+     *  this is blank — every read feature (recent tracks, top tracks,
+     *  Discover, Generate, stats) only needs api_key + username. */
     val sessionKey: String = "",
     val username: String = "",
-    val pendingAuthToken: String = "",
 ) {
-    val isAuthenticated: Boolean get() = sessionKey.isNotBlank() && username.isNotBlank()
+    val isAuthenticated: Boolean get() = username.isNotBlank() && apiKey.isNotBlank()
 }
 
 @Singleton
@@ -28,7 +34,6 @@ class SessionPreferences @Inject constructor(
         val API_SECRET = stringPreferencesKey("lw_apisecret")
         val SESSION_KEY = stringPreferencesKey("lw_sessionkey")
         val USERNAME = stringPreferencesKey("lw_username")
-        val PENDING_TOKEN = stringPreferencesKey("lw_pending_token")
     }
 
     val session: Flow<SessionData> = dataStore.data.map { p ->
@@ -37,7 +42,6 @@ class SessionPreferences @Inject constructor(
             apiSecret = p[Keys.API_SECRET] ?: "",
             sessionKey = p[Keys.SESSION_KEY] ?: "",
             username = p[Keys.USERNAME] ?: "",
-            pendingAuthToken = p[Keys.PENDING_TOKEN] ?: "",
         )
     }
 
@@ -48,36 +52,34 @@ class SessionPreferences @Inject constructor(
         }
     }
 
-    suspend fun setPendingToken(token: String) {
-        dataStore.edit { it[Keys.PENDING_TOKEN] = token }
-    }
-
-    suspend fun clearPendingToken() {
-        dataStore.edit { it.remove(Keys.PENDING_TOKEN) }
-    }
-
-    suspend fun setAuthenticatedSession(sessionKey: String, username: String) {
+    /** Direct sign-in — no token, no session exchange: the verified
+     *  username is stored straight away as the signed-in identity. */
+    suspend fun setSignedIn(username: String) {
         dataStore.edit {
-            it[Keys.SESSION_KEY] = sessionKey
             it[Keys.USERNAME] = username
-            it.remove(Keys.PENDING_TOKEN)
         }
+    }
+
+    /** Stores a real Last.fm session key (`sk`) obtained via
+     *  auth.getMobileSession — the one signed call that needs a plaintext
+     *  password, kept as a separate opt-in step from normal sign-in (see
+     *  AuthRepository.obtainSessionKey) rather than required for everyone,
+     *  since it's only needed to unlock scrobbling and track.scrobble.delete. */
+    suspend fun setSessionKey(key: String) {
+        dataStore.edit { it[Keys.SESSION_KEY] = key }
     }
 
     suspend fun signOut() {
         dataStore.edit {
             it.remove(Keys.SESSION_KEY)
             it.remove(Keys.USERNAME)
-            it.remove(Keys.PENDING_TOKEN)
             // API key/secret are intentionally kept — matches the web app's
             // signOut(), which only clears the session, not the developer credentials.
         }
     }
 
     /** Settings' "Log Out" — matches settings.js's logoutApiCredentials():
-     *  clears username + API key/secret. Playlists and cached data are kept.
-     *  (Faithful to the original: it does not separately clear the session
-     *  key either — same as the web app.) */
+     *  clears username + API key/secret. Playlists and cached data are kept. */
     suspend fun logOutApiCredentials() {
         dataStore.edit {
             it.remove(Keys.USERNAME)

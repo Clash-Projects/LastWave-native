@@ -34,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,10 +45,25 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
+import com.lastwave.app.ui.common.PredictiveBackScreen
 import com.lastwave.app.ui.generate.GenerateScreen
+import com.lastwave.app.ui.generate.MixLauncher
 import com.lastwave.app.ui.home.HomeScreen
 import com.lastwave.app.ui.playlist.PlaylistScreen
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.launch
+
+/** Thin bridge exposing MixLauncher's requests to MainShell — MainShell
+ *  itself isn't a screen with its own ViewModel, so this is the smallest
+ *  way to reach the same singleton GenerateViewModel already listens to
+ *  (see MixLauncher's doc comment for the full "Start Mix" flow). */
+@HiltViewModel
+class MainShellViewModel @Inject constructor(mixLauncher: MixLauncher) : ViewModel() {
+    val mixRequests = mixLauncher.requests
+}
 
 private enum class MainTab(val label: String) { HOME("Home"), GENERATE("Generate"), PLAYLISTS("Playlists") }
 
@@ -90,28 +106,60 @@ fun MainShell(
     onOpenSearch: () -> Unit,
     onOpenDiscover: () -> Unit,
     onOpenGenres: () -> Unit,
+    onOpenFriends: () -> Unit,
+    mainShellViewModel: MainShellViewModel = hiltViewModel(),
 ) {
     val tabs = MainTab.entries
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
 
+    // "Start Mix with this Song" (§6) can be tapped from any screen's track
+    // menu, including ones pushed on top of MainShell (Discover/Search/
+    // Genres) — this keeps running even while MainShell isn't the visible
+    // screen, since its composition isn't disposed just because another
+    // route is on top of it in the back stack.
+    LaunchedEffect(Unit) {
+        mainShellViewModel.mixRequests.collect {
+            scope.launch { pagerState.animateScrollToPage(tabs.indexOf(MainTab.GENERATE)) }
+        }
+    }
+
     // A plain Box, not Scaffold(bottomBar = ...): the nav floats ON TOP of
     // content via Box alignment, never reserving/subtracting its own
     // height from the content area.
     Box(Modifier.fillMaxSize()) {
+        val homeIndex = tabs.indexOf(MainTab.HOME)
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 2,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
-            when (tabs[page]) {
-                MainTab.HOME -> HomeScreen(onOpenSettings = onOpenSettings, onOpenSearch = onOpenSearch, onOpenDiscover = onOpenDiscover, onOpenGenres = onOpenGenres)
-                MainTab.GENERATE -> GenerateScreen(
-                    onNavigateToPlaylist = {
-                        scope.launch { pagerState.animateScrollToPage(tabs.indexOf(MainTab.PLAYLISTS)) }
-                    },
-                )
-                MainTab.PLAYLISTS -> PlaylistScreen()
+            // Predictive back on a non-Home tab returns to Home (with the
+            // real shrink/round gesture animation) instead of doing
+            // nothing — these tabs live inside MainShell's own
+            // HorizontalPager, not the outer NavHost, so they never got
+            // PredictiveBackScreen's handling before. Only the CURRENTLY
+            // shown page enables its handler (`page == pagerState
+            // .currentPage`): HorizontalPager keeps neighboring pages
+            // composed too (beyondViewportPageCount = 2), and without this
+            // guard an offscreen page's handler could intercept the
+            // gesture instead of the one actually visible. Home itself
+            // stays enabled = false so back on Home falls through to the
+            // system default (exit/minimize), same as before.
+            val isCurrent = page == pagerState.currentPage
+            PredictiveBackScreen(
+                enabled = isCurrent && tabs[page] != MainTab.HOME,
+                onBack = { scope.launch { pagerState.animateScrollToPage(homeIndex) } },
+            ) {
+                when (tabs[page]) {
+                    MainTab.HOME -> HomeScreen(onOpenSettings = onOpenSettings, onOpenSearch = onOpenSearch, onOpenDiscover = onOpenDiscover, onOpenGenres = onOpenGenres, onOpenFriends = onOpenFriends)
+                    MainTab.GENERATE -> GenerateScreen(
+                        onNavigateToPlaylist = {
+                            scope.launch { pagerState.animateScrollToPage(tabs.indexOf(MainTab.PLAYLISTS)) }
+                        },
+                    )
+                    MainTab.PLAYLISTS -> PlaylistScreen()
+                }
             }
         }
 
