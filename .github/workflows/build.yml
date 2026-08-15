@@ -1,4 +1,4 @@
-name: Build LastWave APK and AAB
+name: Build LastWave APK
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build Release APK and AAB
+    name: Build Release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -46,24 +46,3 @@ jobs:
         with:
           name: LastWave-Signed-Release-APK
           path: ${{steps.sign_app.outputs.signedReleaseFile}}
-
-      - name: Build Release AAB
-        run: ./gradlew bundleRelease --stacktrace
-
-      - name: Sign Release AAB
-        uses: r0adkll/sign-android-release@v1
-        id: sign_aab
-        with:
-          releaseDirectory: app/build/outputs/bundle/release
-          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-        env:
-          BUILD_TOOLS_VERSION: "34.0.0"
-
-      - name: Upload Signed Release AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: LastWave-Signed-Release-AAB
-          path: ${{steps.sign_aab.outputs.signedReleaseFile}}
