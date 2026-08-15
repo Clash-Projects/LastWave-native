@@ -35,7 +35,7 @@
 
 ## About
 
-LastWave is a native Android client for Last.fm — built with Jetpack Compose and designed around Material 3 Expressive. It comes with its own scrobbler built in, so you don't need Pano Scrobbler or anything else running alongside it. Sign in with your Last.fm account, grant notification access, and it just tracks what you're playing — from any app.
+LastWave is a native Android client for Last.fm — built with Jetpack Compose and designed around Material 3 Expressive. It comes with its own scrobbler built in,  Sign in with your Last.fm account, grant notification access, and it just tracks what you're playing — from any app.
 
 ---
 
@@ -55,7 +55,6 @@ LastWave is a native Android client for Last.fm — built with Jetpack Compose a
 
 ## The Scrobbler
 
-This is the part I built from scratch, since no existing app did quite what I wanted.
 
 - Detects what's playing through Android's own MediaSession framework — works with whatever app you're already using, no extra setup per-app beyond picking which apps to watch.
 - You choose which apps it pays attention to, and it can auto-detect common music players for you.
@@ -101,5 +100,5 @@ cd LastWave-native
 ```
 
 <div align="center">
-  <p>Built by <a href="https://github.com/duxtami">Duxtami</a>.</p>
-</div>
+  <p>Built by  <a href="https://github.com/duxtami">Duxtami</a>.</p>
+</div> 🩵
