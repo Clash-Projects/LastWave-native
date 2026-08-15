@@ -38,7 +38,8 @@ jobs:
           alias: ${{ secrets.ALIAS }}
           keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
           keyPassword: ${{ secrets.KEY_PASSWORD }}
-          buildToolsVersion: '34.0.0'
+        env:
+          BUILD_TOOLS_VERSION: "34.0.0"
 
       - name: Upload Signed Release APK
         uses: actions/upload-artifact@v4
