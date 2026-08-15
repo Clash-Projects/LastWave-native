@@ -33,69 +33,66 @@
 
 <br/>
 
-## ✨ Highlights
-- 🎵 **Native Android app** — Built entirely with Jetpack Compose, targeting a flawless Material 3 Expressive feel.
-- 🔐 **One-tap Last.fm sign-in** — Secure web-auth flow via Chrome; no password is ever typed into the app.
-- 📡 **Built-in local scrobbler** — Seamlessly detects what's playing from any app on your phone and scrobbles it to Last.fm automatically, completely eliminating the need for a third-party scrobbler.
+## About
+
+LastWave is a native Android client for Last.fm — built with Jetpack Compose and designed around Material 3 Expressive. It comes with its own scrobbler built in, so you don't need Pano Scrobbler or anything else running alongside it. Sign in with your Last.fm account, grant notification access, and it just tracks what you're playing — from any app.
 
 ---
 
-## 🎧 Core Features
+## Core Features
 
 | Feature | Description |
 |:---|:---|
-| 🏠 **Home Feed** | Track recent plays, most played, and top tracks across periods (7 days / 30 days / all-time) with a live "Now Playing" status. |
-| 🔮 **Discover** | Dive into a personalized recommendation feed blending similar tracks, similar artists, loved tracks, tags, and global charts. |
-| 🎸 **Genres** | Deep dive into detailed genre breakdowns and comprehensive listening analytics. |
-| 🪄 **Playlist Generator** | Instantly create smart playlists straight from Last.fm data|
-| 🔍 **Search** | Effortlessly find tracks, artists, albums, and even other Last.fm users. |
-| 👥 **Friends** | Seamlessly switch to and browse any of your Last.fm friends' profiles and stats in an instant. |
-| ⚙️ **Settings** | Enjoy full backup & restore capabilities alongside rich appearance customizations. |
+| 🏠 **Home Feed** | Recent tracks, most played, top tracks by period (7 days / 30 days / all-time), and a live Now Playing status. |
+| 🔮 **Discover** | A recommendation feed built from similar tracks, similar artists, loved tracks, tags, and global charts. |
+| 🎸 **Genres** | A breakdown of your genre listening habits. |
+| 🪄 **Playlist Generator** | Builds playlists straight from your Last.fm data. |
+| 🔍 **Search** | Tracks, artists, albums, and other Last.fm users. |
+| 👥 **Friends** | Switch to any friend's profile and browse their stats. |
+| ⚙️ **Settings** | Backup and restore, plus appearance customization. |
 
 ---
 
-## 🎚️ Custom Scrobbler *(Built from Scratch)*
+## The Scrobbler
 
-> **A robust scrobbler designed to 'just work' seamlessly in the background.**
+This is the part I built from scratch, since no existing app did quite what I wanted.
 
-- **Universal Detection**: Detects now-playing status natively via Android's MediaSession framework, working out-of-the-box with any music or streaming app you use.
-- **Granular Control**: Configurable per-app selection with smartly auto-detected music players.
-- **Adjustable Threshold**: Fine-tune your required scrobble threshold (% played).
-- **Edge-Case Handling**: Intelligently manages repeat tracks, resume actions, and multi-app switching without missing a beat.
-- **Smart Cleanup**: Automatically cleans up pesky YouTube Music "Topic" channel artist names for pristine Last.fm logs.
-- **Real-Time Insights**: Includes a live debug log so you can peek under the hood and see exactly what it’s doing in real time.
-
----
-
-## 🎨 Premium Design
-
-> **Crafted meticulously with Material 3 Expressive guidelines.**
-
-- **Expressive Components**: Custom shapes, organically grouped containers, real press animations, and satisfying haptic feedback throughout.
-- **Dynamic Theming**: Adapts to your wallpaper using Material You dynamic color, plus a stunning "Dynamic Now Playing" theme that extracts and applies accent colors directly from the currently playing track's artwork.
-- **Predictive Back Support**: Native Android Predictive Back gesture support for fluid, predictive navigation.
-- **Custom Typography**: Tailored variable typography powered by Google Sans Flex for a sleek, modern finish.
+- Detects what's playing through Android's own MediaSession framework — works with whatever app you're already using, no extra setup per-app beyond picking which apps to watch.
+- You choose which apps it pays attention to, and it can auto-detect common music players for you.
+- Scrobble threshold (% played before it counts) is adjustable.
+- Handles repeats, resuming a paused track, and switching between apps correctly — these are easy to get wrong, so I spent real time on them.
+- Strips the "- Topic" suffix YouTube Music adds to auto-generated channel names, so your artist names stay clean.
+- Has a live debug log in Settings, so if something isn't scrobbling you can actually see why instead of guessing.
 
 ---
 
-## 🛠️ Tech Stack
+## Design
 
-Built modern from the ground up:
-- **Kotlin + Jetpack Compose**
-- **Hilt** (Dependency Injection), **Room** (Local DB), **DataStore** (Preferences)
-- **Retrofit + OkHttp** (Networking)
-- **Last.fm API Integration**
+Built around Material 3 Expressive — grouped containers, real press animations, and haptics where they matter, not just sprinkled everywhere.
+
+- Material You dynamic color from your wallpaper, plus a Dynamic Now Playing theme that pulls its accent from whatever's currently playing.
+- Native Android Predictive Back support.
+- Custom variable typography using Google Sans Flex.
+
+---
+
+## Tech Stack
+
+- Kotlin + Jetpack Compose
+- Hilt, Room, DataStore
+- Retrofit + OkHttp
+- Last.fm API
 
 <br/>
 
-## 🚀 Getting Started
+## Getting Started
 
-1. **Install LastWave** on your Android device.
-2. Open the app and simply tap **Sign In** to authenticate via Last.fm securely using Chrome.
-3. Allow **Notification Access** so the built-in scrobbler can detect your currently playing music.
-4. Enjoy! Your stats, feeds, and smart playlists will load automatically.
+1. Install LastWave.
+2. Open it and tap **Connect with Last.fm** — this opens Chrome to sign in, so your password never touches the app itself.
+3. Grant notification access when asked, so the scrobbler can see what's playing.
+4. That's it — your stats and feed load automatically from there.
 
-## 💻 Building from Source
+## Building from Source
 
 ```bash
 git clone https://github.com/duxtami/LastWave-native.git
@@ -104,5 +101,5 @@ cd LastWave-native
 ```
 
 <div align="center">
-  <p>Crafted with 💖 and Material Design 3. Belonging to <a href="https://github.com/duxtami">DUXTAMI</a>.</p>
+  <p>Built by <a href="https://github.com/duxtami">Duxtami</a>.</p>
 </div>
