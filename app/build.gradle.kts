@@ -61,6 +61,12 @@ dependencies {
     implementation(libs.androidx.browser)
     implementation(libs.androidx.palette)
 
+    // Home-screen "Now Playing" widget (Glance — Compose-style APIs over
+    // RemoteViews), driven by the same MediaController access the local
+    // scrobbler (MediaScrobbleListenerService) already holds.
+    implementation(libs.glance.appwidget)
+    implementation(libs.glance.material3)
+
     // Required even in a Compose-only app: Theme.Material3.DayNight.NoActionBar
     // (used as the AndroidManifest/splash theme parent in themes.xml) is an XML
     // style resource shipped by this artifact. androidx.compose.material3 is

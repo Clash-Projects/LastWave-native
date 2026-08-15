@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LastWave</string>
+    <string name="widget_now_playing_description">Shows what\'s currently playing, with play/pause and skip</string>
 </resources>

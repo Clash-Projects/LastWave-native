@@ -10,6 +10,8 @@ import android.service.notification.NotificationListenerService
 import android.util.Log
 import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.repository.ScrobbleRepository
+import com.lastwave.app.widget.ActiveMediaSessionHolder
+import com.lastwave.app.widget.WidgetUpdater
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -287,6 +289,16 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         val session = watched.remove(token) ?: return
         session.callback?.let { runCatching { session.controller.unregisterCallback(it) } }
         session.scrobbleJob?.cancel()
+        // No more tracked sessions at all — fall back to the widget's
+        // empty "nothing playing" state instead of leaving stale info up,
+        // and drop the transport-control target since it's no longer valid.
+        if (watched.isEmpty()) {
+            ActiveMediaSessionHolder.controller = null
+            serviceScope.launch {
+                runCatching { WidgetUpdater.clear(applicationContext) }
+                    .onFailure { Log.w(TAG, "widget clear failed", it) }
+            }
+        }
     }
 
     private fun unbindAll() {
@@ -365,6 +377,7 @@ class MediaScrobbleListenerService : NotificationListenerService() {
             announceNowPlaying(key, artist, title, album)
         }
         scheduleScrobbleCheck(session, key, artist, title, album, durationMs)
+        publishWidgetState(session, session.playingSinceElapsed != null)
     }
 
     /** Fires on EVERY playback-state transition, not just track changes —
@@ -437,6 +450,30 @@ class MediaScrobbleListenerService : NotificationListenerService() {
                 session.accumulatedMs += SystemClock.elapsedRealtime() - since
             }
             session.playingSinceElapsed = null
+        }
+        publishWidgetState(session, playing)
+    }
+
+    /** Pushes the session's current title/artist/art/playing-state into the
+     *  home-screen widget (see widget/WidgetUpdater.kt) and points
+     *  [ActiveMediaSessionHolder] at this session's controller so the
+     *  widget's Play/Pause and Skip taps have a real target — same
+     *  MediaController this service already holds for scrobbling, no
+     *  separate connection needed. Best-effort: art may be null for apps
+     *  that don't publish album art on their MediaSession, in which case
+     *  the widget falls back to showing just the app icon. */
+    private fun publishWidgetState(session: WatchedSession, playing: Boolean) {
+        val metadata = session.controller.metadata ?: return
+        val rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
+            ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+        val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
+        if (rawArtist.isNullOrBlank() || title.isNullOrBlank()) return
+        val art = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        ActiveMediaSessionHolder.controller = session.controller
+        serviceScope.launch {
+            runCatching { WidgetUpdater.publish(applicationContext, title, cleanArtist(rawArtist), art, playing) }
+                .onFailure { Log.w(TAG, "widget publish failed", it) }
         }
     }
 
