@@ -101,4 +101,4 @@ cd LastWave-native
 
 <div align="center">
   <p>Built by  <a href="https://github.com/duxtami">Duxtami</a>.</p>
-</div> 🩵
+</div> 
