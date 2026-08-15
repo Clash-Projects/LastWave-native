@@ -1,122 +1,110 @@
-# LastWave
+<div align="center">
 
-**A beautiful Last.fm companion app for Android.**
+# ✨ LastWave
 
-This repo totally belong to [DUXTAMI](https://github.com/duxtami)
-
-LastWave connects to your Last.fm account to surface your scrobble history, genre analytics, and smart playlist generation — all wrapped in a clean Material You interface.
+**A fully-featured Last.fm client and scrobbler for Android, built with Material 3 Expressive design.**
 
 <p align="center">
-  <img src="Screenshot/Home.png" width="23%" />
-  <img src="Screenshot/Genres.png" width="23%" />
-  <img src="Screenshot/Generator.png" width="23%" />
-  <img src="Screenshot/Playlist.png" width="23%" />
+  <a href="https://github.com/duxtami/LastWave-native/stargazers">
+    <img src="https://img.shields.io/github/stars/duxtami/LastWave-native?style=for-the-badge&color=ffd0b0&labelColor=2d2d2d" alt="Stars" />
+  </a>
+  <a href="https://github.com/duxtami/LastWave-native/network/members">
+    <img src="https://img.shields.io/github/forks/duxtami/LastWave-native?style=for-the-badge&color=ffb4a2&labelColor=2d2d2d" alt="Forks" />
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/Platform-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white&labelColor=2d2d2d" alt="Platform" />
+  </a>
 </p>
 
----
+</div>
 
-## Features
+<br/>
 
-### 🏠 Home Dashboard
-Your listening life at a glance. See your total scrobble count, unique track/artist/album stats, and a live-updating track list sorted by recency or play count. A real-time listening timer shows your cumulative headphone time as it ticks up.
+<div align="center">
+  <img src="Screenshot/Screenshot_20260815-095128.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />&nbsp;
+  <img src="Screenshot/Screenshot_20260815-095135.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />&nbsp;
+  <img src="Screenshot/Screenshot_20260815-095140.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />&nbsp;
+  <img src="Screenshot/Screenshot_20260815-095145.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />
+</div>
+<br/>
+<div align="center">
+  <img src="Screenshot/Screenshot_20260815-095150.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />&nbsp;
+  <img src="Screenshot/Screenshot_20260815-095158.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />&nbsp;
+  <img src="Screenshot/Screenshot_20260815-095205.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />
+</div>
 
-<p align="center">
-  <img src="Screenshot/Home.png" width="30%" />
-  <img src="Screenshot/Home_2.png" width="30%" />
-</p>
+<br/>
 
----
-
-### 🎸 Genre Analytics
-Discover what your listening habits actually say about you. LastWave analyses the tags across your top artists and builds a ranked breakdown of your genres. Filter by the past 7 days, this month, the last 12 months, or your all-time history.
-
-<p align="center">
-  <img src="Screenshot/Genres.png" width="30%" />
-  <img src="Screenshot/Genres_2.png" width="30%" />
-</p>
-
----
-
-### ✨ Playlist Generator
-Turn your scrobble data into ready-to-use playlists. Choose from eight generation modes:
-
-| Mode | What it does |
-|---|---|
-| **Top Tracks** | Your most-played tracks of all time |
-| **Recent Tracks** | What you've been listening to lately |
-| **Similar Tracks** | Tracks similar to one you love |
-| **Similar Artists** | Discover artists like your favourites |
-| **By Tag / Genre** | Browse by genre — rock, lo-fi, jazz, and more |
-| **My Mix** | Smart blend of top, recent & similar |
-| **My Recommendations** | 30 fresh tracks picked just for you |
-| **My Library** | Re-discover the sounds of your past |
-
-<p align="center">
-  <img src="Screenshot/Generator.png" width="30%" />
-  <img src="Screenshot/Create.png" width="30%" />
-  <img src="Screenshot/Create_2.png" width="30%" />
-</p>
+## ✨ Highlights
+- 🎵 **Native Android app** — Built entirely with Jetpack Compose, targeting a flawless Material 3 Expressive feel.
+- 🔐 **One-tap Last.fm sign-in** — Secure web-auth flow via Chrome; no password is ever typed into the app.
+- 📡 **Built-in local scrobbler** — Seamlessly detects what's playing from any app on your phone and scrobbles it to Last.fm automatically, completely eliminating the need for a third-party scrobbler.
 
 ---
 
-### 💿 Playlist Manager
-All your generated playlists in one place. Regenerate a fresh shuffle, swap generation modes, or export to **CSV** or **M3U** to take your playlist anywhere.
+## 🎧 Core Features
 
-<p align="center">
-  <img src="Screenshot/Playlist.png" width="30%" />
-  <img src="Screenshot/Playlist_2.png" width="30%" />
-  <img src="Screenshot/Playlist_3.png" width="30%" />
-</p>
-
----
-
-### 🔍 Search
-Search across tracks, artists, and albums — all powered by the Last.fm catalogue.
-
-<p align="center">
-  <img src="Screenshot/Search.png" width="30%" />
-  <img src="Screenshot/Search_2.png" width="30%" />
-</p>
+| Feature | Description |
+|:---|:---|
+| 🏠 **Home Feed** | Track recent plays, most played, and top tracks across periods (7 days / 30 days / all-time) with a live "Now Playing" status. |
+| 🔮 **Discover** | Dive into a personalized recommendation feed blending similar tracks, similar artists, loved tracks, tags, and global charts. |
+| 🎸 **Genres** | Deep dive into detailed genre breakdowns and comprehensive listening analytics. |
+| 🪄 **Playlist Generator** | Instantly create smart playlists straight from Last.fm data|
+| 🔍 **Search** | Effortlessly find tracks, artists, albums, and even other Last.fm users. |
+| 👥 **Friends** | Seamlessly switch to and browse any of your Last.fm friends' profiles and stats in an instant. |
+| ⚙️ **Settings** | Enjoy full backup & restore capabilities alongside rich appearance customizations. |
 
 ---
 
-### 🎨 Themes & Personalisation
-Pick from a curated set of Material You colour palettes, or dial in your own accent colour using the built-in colour wheel.
+## 🎚️ Custom Scrobbler *(Built from Scratch)*
 
-<p align="center">
-  <img src="Screenshot/Settings.jpg" width="30%" />
-  <img src="Screenshot/Settings_2.png" width="30%" />
-  <img src="Screenshot/Colour_Wheel.png" width="30%" />
-</p>
+> **A robust scrobbler designed to 'just work' seamlessly in the background.**
 
----
-
-## Getting Started
-
-LastWave uses the free Last.fm API. You'll need a Last.fm account and a personal API key to get started.
-
-1. **Create a Last.fm API key** at [last.fm/api/account/create](https://www.last.fm/api/account/create) — it's free and takes about a minute.
-2. **Install LastWave** on your Android device.
-3. Open the app and go to **Settings**.
-4. Enter your **Last.fm username**, **API Key**, and **API Secret**.
-5. Head to the **Home** screen — your stats will load automatically.
+- **Universal Detection**: Detects now-playing status natively via Android's MediaSession framework, working out-of-the-box with any music or streaming app you use.
+- **Granular Control**: Configurable per-app selection with smartly auto-detected music players.
+- **Adjustable Threshold**: Fine-tune your required scrobble threshold (% played).
+- **Edge-Case Handling**: Intelligently manages repeat tracks, resume actions, and multi-app switching without missing a beat.
+- **Smart Cleanup**: Automatically cleans up pesky YouTube Music "Topic" channel artist names for pristine Last.fm logs.
+- **Real-Time Insights**: Includes a live debug log so you can peek under the hood and see exactly what it’s doing in real time.
 
 ---
 
-## Requirements
+## 🎨 Premium Design
 
-- Android device
-- A [Last.fm](https://www.last.fm) account
-- A free Last.fm API key
+> **Crafted meticulously with Material 3 Expressive guidelines.**
+
+- **Expressive Components**: Custom shapes, organically grouped containers, real press animations, and satisfying haptic feedback throughout.
+- **Dynamic Theming**: Adapts to your wallpaper using Material You dynamic color, plus a stunning "Dynamic Now Playing" theme that extracts and applies accent colors directly from the currently playing track's artwork.
+- **Predictive Back Support**: Native Android Predictive Back gesture support for fluid, predictive navigation.
+- **Custom Typography**: Tailored variable typography powered by Google Sans Flex for a sleek, modern finish.
 
 ---
 
-## Building from Source
+## 🛠️ Tech Stack
+
+Built modern from the ground up:
+- **Kotlin + Jetpack Compose**
+- **Hilt** (Dependency Injection), **Room** (Local DB), **DataStore** (Preferences)
+- **Retrofit + OkHttp** (Networking)
+- **Last.fm API Integration**
+
+<br/>
+
+## 🚀 Getting Started
+
+1. **Install LastWave** on your Android device.
+2. Open the app and simply tap **Sign In** to authenticate via Last.fm securely using Chrome.
+3. Allow **Notification Access** so the built-in scrobbler can detect your currently playing music.
+4. Enjoy! Your stats, feeds, and smart playlists will load automatically.
+
+## 💻 Building from Source
 
 ```bash
-git clone https://github.com/your-username/lastwave.git
-cd lastwave
+git clone https://github.com/duxtami/LastWave-native.git
+cd LastWave-native
 ./gradlew assembleDebug
 ```
 
-Open the project in Android Studio, or build via the Gradle wrapper. The app targets a standard Android SDK setup with no external library dependencies beyond the Android framework.# LastWave-native
+<div align="center">
+  <p>Crafted with 💖 and Material Design 3. Belonging to <a href="https://github.com/duxtami">DUXTAMI</a>.</p>
+</div>
