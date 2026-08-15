@@ -26,20 +26,21 @@ jobs:
       - name: Grant Gradle execute permission
         run: chmod +x gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
-
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
+      - name: Sign Release APK
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
         with:
-          name: LastWave-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Upload Release APK
+      - name: Upload Signed Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: LastWave-Release-APK
-          path: app/build/outputs/apk/release/*.apk
+          name: LastWave-Signed-Release-APK
+          path: ${{steps.sign_app.outputs.signedReleaseFile}}
