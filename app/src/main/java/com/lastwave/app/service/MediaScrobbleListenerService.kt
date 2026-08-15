@@ -76,6 +76,22 @@ private const val TAG = "MediaScrobbleListener"
  *    well before ever reaching the scrobble threshold, while now-playing
  *    (a one-shot call needing no sustained state) kept working. Re-keyed
  *    on MediaSession.Token, which has real value-based equality.
+ * 5) Two more gaps found from direct reports:
+ *    - Repeating the exact same track (most apps never re-fire
+ *      onMetadataChanged for a plain repeat/replay — title/artist/duration
+ *      are all unchanged) never re-armed scrobbling, so a track played
+ *      twice back-to-back only ever scrobbled once, and Last.fm's own "×2"
+ *      repeat badge never showed. Now detected via a playback-position
+ *      jump backward to near zero (see onStateChanged) instead of relying
+ *      on metadata, which is silent on a plain repeat.
+ *    - A track that scrobbled successfully while STILL actively playing
+ *      would immediately vanish from "Now Playing", even mid-song.
+ *      Last.fm's own API appears to treat a track that now has a scrobble
+ *      timestamp as no longer "now playing" from its side, and
+ *      updateNowPlaying is normally only sent once per track start/resume
+ *      — nothing told Last.fm "still playing" again right after the
+ *      scrobble landed. Now re-announced immediately after a successful
+ *      scrobble if playback hasn't stopped.
  */
 @AndroidEntryPoint
 class MediaScrobbleListenerService : NotificationListenerService() {
@@ -114,6 +130,10 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         // threshold we scheduled for the current trackKey was computed
         // from a real known duration, or the unknown-duration fallback.
         var durationKnown: Boolean = false
+        // See onStateChanged's repeat-play detection — the last playback
+        // position seen for this session, used purely to notice a big
+        // backward jump (a restart/repeat), not for anything else.
+        var lastPositionMs: Long = 0L
     }
 
     override fun onCreate() {
@@ -330,6 +350,13 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         session.trackKey = key
         session.accumulatedMs = 0L
         session.durationKnown = durationMs > 0L
+        session.scrobbledForKey = ""
+        // Reset so this new track's own position never gets compared
+        // against whatever the PREVIOUS track's position happened to be —
+        // otherwise a brand new track starting at 0:00 right after a
+        // previous track that was, say, 3 minutes in could itself get
+        // misread as a "repeat" by onStateChanged's jump-back check.
+        session.lastPositionMs = session.controller.playbackState?.position?.coerceAtLeast(0L) ?: 0L
         session.playingSinceElapsed = if (session.controller.playbackState?.state == PlaybackState.STATE_PLAYING) SystemClock.elapsedRealtime() else null
         session.startedAtEpochSec = System.currentTimeMillis() / 1000
         session.scrobbleJob?.cancel()
@@ -344,9 +371,54 @@ class MediaScrobbleListenerService : NotificationListenerService() {
      *  this is what makes resuming an already-playing track (same
      *  metadata, no onMetadataChanged at all) correctly re-announce
      *  now-playing, and what makes switching back to a different app's
-     *  paused session take over the now-playing slot again immediately. */
+     *  paused session take over the now-playing slot again immediately.
+     *
+     *  Also the ONLY place a repeat/replay of the exact same track can be
+     *  noticed at all: on repeat, most apps never fire onMetadataChanged
+     *  again (title/artist/album/duration are all literally unchanged),
+     *  so onTrackChanged's own key-based dedup has nothing to react to —
+     *  from that side, a repeat looks identical to "still playing the
+     *  first listen-through". The one real signal a repeat leaves behind
+     *  is the playback POSITION jumping backward to (near) zero while
+     *  still on the same track. That's what let Last.fm's own "×2" repeat
+     *  badge work before — this app's own scrobbler never re-armed
+     *  scrobbling for a second listen at all, so a repeated track only
+     *  ever counted once no matter how many times it played through. */
     private fun onStateChanged(session: WatchedSession, state: PlaybackState?) {
         val playing = state?.state == PlaybackState.STATE_PLAYING
+        val position = state?.position ?: -1L
+
+        if (position >= 0L && session.trackKey.isNotBlank()) {
+            // A backward jump of more than 8s, landing back near the very
+            // start (<5s in), while we'd already gotten meaningfully far
+            // into the track (>20s) — a plain seek-back-a-few-seconds
+            // (common, e.g. re-hearing a line) never satisfies all three,
+            // only an actual restart/repeat does.
+            val jumpedBack = session.lastPositionMs - position > 8_000L
+            val nearStart = position < 5_000L
+            val wasWellIntoIt = session.lastPositionMs > 20_000L
+            if (jumpedBack && nearStart && wasWellIntoIt) {
+                debugLog.log("Repeat detected for \"${session.trackKey}\" (was at ${session.lastPositionMs / 1000}s, now ${position / 1000}s) — re-arming scrobble")
+                session.scrobbleJob?.cancel()
+                session.accumulatedMs = 0L
+                session.scrobbledForKey = "" // the key part: lets this same track scrobble again
+                session.startedAtEpochSec = System.currentTimeMillis() / 1000
+                session.playingSinceElapsed = if (playing) SystemClock.elapsedRealtime() else null
+                val metadata = session.controller.metadata
+                val rawArtist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
+                    ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+                val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
+                if (!rawArtist.isNullOrBlank() && !title.isNullOrBlank()) {
+                    val artist = cleanArtist(rawArtist)
+                    val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)
+                    val durationMs = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
+                    if (playing) announceNowPlaying(session.trackKey, artist, title, album, forceReannounce = true)
+                    scheduleScrobbleCheck(session, session.trackKey, artist, title, album, durationMs)
+                }
+            }
+            session.lastPositionMs = position
+        }
+
         if (playing) {
             if (session.playingSinceElapsed == null) {
                 session.playingSinceElapsed = SystemClock.elapsedRealtime()
@@ -368,9 +440,9 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         }
     }
 
-    private fun announceNowPlaying(key: String, artist: String, title: String, album: String?) {
+    private fun announceNowPlaying(key: String, artist: String, title: String, album: String?, forceReannounce: Boolean = false) {
         if (!enabled || !submitNowPlaying) return
-        if (key == lastAnnouncedKey) return
+        if (key == lastAnnouncedKey && !forceReannounce) return
         lastAnnouncedKey = key
         serviceScope.launch {
             runCatching { scrobbleRepository.updateNowPlaying(artist, title, album) }
@@ -434,6 +506,26 @@ class MediaScrobbleListenerService : NotificationListenerService() {
                                         is ScrobbleRepository.Result.Failed -> "Scrobble FAILED for \"$title\": ${result.message}"
                                     },
                                 )
+                                // The actual explanation for "scrobbled fine,
+                                // but disappeared from Now Playing while the
+                                // song was still going": Last.fm's own API
+                                // appears to treat a track that now HAS a
+                                // scrobble timestamp as no longer "now
+                                // playing" from its own perspective, even
+                                // though the person is still actively
+                                // listening — updateNowPlaying is only ever
+                                // called once per track-start/resume, so
+                                // there was nothing telling Last.fm "still
+                                // playing" again right after the scrobble
+                                // landed. Re-announcing immediately after a
+                                // successful scrobble (bypassing the normal
+                                // same-key dedup, since this genuinely is a
+                                // fresh signal Last.fm needs) keeps the
+                                // now-playing status correct for however
+                                // much of the track is still left.
+                                if (result == ScrobbleRepository.Result.Success && session.trackKey == key && session.playingSinceElapsed != null) {
+                                    announceNowPlaying(key, artist, title, album, forceReannounce = true)
+                                }
                             }
                             .onFailure {
                                 debugLog.log("Scrobble THREW for \"$title\": ${it.message}")

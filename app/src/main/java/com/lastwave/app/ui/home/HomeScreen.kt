@@ -412,7 +412,7 @@ private fun LiveListenTimer(viewModel: HomeViewModel) {
         ) {
             Icon(
                 Icons.Filled.Headset,
-                contentDescription = "Listening time",
+                contentDescription = "Estimated lifetime listening time",
                 modifier = Modifier.size(18.dp),
                 tint = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -428,12 +428,25 @@ private fun LiveListenTimer(viewModel: HomeViewModel) {
 }
 
 private fun formatTimer(totalSeconds: Long): String {
-    if (totalSeconds <= 0) return "--:--:--:--"
+    // This is an ESTIMATED LIFETIME total (scrobble count × an average
+    // track length — see HomeRepository.HomeStats.timerBaseSeconds), not a
+    // session/session-elapsed timer, so it legitimately runs into weeks or
+    // months for anyone with a large scrobble history — 18,838 scrobbles
+    // at ~3.5 min average really is ~46 days of total listening. The raw
+    // "DD:HH:MM:SS" digits made that read as a broken/runaway counter
+    // instead of what it actually is; spelling out the units (matching how
+    // the rest of the app writes durations elsewhere) makes the same
+    // number immediately legible as "45 days" instead of a wall of colons.
+    if (totalSeconds <= 0) return "--"
     val d = totalSeconds / 86400
     val h = (totalSeconds % 86400) / 3600
     val m = (totalSeconds % 3600) / 60
     val s = totalSeconds % 60
-    return "%02d:%02d:%02d:%02d".format(d, h, m, s)
+    return when {
+        d > 0 -> "${d}d ${h}h ${m}m"
+        h > 0 -> "${h}h ${m}m ${s}s"
+        else -> "${m}m ${s}s"
+    }
 }
 
 @Composable
