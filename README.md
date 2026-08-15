@@ -21,16 +21,13 @@
 <br/>
 
 <div align="center">
-  <img src="Screenshot/Screenshot_20260815-095128.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />&nbsp;
-  <img src="Screenshot/Screenshot_20260815-095135.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />&nbsp;
-  <img src="Screenshot/Screenshot_20260815-095140.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />&nbsp;
-  <img src="Screenshot/Screenshot_20260815-095145.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />
-</div>
-<br/>
-<div align="center">
-  <img src="Screenshot/Screenshot_20260815-095150.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />&nbsp;
-  <img src="Screenshot/Screenshot_20260815-095158.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />&nbsp;
-  <img src="Screenshot/Screenshot_20260815-095205.png" width="24%" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" />
+  <img src="Screenshot/Screenshot_20260815-095128.png" width="23%" style="border-radius: 16px; margin: 1%;" />
+  <img src="Screenshot/Screenshot_20260815-095135.png" width="23%" style="border-radius: 16px; margin: 1%;" />
+  <img src="Screenshot/Screenshot_20260815-095140.png" width="23%" style="border-radius: 16px; margin: 1%;" />
+  <img src="Screenshot/Screenshot_20260815-095145.png" width="23%" style="border-radius: 16px; margin: 1%;" />
+  <img src="Screenshot/Screenshot_20260815-095150.png" width="23%" style="border-radius: 16px; margin: 1%;" />
+  <img src="Screenshot/Screenshot_20260815-095158.png" width="23%" style="border-radius: 16px; margin: 1%;" />
+  <img src="Screenshot/Screenshot_20260815-095205.png" width="23%" style="border-radius: 16px; margin: 1%;" />
 </div>
 
 <br/>
