@@ -41,4 +41,5 @@ Thumbs.db
 .acside/
 
 # Screenshots
-Screenshot/
+Screenshot/release.jks
+keystore_credentials.txt
