@@ -11,6 +11,9 @@ import com.lastwave.app.util.FileExportHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -42,20 +45,41 @@ class PlaylistRepository @Inject constructor(
     private val dao: SavedPlaylistDao,
     private val fileExportHelper: FileExportHelper,
     private val exportEvents: PlaylistExportEvents,
+    private val publicMirror: PlaylistPublicMirror,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val changes = _changes.asSharedFlow()
 
     // Fire-and-forget scope for the public Downloads export copy — outlives
     // any single screen's viewModelScope (it's a Singleton), and its own
     // failure must never fail or delay save() itself.
     private val exportScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val startupSync = exportScope.async {
+        runCatching { publicMirror.restoreIfDatabaseEmpty() }
+            .onSuccess { restored ->
+                if (restored > 0) _changes.tryEmit(Unit)
+            }
+            .onFailure { error ->
+                Log.e(TAG, "Playlist JSON startup sync failed; continuing with Room", error)
+            }
+    }
+
+    private suspend fun awaitStartupSync() {
+        startupSync.await()
+    }
 
     /** Newest first — matches _plRenderSaved()'s display order (the
      *  original reverses its append-ordered array before rendering). */
-    suspend fun getAll(): List<SavedPlaylist> =
-        dao.getAll().map { it.toDomain() }.sortedByDescending { it.createdAtMillis }
+    suspend fun getAll(): List<SavedPlaylist> {
+        awaitStartupSync()
+        return dao.getAll().map { it.toDomain() }.sortedByDescending { it.createdAtMillis }
+    }
 
-    suspend fun getById(id: Long): SavedPlaylist? = dao.getById(id)?.toDomain()
+    suspend fun getById(id: Long): SavedPlaylist? {
+        awaitStartupSync()
+        return dao.getById(id)?.toDomain()
+    }
 
     /**
      * Saves a new playlist. Guards against accidental double-saves the same
@@ -66,7 +90,9 @@ class PlaylistRepository @Inject constructor(
     suspend fun save(title: String, subtitle: String, mode: String, tracks: List<GeneratedTrack>, discoverSignature: String? = null): SavedPlaylist {
         val existing = getAll()
         val firstKey = tracks.firstOrNull()?.key
-        existing.firstOrNull { it.title.equals(title, ignoreCase = true) && it.tracks.firstOrNull()?.key == firstKey }
+        existing.firstOrNull {
+            it.mode == mode && it.title.equals(title, ignoreCase = true) && it.tracks.firstOrNull()?.key == firstKey
+        }
             ?.let { return it }
 
         val entity = SavedPlaylistEntity(
@@ -79,24 +105,97 @@ class PlaylistRepository @Inject constructor(
             discoverSignature = discoverSignature,
         )
         dao.upsert(entity)
-        dao.trimToNewest(MAX_SAVED_PLAYLISTS)
+        dao.trimGeneratedToNewest(MAX_SAVED_PLAYLISTS)
         val saved = entity.toDomain()
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
 
         // Best-effort copy to the public Downloads folder. Room is already
         // the source of truth the app reads from, so this never blocks the
         // caller — and a failure here doesn't mean the playlist was lost.
-        exportScope.launch {
-            fileExportHelper.savePlaylistToPublicDownloads(saved.title, saved.tracks)
-                .onFailure { e ->
-                    Log.e(TAG, "Public Downloads export failed for \"${saved.title}\"", e)
-                    exportEvents.notifyFailure("Couldn't save \"${saved.title}\" to Downloads")
-                }
+        if (mode != "custom") {
+            exportScope.launch {
+                fileExportHelper.savePlaylistToPublicDownloads(saved.title, saved.tracks)
+                    .onFailure { e ->
+                        Log.e(TAG, "Public Downloads export failed for \"${saved.title}\"", e)
+                        exportEvents.notifyFailure("Couldn't save \"${saved.title}\" to Downloads")
+                    }
+            }
         }
 
         return saved
     }
 
-    suspend fun delete(id: Long) = dao.deleteById(id)
+    suspend fun createCustom(title: String): SavedPlaylist {
+        val cleanTitle = title.trim()
+        getAll().firstOrNull { it.mode == "custom" && it.title.equals(cleanTitle, ignoreCase = true) }
+            ?.let { return it }
+        return save(
+            title = cleanTitle,
+            subtitle = "Custom playlist",
+            mode = "custom",
+            tracks = emptyList(),
+        )
+    }
+
+    suspend fun rename(id: Long, title: String): SavedPlaylist? {
+        awaitStartupSync()
+        val entity = dao.getById(id) ?: return null
+        val cleanTitle = title.trim()
+        if (cleanTitle.isBlank()) return entity.toDomain()
+        val updated = entity.copy(title = cleanTitle)
+        dao.upsert(updated)
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
+        return updated.toDomain()
+    }
+
+    suspend fun addTrack(id: Long, track: GeneratedTrack): SavedPlaylist? {
+        awaitStartupSync()
+        val entity = dao.getById(id) ?: return null
+        val playlist = entity.toDomain()
+        if (playlist.mode != "custom" || playlist.tracks.any { it.key == track.key }) return playlist
+        val updatedTracksJson = json.encodeToString((playlist.tracks + track).map { it.toStored() })
+        val updated = entity.copy(tracksJson = updatedTracksJson)
+        dao.upsert(updated)
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
+        return updated.toDomain()
+    }
+
+    suspend fun removeTrack(id: Long, index: Int): SavedPlaylist? {
+        awaitStartupSync()
+        val entity = dao.getById(id) ?: return null
+        val playlist = entity.toDomain()
+        if (playlist.mode != "custom" || index !in playlist.tracks.indices) return playlist
+        val updatedTracks = playlist.tracks.toMutableList().apply { removeAt(index) }
+        val updated = entity.copy(tracksJson = json.encodeToString(updatedTracks.map { it.toStored() }))
+        dao.upsert(updated)
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
+        return updated.toDomain()
+    }
+
+    suspend fun delete(id: Long) {
+        awaitStartupSync()
+        dao.deleteById(id)
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
+    }
+
+    suspend fun clearAll() {
+        awaitStartupSync()
+        dao.clear()
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
+    }
+
+    fun publicMirrorPlaylistCount(content: String): Int? = publicMirror.playlistCount(content)
+
+    suspend fun importPublicMirror(content: String): Result<Int> {
+        awaitStartupSync()
+        return publicMirror.importAndMerge(content).onSuccess { _changes.tryEmit(Unit) }
+    }
 
     suspend fun titles(): List<String> = getAll().map { it.title }
 
@@ -108,6 +207,13 @@ class PlaylistRepository @Inject constructor(
 
     suspend fun findByDiscoverSignature(signature: String): SavedPlaylist? =
         getAll().firstOrNull { it.discoverSignature == signature }
+
+    private suspend fun syncPublicMirror() {
+        publicMirror.writeFromDatabase().onFailure { e ->
+            Log.e(TAG, "Public playlist JSON sync failed", e)
+            exportEvents.notifyFailure("Couldn't sync playlist JSON to Downloads")
+        }
+    }
 
     private fun SavedPlaylistEntity.toDomain(): SavedPlaylist {
         val tracks = try {

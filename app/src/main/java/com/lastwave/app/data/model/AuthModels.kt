@@ -11,6 +11,9 @@ sealed interface AuthState {
      *  a valid session exists. */
     data object Unknown : AuthState
     data object SignedOut : AuthState
+    /** Full account-free player/search mode. Last.fm-only profile screens
+     *  simply have no remote profile data until an account is connected. */
+    data object Guest : AuthState
     data object SigningIn : AuthState
     data class SignedIn(val username: String) : AuthState
     data class Error(val message: String) : AuthState

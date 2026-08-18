@@ -2,6 +2,7 @@ package com.lastwave.app.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,7 +24,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
@@ -222,6 +223,25 @@ fun HomeScreen(
                 val rows = remember(uiState.allTracks, uiState.sortMode, uiState.nowPlaying, uiState.topTracksOverall, uiState.topTracks7Days, uiState.topTracks30Days) {
                     uiState.visibleRows()
                 }
+                val playbackQueue = remember(rows) {
+                    rows.mapNotNull { row ->
+                        (row as? HomeRow.Track)?.track?.let { track ->
+                            com.lastwave.app.playback.PlayableTrack(
+                                title = track.name,
+                                artist = track.artist,
+                                artworkUrl = track.artworkUrl,
+                            )
+                        }
+                    }
+                }
+                val playbackIndexByRow = remember(rows) {
+                    var nextPlaybackIndex = 0
+                    IntArray(rows.size) { rowIndex ->
+                        if (rows[rowIndex] is HomeRow.Track) nextPlaybackIndex++ else -1
+                    }
+                }
+                val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
+                val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
 
                 Column(
                     Modifier
@@ -244,9 +264,9 @@ fun HomeScreen(
                         ),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        items(
+                        itemsIndexed(
                             rows,
-                            key = { row ->
+                            key = { _, row ->
                                 when (row) {
                                     is HomeRow.DateHeader -> "date_${row.label}"
                                     // isNowPlaying deliberately left OUT of
@@ -296,17 +316,36 @@ fun HomeScreen(
                                     }
                                 }
                             },
-                            contentType = { row ->
+                            contentType = { _, row ->
                                 when (row) {
                                     is HomeRow.DateHeader -> "date"
                                     is HomeRow.Track -> "track"
                                 }
                             },
-                        ) { row ->
+                        ) { rowIndex, row ->
                             Box(Modifier.animateItem()) {
                                 when (row) {
                                     is HomeRow.DateHeader -> DateHeaderRow(row.label)
-                                    is HomeRow.Track -> TrackRow(row.track, row.badge, onMenuClick = { menuTrack = row.track })
+                                    is HomeRow.Track -> TrackRow(
+                                        track = row.track,
+                                        badge = row.badge,
+                                        onClick = {
+                                            musicPlayer.playQueue(
+                                                tracks = playbackQueue,
+                                                startIndex = playbackIndexByRow[rowIndex],
+                                            )
+                                        },
+                                        onLongClick = {
+                                            addToPlaylist(
+                                                com.lastwave.app.playback.PlayableTrack(
+                                                    title = row.track.name,
+                                                    artist = row.track.artist,
+                                                    artworkUrl = row.track.artworkUrl,
+                                                ),
+                                            )
+                                        },
+                                        onMenuClick = { menuTrack = row.track },
+                                    )
                                 }
                             }
                         }
@@ -770,8 +809,14 @@ private fun DateHeaderRow(label: String) {
 }
 
 @Composable
-private fun TrackRow(track: HomeTrack, badge: String?, onMenuClick: () -> Unit) {
-    val context = LocalContext.current
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun TrackRow(
+    track: HomeTrack,
+    badge: String?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onMenuClick: () -> Unit,
+) {
     val isNowPlaying = track.isNowPlaying
     val secondaryTextColor =
         if (isNowPlaying) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
@@ -780,16 +825,10 @@ private fun TrackRow(track: HomeTrack, badge: String?, onMenuClick: () -> Unit) 
         shape = if (isNowPlaying) NowPlayingCardShape else TrackRowShape,
         color = if (isNowPlaying) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
         tonalElevation = if (isNowPlaying) 1.dp else 0.dp,
-        onClick = {
-            val q = java.net.URLEncoder.encode("${track.name} ${track.artist}", "UTF-8")
-            try {
-                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/results?search_query=$q")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-            } catch (e: Exception) { }
-        },
         modifier = if (isNowPlaying) {
-            Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            Modifier.fillMaxWidth().padding(vertical = 4.dp).combinedClickable(onClick = onClick, onLongClick = onLongClick)
         } else {
-            Modifier.fillMaxWidth()
+            Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick)
         },
     ) {
         Row(

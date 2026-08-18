@@ -99,6 +99,10 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch { authRepository.signOut() }
     }
 
+    fun continueAsGuest() {
+        viewModelScope.launch { authRepository.continueAsGuest() }
+    }
+
     fun dismissError() {
         authRepository.clearError()
         _webAuthState.value = WebAuthState.Idle

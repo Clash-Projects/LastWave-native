@@ -4,7 +4,6 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -34,15 +33,19 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -55,6 +58,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -100,6 +104,8 @@ import java.util.Locale
 @Composable
 fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsState()
+    val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
+    val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
 
     // Re-reads from Room whenever this tab regains visibility — this is how
     // a playlist just saved by Generate shows up here without polling.
@@ -117,6 +123,26 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
                 title = "Playlist",
                 subtitle = "${state.playlists.size} Playlists \u00b7 ${state.playlists.sumOf { it.tracks.size }} Tracks",
                 actions = {
+                    IconButton(
+                        onClick = viewModel::openCreateDialog,
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = "Create custom playlist")
+                    }
+                    IconButton(
+                        onClick = viewModel::shuffleAllPlaylists,
+                        enabled = !state.isShufflingPlaylists && state.playlists.any { it.tracks.isNotEmpty() },
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        if (state.isShufflingPlaylists) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(Icons.Filled.Shuffle, contentDescription = "Shuffle 25 songs from each playlist")
+                        }
+                    }
                     Box {
                         Surface(
                             onClick = { sortMenuExpanded = true },
@@ -221,7 +247,32 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
                                     onExport = { viewModel.openExportSheet(playlist.id) },
                                     onRegenerate = { viewModel.regenerate(playlist.id) },
                                     onGenerateSimilar = { viewModel.generateSimilar(playlist.id) },
+                                    onRename = { viewModel.requestRename(playlist.id) },
                                     onDelete = { viewModel.requestDelete(playlist.id) },
+                                    onRemoveTrack = { trackIndex -> viewModel.removeTrack(playlist.id, trackIndex) },
+                                    onPlay = { startIndex ->
+                                        musicPlayer.playQueue(
+                                            playlist.tracks.map { track ->
+                                                com.lastwave.app.playback.PlayableTrack(
+                                                    title = track.name,
+                                                    artist = track.artist,
+                                                    album = track.album,
+                                                    artworkUrl = track.artworkUrl,
+                                                )
+                                            },
+                                            startIndex = startIndex,
+                                        )
+                                    },
+                                    onAddTrackToPlaylist = { track ->
+                                        addToPlaylist(
+                                            com.lastwave.app.playback.PlayableTrack(
+                                                title = track.name,
+                                                artist = track.artist,
+                                                album = track.album,
+                                                artworkUrl = track.artworkUrl,
+                                            ),
+                                        )
+                                    },
                                     onTrackMenu = { track -> menuTarget = playlist.id to track },
                                 )
                             }
@@ -269,6 +320,47 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
     }
 
     // ── Delete-scrobble authorization-required dialog ──
+    if (state.createDialogVisible) {
+        var title by remember(state.createDialogVisible) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = viewModel::dismissCreateDialog,
+            title = { Text("Create custom playlist") },
+            text = {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Playlist name") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.createCustomPlaylist(title) }, enabled = title.isNotBlank()) { Text("Create") }
+            },
+            dismissButton = { TextButton(onClick = viewModel::dismissCreateDialog) { Text("Cancel") } },
+        )
+    }
+
+    state.renamePlaylistId?.let { playlistId ->
+        val playlist = state.playlists.firstOrNull { it.id == playlistId }
+        var title by remember(playlistId) { mutableStateOf(playlist?.title.orEmpty()) }
+        AlertDialog(
+            onDismissRequest = viewModel::dismissRename,
+            title = { Text("Rename playlist") },
+            text = {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Playlist name") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.renamePlaylist(title) }, enabled = title.isNotBlank()) { Text("Rename") }
+            },
+            dismissButton = { TextButton(onClick = viewModel::dismissRename) { Text("Cancel") } },
+        )
+    }
+
     if (state.deleteScrobbleAuthRequired) {
         AlertDialog(
             onDismissRequest = viewModel::dismissDeleteScrobbleAuthRequired,
@@ -351,7 +443,11 @@ private fun PlaylistCard(
     onExport: () -> Unit,
     onRegenerate: () -> Unit,
     onGenerateSimilar: () -> Unit,
+    onRename: () -> Unit,
     onDelete: () -> Unit,
+    onRemoveTrack: (Int) -> Unit,
+    onPlay: (Int) -> Unit,
+    onAddTrackToPlaylist: (GeneratedTrack) -> Unit,
     onTrackMenu: (GeneratedTrack) -> Unit,
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -393,20 +489,49 @@ private fun PlaylistCard(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                 )
                 Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.End) {
-                    com.lastwave.app.ui.common.ExpressiveRefreshButton(
-                        isRefreshing = isRegenerating,
-                        onClick = onRegenerate,
-                        contentDescription = "Regenerate",
-                    )
+                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                        Surface(
+                            onClick = { onPlay(0) },
+                            enabled = playlist.tracks.isNotEmpty(),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            shadowElevation = 4.dp,
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Filled.PlayArrow, contentDescription = "Play playlist", modifier = Modifier.size(24.dp))
+                            }
+                        }
+                    }
+                    Spacer(Modifier.width(4.dp))
+                    if (playlist.mode == "custom") {
+                        IconButton(onClick = onRename) { Icon(Icons.Filled.Edit, contentDescription = "Rename playlist") }
+                    } else {
+                        com.lastwave.app.ui.common.ExpressiveRefreshButton(
+                            isRefreshing = isRegenerating,
+                            onClick = onRegenerate,
+                            contentDescription = "Regenerate",
+                        )
+                    }
                     IconButton(onClick = onExport) { Icon(Icons.Filled.Download, contentDescription = "Export") }
-                    IconButton(onClick = onGenerateSimilar, enabled = !isGeneratingSimilar) {
-                        if (isGeneratingSimilar) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp) else Icon(Icons.Filled.Shuffle, contentDescription = "Generate Similar")
+                    if (playlist.mode != "custom") {
+                        IconButton(onClick = onGenerateSimilar, enabled = !isGeneratingSimilar) {
+                            if (isGeneratingSimilar) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp) else Icon(Icons.Filled.Shuffle, contentDescription = "Generate Similar")
+                        }
                     }
                     IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error) }
                 }
                 Column(Modifier.padding(bottom = 8.dp)) {
                     playlist.tracks.forEachIndexed { index, track ->
-                        TrackRow(index = index + 1, track = track, onMenuClick = { onTrackMenu(track) })
+                        TrackRow(
+                            index = index + 1,
+                            track = track,
+                            onClick = { onPlay(index) },
+                            onLongClick = { onAddTrackToPlaylist(track) },
+                            onRemove = if (playlist.mode == "custom") ({ onRemoveTrack(index) }) else null,
+                            onMenuClick = { onTrackMenu(track) },
+                        )
                     }
                 }
             }
@@ -445,17 +570,19 @@ private fun CoverGrid(tracks: List<GeneratedTrack>) {
 }
 
 @Composable
-private fun TrackRow(index: Int, track: GeneratedTrack, onMenuClick: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun TrackRow(
+    index: Int,
+    track: GeneratedTrack,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onRemove: (() -> Unit)?,
+    onMenuClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                val q = java.net.URLEncoder.encode("${track.name} ${track.artist}", "UTF-8")
-                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/results?search_query=$q"))
-                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                try { context.startActivity(intent) } catch (e: Exception) { }
-            }
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -465,6 +592,11 @@ private fun TrackRow(index: Int, track: GeneratedTrack, onMenuClick: () -> Unit)
         Column(Modifier.weight(1f)) {
             Text(track.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(track.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (onRemove != null) {
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Filled.Delete, contentDescription = "Remove from playlist", tint = MaterialTheme.colorScheme.error)
+            }
         }
         com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenuClick)
     }

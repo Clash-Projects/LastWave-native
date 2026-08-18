@@ -9,6 +9,7 @@ import com.lastwave.app.data.local.db.SavedPlaylistDao
 import com.lastwave.app.data.local.db.SavedPlaylistEntity
 import com.lastwave.app.data.local.db.SeenTrackDao
 import com.lastwave.app.data.local.db.SeenTrackEntity
+import com.lastwave.app.data.playlist.PlaylistPublicMirror
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -75,6 +76,7 @@ class BackupRepository @Inject constructor(
     private val dataStore: DataStore<Preferences>,
     private val playlistDao: SavedPlaylistDao,
     private val seenTrackDao: SeenTrackDao,
+    private val playlistPublicMirror: PlaylistPublicMirror,
 ) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
 
@@ -123,20 +125,19 @@ class BackupRepository @Inject constructor(
                 backup.prefs.strings.forEach { (k, v) -> mutablePrefs[stringPreferencesKey(k)] = v }
                 backup.prefs.booleans.forEach { (k, v) -> mutablePrefs[booleanPreferencesKey(k)] = v }
             }
-            playlistDao.clear()
-            backup.playlists.forEach { p ->
-                playlistDao.upsert(SavedPlaylistEntity(p.id, p.title, p.subtitle, p.mode, p.tracksJson, p.createdAtMillis, p.discoverSignature))
-            }
+            playlistDao.replaceAll(backup.playlists.map { p ->
+                SavedPlaylistEntity(p.id, p.title, p.subtitle, p.mode, p.tracksJson, p.createdAtMillis, p.discoverSignature)
+            })
             if (backup.seenTracks.isNotEmpty()) {
                 seenTrackDao.clear()
                 seenTrackDao.upsertAll(backup.seenTracks.map { SeenTrackEntity(it.trackKey, it.lastSeenMillis) })
             }
+            playlistPublicMirror.writeFromDatabase()
             RestoreResult.Success(backup.playlists.size, backup.seenTracks.size)
         } catch (e: Exception) {
             try {
                 previousPrefsSnapshot?.let { rollback(it) }
-                playlistDao.clear()
-                previousPlaylists.forEach { playlistDao.upsert(it) }
+                playlistDao.replaceAll(previousPlaylists)
                 seenTrackDao.clear()
                 seenTrackDao.upsertAll(previousSeenTracks)
             } catch (rollbackError: Exception) {

@@ -28,3 +28,13 @@
 # kept explicitly here too since this file is the project's own source of truth.
 -keep class dagger.hilt.internal.aggregatedroot.codegen.** { *; }
 -keep class hilt_aggregated_deps.** { *; }
+
+# NewPipe's YouTube extractor loads service implementations and its
+# JavaScript deobfuscation engine dynamically.
+-keep class org.schabi.newpipe.extractor.** { *; }
+-dontwarn org.schabi.newpipe.extractor.**
+-keep class org.jsoup.** { *; }
+-dontwarn org.jsoup.**
+-dontwarn java.beans.**
+-dontwarn org.mozilla.javascript.**
+-dontwarn javax.script.**

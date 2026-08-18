@@ -24,7 +24,7 @@ interface LastFmApiService {
     suspend fun get(@QueryMap params: Map<String, String>): Response<ResponseBody>
 
     /** Signed POST — used for auth.getSession and any authenticated write
-     *  (scrobble, love/unlove, playlist ops). Params must already include
+     *  (scrobble and love/unlove). Params must already include
      *  api_sig and format, added by the caller after signing. */
     @FormUrlEncoded
     @POST("2.0/")

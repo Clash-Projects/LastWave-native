@@ -61,6 +61,8 @@ class AuthRepository @Inject constructor(
     ) { session, transient ->
         transient ?: if (session.isAuthenticated) {
             AuthState.SignedIn(session.username)
+        } else if (session.guestMode) {
+            AuthState.Guest
         } else {
             AuthState.SignedOut
         }
@@ -71,6 +73,11 @@ class AuthRepository @Inject constructor(
             LastFmSigner.normalizeKey(apiKey),
             LastFmSigner.normalizeKey(apiSecret),
         )
+    }
+
+    suspend fun continueAsGuest() {
+        transientState.value = null
+        sessionPreferences.setGuestMode(true)
     }
 
     /**

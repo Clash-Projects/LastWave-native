@@ -210,11 +210,11 @@ fun SettingsScreen(
     // hides anything that doesn't match — the user's own backup file would
     // silently not show up. Real validation happens right after the file is
     // read (stagePendingRestore), so being permissive here is safe.
-    val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
                 val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                if (text != null) viewModel.stagePendingRestore(text)
+                if (text != null) viewModel.stagePendingRestore(text, uri)
             } catch (e: Exception) { }
         }
     }
@@ -426,8 +426,8 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = "Restore",
-                                subtitle = "Load data from a backup file",
-                                onClick = { restoreLauncher.launch("*/*") },
+                                subtitle = "Load a backup or playlist JSON",
+                                onClick = { restoreLauncher.launch(arrayOf("*/*")) },
                                 position = position,
                             )
                         }
@@ -474,11 +474,20 @@ fun SettingsScreen(
 
     // -- Restore confirm --
     if (state.showRestoreConfirm) {
+        val isPlaylistMirror = state.pendingRestoreKind == PendingRestoreKind.PLAYLIST_MIRROR
         AlertDialog(
             onDismissRequest = viewModel::dismissRestoreConfirm,
-            title = { Text("Restore backup?") },
-            text = { Text("This will replace your current data with ${state.pendingRestorePlaylistCount ?: 0} playlist(s) and all settings from the backup file.") },
-            confirmButton = { TextButton(onClick = { viewModel.confirmRestore(onBack) }) { Text("Restore") } },
+            title = { Text(if (isPlaylistMirror) "Sync playlist JSON?" else "Restore backup?") },
+            text = {
+                Text(
+                    if (isPlaylistMirror) {
+                        "This will merge ${state.pendingRestorePlaylistCount ?: 0} playlist(s) from the local JSON file and reconnect automatic syncing."
+                    } else {
+                        "This will replace your current data with ${state.pendingRestorePlaylistCount ?: 0} playlist(s) and all settings from the backup file."
+                    },
+                )
+            },
+            confirmButton = { TextButton(onClick = { viewModel.confirmRestore(onBack) }) { Text(if (isPlaylistMirror) "Sync" else "Restore") } },
             dismissButton = { TextButton(onClick = viewModel::dismissRestoreConfirm) { Text("Cancel") } },
         )
     }

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 
 /**
@@ -43,6 +44,9 @@ interface SavedPlaylistDao {
     @Upsert
     suspend fun upsert(entity: SavedPlaylistEntity)
 
+    @Upsert
+    suspend fun upsertAll(entities: List<SavedPlaylistEntity>)
+
     @Query("DELETE FROM saved_playlists WHERE id = :id")
     suspend fun deleteById(id: Long)
 
@@ -51,11 +55,19 @@ interface SavedPlaylistDao {
 
     /** Port of PL_MAX_SAVED = 20 — keeps only the newest 20 rows. */
     @Query(
-        """DELETE FROM saved_playlists WHERE id NOT IN
-           (SELECT id FROM saved_playlists ORDER BY createdAtMillis DESC LIMIT :max)""",
+        """DELETE FROM saved_playlists
+           WHERE mode != 'custom' AND id NOT IN
+           (SELECT id FROM saved_playlists WHERE mode != 'custom'
+            ORDER BY createdAtMillis DESC LIMIT :max)""",
     )
-    suspend fun trimToNewest(max: Int)
+    suspend fun trimGeneratedToNewest(max: Int)
 
     @Query("DELETE FROM saved_playlists")
     suspend fun clear()
+
+    @Transaction
+    suspend fun replaceAll(entities: List<SavedPlaylistEntity>) {
+        clear()
+        upsertAll(entities)
+    }
 }

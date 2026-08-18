@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.lastwave.app.data.artwork.ArtworkNormalizer
@@ -43,7 +44,7 @@ fun ArtworkImage(
 ) {
     if (!embeddedUrl.isNullOrBlank()) {
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
-            AsyncImage(model = embeddedUrl, contentDescription = null, modifier = Modifier.fillMaxSize())
+            AsyncImage(model = embeddedUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
         }
         return
     }
@@ -65,6 +66,7 @@ fun ArtworkImage(
             !resolvedUrl.isNullOrBlank() -> AsyncImage(
                 model = resolvedUrl,
                 contentDescription = null,
+                contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
             resolvedUrl == "" -> Icon(

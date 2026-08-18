@@ -62,6 +62,7 @@ fun LoginScreen(
     onReturnedFromBrowser: () -> Unit,
     onCancelWebAuth: () -> Unit,
     onSignOut: () -> Unit,
+    onContinueWithoutAccount: () -> Unit,
     onDismissError: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -114,7 +115,7 @@ fun LoginScreen(
             }
             Text("LastWave", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Connect your Last.fm account to get started",
+                "Stream music now, with or without an account",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -161,8 +162,17 @@ fun LoginScreen(
                                 }
                             }
                             Spacer(Modifier.height(12.dp))
+                            OutlinedButton(
+                                onClick = onContinueWithoutAccount,
+                                enabled = !busy,
+                                shape = ExpressivePillShape,
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                            ) {
+                                Text("Continue without account")
+                            }
+                            Spacer(Modifier.height(12.dp))
                             Text(
-                                "Opens Last.fm in your browser to approve LastWave \u2014 no password typed into this app.",
+                                "A Last.fm account is optional and is only needed to sync plays to a Last.fm profile.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,

@@ -28,6 +28,9 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.QueuePlayNext
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Shuffle
@@ -60,6 +63,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import com.lastwave.app.ui.generate.MixLauncher
+import com.lastwave.app.playback.PlayableTrack
+import com.lastwave.app.ui.player.LocalMusicPlayer
+import com.lastwave.app.ui.player.LocalAddToPlaylist
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
@@ -104,11 +110,6 @@ class ExploreGenreMenuViewModel @Inject constructor(private val genreExplorer: c
  *  ACTION_VIEW opens the app directly — no explicit package targeting (and
  *  the manifest <queries> visibility declaration that would need) required.
  *  Falls back to the YouTube Music website when the app isn't installed. */
-private fun youtubeMusicSearchUrl(track: String, artist: String): String {
-    val q = java.net.URLEncoder.encode("$track $artist", "UTF-8")
-    return "https://music.youtube.com/search?q=$q"
-}
-
 private fun openUrl(context: Context, url: String) {
     if (url.isBlank()) return
     try {
@@ -175,6 +176,8 @@ fun TrackContextMenuSheet(
     exploreGenreViewModel: ExploreGenreMenuViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
+    val musicPlayer = LocalMusicPlayer.current
+    val addToPlaylist = LocalAddToPlaylist.current
     val clipboard = LocalClipboardManager.current
     val sheetState = rememberModalBottomSheetState()
     val startMix = onStartMix ?: { name: String, artist: String -> startMixViewModel.startMix(name, artist) }
@@ -249,8 +252,12 @@ fun TrackContextMenuSheet(
                             )
                         }
                     }
+                    val playable = PlayableTrack(title = t.name, artist = t.artist)
+                    add { pos -> MenuActionRow(Icons.Filled.PlayCircle, "Play in LastWave", position = pos) { musicPlayer.play(playable); onDismiss() } }
+                    add { pos -> MenuActionRow(Icons.Filled.QueuePlayNext, "Play next", position = pos) { musicPlayer.playNext(playable); onDismiss() } }
+                    add { pos -> MenuActionRow(Icons.Filled.QueueMusic, "Add to queue", position = pos) { musicPlayer.addToQueue(playable); onDismiss() } }
+                    add { pos -> MenuActionRow(Icons.Filled.PlaylistAdd, "Add to playlist", position = pos) { addToPlaylist(playable); onDismiss() } }
                     add { pos -> MenuActionRow(Icons.Filled.Language, "Open in Last.fm", position = pos) { openUrl(context, buildLastFmUrl(target)); onDismiss() } }
-                    add { pos -> MenuActionRow(Icons.Filled.PlayCircle, "Open in YouTube Music", position = pos) { openUrl(context, youtubeMusicSearchUrl(t.name, t.artist)); onDismiss() } }
                     if (onRefreshArtwork != null) {
                         add { pos -> MenuActionRow(Icons.Filled.Refresh, "Refresh Cover Art", position = pos) { onRefreshArtwork(); onDismiss() } }
                     }

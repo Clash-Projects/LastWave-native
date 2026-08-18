@@ -267,16 +267,13 @@ private fun DiscoverCard(
     onMenu: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     com.lastwave.app.ui.common.ExpressiveGroupTrackRow(
         title = track.name,
         subtitle = track.artist,
         position = position,
         onClick = {
-            val q = java.net.URLEncoder.encode("${track.name} ${track.artist}", "UTF-8")
-            try {
-                context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/results?search_query=$q")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-            } catch (e: Exception) { }
+            musicPlayer.play(com.lastwave.app.playback.PlayableTrack(track.name, track.artist, album = track.album, artworkUrl = track.artworkUrl))
         },
         modifier = modifier,
         leading = {

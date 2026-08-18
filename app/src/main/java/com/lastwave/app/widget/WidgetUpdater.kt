@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.glance.appwidget.updateAll
 import java.io.File
 import java.io.FileOutputStream
 
@@ -38,6 +39,7 @@ object WidgetUpdater {
             prefs[NowPlayingWidget.Keys.isPlaying] = isPlaying
             prefs[NowPlayingWidget.Keys.hasSession] = true
             if (artPath != null) prefs[NowPlayingWidget.Keys.artPath] = artPath
+            else prefs.remove(NowPlayingWidget.Keys.artPath)
         }
     }
 

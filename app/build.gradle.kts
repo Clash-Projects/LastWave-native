@@ -8,7 +8,8 @@ plugins {
 
 android {
     namespace = "com.lastwave.app"
-    compileSdk = 35
+    compileSdk = 36
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "com.lastwave.app"
@@ -64,8 +65,8 @@ dependencies {
     // Home-screen "Now Playing" widget (Glance — Compose-style APIs over
     // RemoteViews), driven by the same MediaController access the local
     // scrobbler (MediaScrobbleListenerService) already holds.
-    implementation(libs.glance.appwidget)
-    implementation(libs.glance.material3)
+    implementation("androidx.glance:glance-appwidget:1.1.1")
+    implementation("androidx.glance:glance-material3:1.1.1")
 
     // Required even in a Compose-only app: Theme.Material3.DayNight.NoActionBar
     // (used as the AndroidManifest/splash theme parent in themes.xml) is an XML
@@ -106,4 +107,12 @@ dependencies {
     // running through JIT on first use — a large, zero-code smoothness win
     // for scrolling and animations in release builds.
     implementation(libs.androidx.profileinstaller)
+
+    // Native in-app audio playback, background service, system media
+    // controls, Bluetooth/headset controls and a MediaController-backed UI.
+    implementation("androidx.media3:media3-exoplayer:1.2.1")
+
+    // Resolves YouTube's current protected/ciphered playback URLs locally.
+    // InnerTube remains responsible for YouTube Music search and metadata.
+    implementation(libs.newpipe.extractor)
 }

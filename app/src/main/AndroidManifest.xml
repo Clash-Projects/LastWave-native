@@ -3,6 +3,10 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackages" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
@@ -67,6 +71,15 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- Owns the native player so audio and its MediaSession survive
+             Activity/background transitions. Media3 publishes the standard
+             Android now-playing notification and lock-screen controls. -->
+        <service
+            android:name=".playback.MusicPlaybackService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <!-- Home-screen "Now Playing" widget (see widget/NowPlayingWidget.kt).
              Reads its own persisted state; state is pushed into it by

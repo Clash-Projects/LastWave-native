@@ -39,10 +39,11 @@ data class StoredTrack(
     val artist: String,
     val url: String = "",
     val image: String? = null,
+    val album: String? = null,
 )
 
-fun GeneratedTrack.toStored() = StoredTrack(name = name, artist = artist, url = url, image = artworkUrl)
-fun StoredTrack.toGenerated() = GeneratedTrack(name = name, artist = artist, artworkUrl = image, url = url)
+fun GeneratedTrack.toStored() = StoredTrack(name = name, artist = artist, url = url, image = artworkUrl, album = album)
+fun StoredTrack.toGenerated() = GeneratedTrack(name = name, artist = artist, artworkUrl = image, url = url, album = album)
 
 /**
  * Last.fm's quirky "bare object instead of a 1-item array" behavior (seen

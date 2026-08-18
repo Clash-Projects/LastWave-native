@@ -13,6 +13,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -32,11 +33,17 @@ import androidx.compose.ui.unit.dp
  */
 @Composable
 fun OverflowMenuButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val darkThemeTone = lerp(
+        MaterialTheme.colorScheme.surfaceContainerHigh,
+        MaterialTheme.colorScheme.primaryContainer,
+        0.55f,
+    )
     FilledTonalIconButton(
         onClick = onClick,
         shape = RoundedCornerShape(12.dp),
         colors = IconButtonDefaults.filledTonalIconButtonColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            containerColor = darkThemeTone,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         ),
         modifier = modifier
             .padding(start = 10.dp)

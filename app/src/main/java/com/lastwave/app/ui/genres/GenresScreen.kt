@@ -252,7 +252,13 @@ private fun SortPill(current: GenreDetailSort, onChange: (GenreDetailSort) -> Un
 
 @Composable
 private fun GenreTrackRow(track: GeneratedTrack, onMenu: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
+    Row(
+        Modifier.fillMaxWidth()
+            .clickable { musicPlayer.play(com.lastwave.app.playback.PlayableTrack(track.name, track.artist, album = track.album, artworkUrl = track.artworkUrl)) }
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         ArtworkImage(name = track.name, artist = track.artist, embeddedUrl = track.artworkUrl, fallbackIcon = Icons.Filled.MusicNote, modifier = Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {

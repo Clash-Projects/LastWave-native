@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.search.SearchRepository
 import com.lastwave.app.data.search.SearchResultItem
 import com.lastwave.app.data.search.SearchTab
+import com.lastwave.app.playback.MusicPlayer
+import com.lastwave.app.playback.PlayableTrack
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -32,6 +34,7 @@ data class SearchUiState(
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val repository: SearchRepository,
+    private val musicPlayer: MusicPlayer,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
@@ -67,6 +70,40 @@ class SearchViewModel @Inject constructor(
         val q = _uiState.value.query
         if (q.isBlank()) return
         viewModelScope.launch { runSearch(q) }
+    }
+
+    fun playResult(item: SearchResultItem) {
+        val tab = _uiState.value.tab
+        when (tab) {
+            SearchTab.TRACKS -> {
+                val results = _uiState.value.results
+                val queue = results.map { result ->
+                    PlayableTrack(
+                        title = result.name,
+                        artist = result.artist.orEmpty(),
+                        album = result.subtitle,
+                        artworkUrl = result.artworkUrl,
+                        videoId = result.videoId,
+                    )
+                }
+                musicPlayer.playQueue(queue, results.indexOf(item).coerceAtLeast(0))
+            }
+            SearchTab.ARTISTS, SearchTab.ALBUMS -> viewModelScope.launch {
+                val tracks = runCatching { repository.songsFor(item) }.getOrDefault(emptyList())
+                if (tracks.isNotEmpty()) {
+                    musicPlayer.playQueue(tracks.map { track ->
+                        PlayableTrack(
+                            title = track.title,
+                            artist = track.artist.takeUnless { it == "Unknown artist" } ?: item.artist ?: item.name,
+                            album = track.album ?: if (tab == SearchTab.ALBUMS) item.name else null,
+                            artworkUrl = track.artworkUrl ?: item.artworkUrl,
+                            videoId = track.videoId,
+                        )
+                    })
+                }
+            }
+            SearchTab.USERS -> Unit
+        }
     }
 
     private suspend fun runSearch(query: String) {

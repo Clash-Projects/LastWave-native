@@ -33,6 +33,10 @@ class FileExportHelper @Inject constructor(
 ) {
     companion object {
         private const val PUBLIC_EXPORT_SUBDIR = "LastWave"
+        private const val PLAYLIST_MIRROR_FILENAME = "lastwave-playlists.json"
+        private const val PLAYLIST_RECOVERY_FILENAME = "lastwave-playlists-recovery.json"
+        private const val MIRROR_PREFS = "playlist_file_mirror"
+        private const val MIRROR_URI_KEY = "persisted_uri"
     }
 
     private fun documentsDir(): File {
@@ -122,8 +126,129 @@ class FileExportHelper @Inject constructor(
             }
         }
 
-    /** API 29+: MediaStore's Downloads collection — no storage permission
-     *  needed for an app writing its own files here under scoped storage. */
+    /** Writes the complete playlist library to a user-visible JSON file
+     * that lives outside app-private/cache storage and survives uninstall. */
+    suspend fun writePublicPlaylistMirror(content: String): Result<Unit> = withContext(Dispatchers.IO) {
+        // Write a complete recovery generation first. If the process or
+        // device stops while the primary is being replaced, startup can
+        // still recover the same snapshot from this companion file.
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                writeMirrorViaMediaStore(PLAYLIST_RECOVERY_FILENAME, content)
+            } else {
+                writeMirrorViaLegacyFile(PLAYLIST_RECOVERY_FILENAME, content)
+            }
+        }
+        persistedPlaylistMirrorUri()?.let { uri ->
+            runCatching { writeTextToUri(uri, content) }
+                .onSuccess { return@withContext Result.success(Unit) }
+        }
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                writeMirrorViaMediaStore(PLAYLIST_MIRROR_FILENAME, content)
+            } else {
+                writeMirrorViaLegacyFile(PLAYLIST_MIRROR_FILENAME, content)
+            }
+        }
+    }
+
+    /** Reads the public mirror automatically when Android still grants
+     * access. A clean reinstall can require selecting the file once. */
+    suspend fun readPublicPlaylistMirror(): Result<String?> = withContext(Dispatchers.IO) {
+        persistedPlaylistMirrorUri()?.let { uri ->
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            }.getOrNull()?.let { return@withContext Result.success(it) }
+        }
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) readMirrorViaMediaStore(PLAYLIST_MIRROR_FILENAME)
+            else readMirrorViaLegacyFile(PLAYLIST_MIRROR_FILENAME)
+        }
+    }
+
+    suspend fun readPublicPlaylistRecovery(): Result<String?> = withContext(Dispatchers.IO) {
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) readMirrorViaMediaStore(PLAYLIST_RECOVERY_FILENAME)
+            else readMirrorViaLegacyFile(PLAYLIST_RECOVERY_FILENAME)
+        }
+    }
+
+    /** Reconnects a mirror selected via ACTION_OPEN_DOCUMENT so subsequent
+     * edits keep updating that exact file. */
+    fun rememberPlaylistMirrorUri(uri: Uri) {
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }
+        context.getSharedPreferences(MIRROR_PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(MIRROR_URI_KEY, uri.toString())
+            .apply()
+    }
+
+    private fun persistedPlaylistMirrorUri(): Uri? =
+        context.getSharedPreferences(MIRROR_PREFS, Context.MODE_PRIVATE)
+            .getString(MIRROR_URI_KEY, null)
+            ?.let(Uri::parse)
+
+    private fun publicDownloadUri(filename: String): Uri? {
+        val resolver = context.contentResolver
+        return resolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.Downloads._ID),
+            "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
+            arrayOf(filename, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_EXPORT_SUBDIR/"),
+            "${MediaStore.Downloads.DATE_MODIFIED} DESC",
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) null
+            else Uri.withAppendedPath(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)).toString(),
+            )
+        }
+    }
+
+    private fun writeMirrorViaMediaStore(filename: String, content: String) {
+        val resolver = context.contentResolver
+        val uri = publicDownloadUri(filename) ?: resolver.insert(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, filename)
+                put(MediaStore.Downloads.MIME_TYPE, "application/json")
+                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_EXPORT_SUBDIR")
+            },
+        ) ?: throw IOException("MediaStore refused to create $filename")
+        resolver.openOutputStream(uri, "wt")?.use { it.write(content.toByteArray()) }
+            ?: throw IOException("Couldn't write $filename")
+    }
+
+    private fun readMirrorViaMediaStore(filename: String): String? {
+        val uri = publicDownloadUri(filename) ?: return null
+        return context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+    }
+
+    private fun writeMirrorViaLegacyFile(filename: String, content: String) {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        if (!granted) throw SecurityException("Storage permission is required")
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), PUBLIC_EXPORT_SUBDIR)
+        if (!dir.exists() && !dir.mkdirs()) throw IOException("Couldn't create ${dir.path}")
+        File(dir, filename).writeText(content)
+    }
+
+    private fun readMirrorViaLegacyFile(filename: String): String? {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        if (!granted) throw SecurityException("Storage permission is required")
+        val file = File(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), PUBLIC_EXPORT_SUBDIR),
+            filename,
+        )
+        return file.takeIf(File::exists)?.readText()
+    }
+
+    /** API 29+: MediaStore Downloads; no permission is needed for files
+     * created by the current app installation. */
     private fun saveViaMediaStore(filename: String, content: String) {
         val resolver = context.contentResolver
         val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_EXPORT_SUBDIR"

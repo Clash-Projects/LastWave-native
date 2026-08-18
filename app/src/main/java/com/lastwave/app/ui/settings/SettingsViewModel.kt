@@ -13,6 +13,7 @@ import com.lastwave.app.data.local.ScrobblerSettings
 import com.lastwave.app.data.local.SessionData
 import com.lastwave.app.data.local.SessionPreferences
 import com.lastwave.app.data.local.SettingsPreferences
+import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.repository.AuthRepository
 import com.lastwave.app.data.repository.ThemeRepository
 import com.lastwave.app.data.repository.ThemeUiState
@@ -28,6 +29,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class PendingRestoreKind { FULL_BACKUP, PLAYLIST_MIRROR }
+
 data class SettingsScreenState(
     val session: SessionData = SessionData(),
     val theme: ThemeUiState? = null,
@@ -39,6 +42,8 @@ data class SettingsScreenState(
     val showRestoreConfirm: Boolean = false,
     val pendingRestoreContent: String? = null,
     val pendingRestorePlaylistCount: Int? = null,
+    val pendingRestoreKind: PendingRestoreKind? = null,
+    val pendingRestoreUri: android.net.Uri? = null,
     val showSessionKeyDialog: Boolean = false,
     val sessionKeyError: String? = null,
     val sessionKeyLoading: Boolean = false,
@@ -52,6 +57,7 @@ class SettingsViewModel @Inject constructor(
     private val settingsPreferences: SettingsPreferences,
     private val generateRepository: GenerateRepository,
     private val backupRepository: BackupRepository,
+    private val playlistRepository: PlaylistRepository,
     private val fileExportHelper: FileExportHelper,
     private val scrobblerPreferences: ScrobblerPreferences,
 ) : ViewModel() {
@@ -130,6 +136,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             sessionPreferences.clearAll()
             generateRepository.clearSeenTracks()
+            playlistRepository.clearAll()
             _uiState.update { it.copy(showClearAllConfirm = false) }
             onComplete()
         }
@@ -152,30 +159,68 @@ class SettingsViewModel @Inject constructor(
     /** Called once the file picker returns raw file content — validates and
      *  stages the restore, showing a confirm dialog with the item count
      *  before actually applying anything (§8.6). */
-    fun stagePendingRestore(content: String) {
+    fun stagePendingRestore(content: String, uri: android.net.Uri) {
         viewModelScope.launch {
-            val parseCheck = try {
+            val backup = try {
                 kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
                     .decodeFromString(com.lastwave.app.data.backup.BackupFile.serializer(), content)
-            } catch (e: Exception) {
-                _uiState.update { it.copy(toastMessage = "That file doesn't look like a LastWave backup") }
+                    .takeIf { it.type == "lastwave-backup" }
+            } catch (e: Exception) { null }
+            val mirrorCount = playlistRepository.publicMirrorPlaylistCount(content)
+            if (backup == null && mirrorCount == null) {
+                _uiState.update { it.copy(toastMessage = "That isn't a LastWave backup or playlist JSON") }
                 return@launch
             }
             _uiState.update {
                 it.copy(
                     showRestoreConfirm = true,
                     pendingRestoreContent = content,
-                    pendingRestorePlaylistCount = parseCheck.playlists.size,
+                    pendingRestorePlaylistCount = backup?.playlists?.size ?: mirrorCount,
+                    pendingRestoreKind = if (backup != null) PendingRestoreKind.FULL_BACKUP else PendingRestoreKind.PLAYLIST_MIRROR,
+                    pendingRestoreUri = uri,
                 )
             }
         }
     }
 
-    fun dismissRestoreConfirm() = _uiState.update { it.copy(showRestoreConfirm = false, pendingRestoreContent = null, pendingRestorePlaylistCount = null) }
+    fun dismissRestoreConfirm() = _uiState.update {
+        it.copy(
+            showRestoreConfirm = false,
+            pendingRestoreContent = null,
+            pendingRestorePlaylistCount = null,
+            pendingRestoreKind = null,
+            pendingRestoreUri = null,
+        )
+    }
 
     fun confirmRestore(onComplete: () -> Unit) {
-        val content = _uiState.value.pendingRestoreContent ?: return
+        val pending = _uiState.value
+        val content = pending.pendingRestoreContent ?: return
         viewModelScope.launch {
+            if (pending.pendingRestoreKind == PendingRestoreKind.PLAYLIST_MIRROR) {
+                pending.pendingRestoreUri?.let(fileExportHelper::rememberPlaylistMirrorUri)
+                playlistRepository.importPublicMirror(content)
+                    .onSuccess { count ->
+                        _uiState.update {
+                            it.copy(
+                                showRestoreConfirm = false,
+                                pendingRestoreContent = null,
+                                pendingRestoreKind = null,
+                                pendingRestoreUri = null,
+                                toastMessage = "Synced $count playlist(s) from local JSON",
+                            )
+                        }
+                        kotlinx.coroutines.delay(900)
+                        onComplete()
+                    }
+                    .onFailure { error ->
+                        _uiState.update {
+                            it.copy(showRestoreConfirm = false, toastMessage = "Playlist sync failed: ${error.message}")
+                        }
+                    }
+                return@launch
+            }
+
             when (val result = backupRepository.restore(content)) {
                 is RestoreResult.Success -> {
                     val historyNote = if (result.seenTrackCount > 0) " and discovery history" else ""

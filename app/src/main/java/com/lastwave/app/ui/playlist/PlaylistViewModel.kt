@@ -39,7 +39,10 @@ data class PlaylistUiState(
     val toastMessage: String? = null,
     val deleteScrobbleAuthRequired: Boolean = false,
     val isGenerating: Boolean = false,
+    val isShufflingPlaylists: Boolean = false,
     val generatingMessage: String = "",
+    val createDialogVisible: Boolean = false,
+    val renamePlaylistId: Long? = null,
 )
 
 /**
@@ -86,6 +89,9 @@ class PlaylistViewModel @Inject constructor(
                 _uiState.update { it.copy(toastMessage = message) }
             }
         }
+        viewModelScope.launch {
+            playlistRepository.changes.collect { load() }
+        }
     }
 
     /** Re-reads from Room. Called on first composition and again whenever
@@ -94,7 +100,7 @@ class PlaylistViewModel @Inject constructor(
     fun load(justGeneratedId: Long? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            val all = playlistRepository.getAll()
+            val all = sortPlaylists(playlistRepository.getAll(), _uiState.value.sortMode)
             val newest = justGeneratedId ?: all.maxByOrNull { it.createdAtMillis }?.id
             _uiState.update {
                 it.copy(
@@ -117,13 +123,62 @@ class PlaylistViewModel @Inject constructor(
 
     fun setSortMode(mode: PlaylistSortMode) {
         _uiState.update { s ->
-            val sorted = when (mode) {
-                PlaylistSortMode.DATE_DESC -> s.playlists.sortedByDescending { it.createdAtMillis }
-                PlaylistSortMode.DATE_ASC -> s.playlists.sortedBy { it.createdAtMillis }
-                PlaylistSortMode.NAME -> s.playlists.sortedBy { it.title.lowercase() }
-                PlaylistSortMode.TRACK_COUNT -> s.playlists.sortedByDescending { it.tracks.size }
-            }
+            val sorted = sortPlaylists(s.playlists, mode)
             s.copy(sortMode = mode, playlists = sorted)
+        }
+    }
+
+    private fun sortPlaylists(playlists: List<SavedPlaylist>, mode: PlaylistSortMode): List<SavedPlaylist> = when (mode) {
+        PlaylistSortMode.DATE_DESC -> playlists.sortedByDescending { it.createdAtMillis }
+        PlaylistSortMode.DATE_ASC -> playlists.sortedBy { it.createdAtMillis }
+        PlaylistSortMode.NAME -> playlists.sortedBy { it.title.lowercase() }
+        PlaylistSortMode.TRACK_COUNT -> playlists.sortedByDescending { it.tracks.size }
+    }
+
+    fun shuffleAllPlaylists() {
+        if (_uiState.value.isShufflingPlaylists) return
+
+        val sourcePlaylists = _uiState.value.playlists.filter { it.tracks.isNotEmpty() }
+        if (sourcePlaylists.isEmpty()) {
+            _uiState.update { it.copy(toastMessage = "No playlist songs to shuffle") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isShufflingPlaylists = true) }
+            try {
+                val uniqueTracks = LinkedHashMap<String, GeneratedTrack>()
+                sourcePlaylists.shuffled().forEach { playlist ->
+                    playlist.tracks
+                        .shuffled()
+                        .distinctBy { it.key }
+                        .take(25)
+                        .forEach { track -> uniqueTracks.putIfAbsent(track.key, track) }
+                }
+
+                val shuffledTracks = uniqueTracks.values.shuffled()
+                val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())
+                val saved = playlistRepository.save(
+                    title = title,
+                    subtitle = "Up to 25 from each \u00b7 ${sourcePlaylists.size} playlists",
+                    mode = "shuffle",
+                    tracks = shuffledTracks,
+                )
+                _uiState.update {
+                    it.copy(
+                        isShufflingPlaylists = false,
+                        toastMessage = "Created ${saved.title} with ${shuffledTracks.size} songs",
+                    )
+                }
+                load(justGeneratedId = saved.id)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isShufflingPlaylists = false,
+                        toastMessage = e.message ?: "Couldn't create shuffled playlist",
+                    )
+                }
+            }
         }
     }
 
@@ -139,6 +194,45 @@ class PlaylistViewModel @Inject constructor(
             val next = s.expandedIds.toMutableSet()
             if (id in next) next.remove(id) else next.add(id)
             s.copy(expandedIds = next)
+        }
+    }
+
+    fun openCreateDialog() = _uiState.update { it.copy(createDialogVisible = true) }
+    fun dismissCreateDialog() = _uiState.update { it.copy(createDialogVisible = false) }
+
+    fun createCustomPlaylist(title: String) {
+        if (title.isBlank()) return
+        viewModelScope.launch {
+            val playlist = playlistRepository.createCustom(title)
+            _uiState.update {
+                it.copy(
+                    createDialogVisible = false,
+                    expandedIds = it.expandedIds + playlist.id,
+                    toastMessage = "Created ${playlist.title}",
+                )
+            }
+            load()
+        }
+    }
+
+    fun requestRename(id: Long) = _uiState.update { it.copy(renamePlaylistId = id) }
+    fun dismissRename() = _uiState.update { it.copy(renamePlaylistId = null) }
+
+    fun renamePlaylist(title: String) {
+        val id = _uiState.value.renamePlaylistId ?: return
+        if (title.isBlank()) return
+        viewModelScope.launch {
+            playlistRepository.rename(id, title)
+            _uiState.update { it.copy(renamePlaylistId = null, toastMessage = "Playlist renamed") }
+            load()
+        }
+    }
+
+    fun removeTrack(playlistId: Long, index: Int) {
+        viewModelScope.launch {
+            playlistRepository.removeTrack(playlistId, index)
+            _uiState.update { it.copy(toastMessage = "Song removed") }
+            load()
         }
     }
 

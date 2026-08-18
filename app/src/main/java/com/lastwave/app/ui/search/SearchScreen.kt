@@ -1,7 +1,7 @@
 package com.lastwave.app.ui.search
 
 import androidx.compose.animation.Crossfade
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -69,6 +69,7 @@ import com.lastwave.app.ui.common.TrackMenuTarget
 fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsState()
     var menuTarget by remember { mutableStateOf<TrackMenuTarget?>(null) }
+    val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
 
     Column(Modifier.fillMaxSize()) {
         // Same rounded-container header language as ExpressiveHeader (used
@@ -98,7 +99,7 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                 TextField(
                     value = state.query,
                     onValueChange = viewModel::setQuery,
-                    placeholder = { Text("Search Last.fm\u2026") },
+                    placeholder = { Text(if (state.tab == SearchTab.USERS) "Search Last.fm users\u2026" else "Search YouTube Music\u2026") },
                     singleLine = true,
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                     trailingIcon = {
@@ -148,7 +149,7 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                             val hint = if (state.tab == SearchTab.USERS) {
                             "Enter an exact Last.fm username to look them up"
                         } else {
-                            "Search Last.fm for tracks, artists or albums"
+                            "Search YouTube Music for songs, artists or albums"
                         }
                         Text(hint, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp))
                         }
@@ -163,10 +164,24 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                             bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                         )
                     ) {
-                        items(state.results, key = { it.url.ifBlank { it.name + it.artist.orEmpty() } }) { item ->
+                        items(state.results, key = { it.entityId ?: it.url.ifBlank { it.name + it.artist.orEmpty() } }) { item ->
                             SearchResultRow(
                                 item = item,
                                 tab = state.tab,
+                                onClick = { viewModel.playResult(item) },
+                                onLongClick = {
+                                    if (state.tab == SearchTab.TRACKS) {
+                                        addToPlaylist(
+                                            com.lastwave.app.playback.PlayableTrack(
+                                                title = item.name,
+                                                artist = item.artist.orEmpty(),
+                                                album = item.subtitle,
+                                                artworkUrl = item.artworkUrl,
+                                                videoId = item.videoId,
+                                            ),
+                                        )
+                                    }
+                                },
                                 onMenu = {
                                     menuTarget = when (state.tab) {
                                         SearchTab.TRACKS -> TrackMenuTarget.Track(item.name, item.artist.orEmpty(), item.url)
@@ -193,7 +208,14 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
 }
 
 @Composable
-private fun SearchResultRow(item: SearchResultItem, tab: SearchTab, onMenu: () -> Unit) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun SearchResultRow(
+    item: SearchResultItem,
+    tab: SearchTab,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onMenu: () -> Unit,
+) {
     val context = LocalContext.current
     // Last.fm's API has no add-friend/remove-friend method at all — the
     // social graph is read-only over the API (user.getfriends is the only
@@ -214,18 +236,11 @@ private fun SearchResultRow(item: SearchResultItem, tab: SearchTab, onMenu: () -
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
-                val url = item.url
-                if (url.isNotBlank()) {
-                    val target = if (tab == SearchTab.TRACKS) {
-                        val q = java.net.URLEncoder.encode("${item.name} ${item.artist.orEmpty()}", "UTF-8")
-                        "https://www.youtube.com/results?search_query=$q"
-                    } else url
-                    try {
-                        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(target)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
-                    } catch (e: Exception) { }
-                }
-            }
+            .combinedClickable(
+                enabled = tab != SearchTab.USERS,
+                onClick = onClick,
+                onLongClick = if (tab == SearchTab.TRACKS) onLongClick else onMenu,
+            )
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -245,8 +260,9 @@ private fun SearchResultRow(item: SearchResultItem, tab: SearchTab, onMenu: () -
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             val subtitle = when (tab) {
-                SearchTab.TRACKS, SearchTab.ALBUMS -> item.artist.orEmpty()
-                SearchTab.ARTISTS -> item.listeners?.let { "$it listeners" } ?: ""
+                SearchTab.TRACKS -> listOfNotNull(item.artist, item.subtitle).joinToString(" \u00b7 ")
+                SearchTab.ALBUMS -> item.subtitle ?: item.artist.orEmpty()
+                SearchTab.ARTISTS -> item.subtitle.orEmpty()
                 SearchTab.USERS -> listOfNotNull(item.artist, item.listeners?.let { "$it scrobbles" }).joinToString(" \u00b7 ")
             }
             if (subtitle.isNotBlank()) {

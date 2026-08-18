@@ -21,11 +21,9 @@ object DatabaseModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "lastwave.db")
-            // This database currently holds only a disposable artwork cache —
-            // losing it just means artwork gets re-resolved, not data loss.
-            // Destructive fallback here means a schema change rebuilds the
-            // cache instead of crashing the app on open, which is exactly
-            // what happened last round when a column changed without this.
+            // PlaylistRepository mirrors playlists to public JSON before
+            // future schema changes can rebuild Room, then restores that
+            // mirror if the database opens empty. Artwork/history are cache.
             .fallbackToDestructiveMigration()
             .build()
 

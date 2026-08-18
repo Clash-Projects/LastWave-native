@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -21,6 +22,7 @@ data class SessionData(
      *  Discover, Generate, stats) only needs api_key + username. */
     val sessionKey: String = "",
     val username: String = "",
+    val guestMode: Boolean = false,
 ) {
     val isAuthenticated: Boolean get() = username.isNotBlank() && apiKey.isNotBlank()
 }
@@ -34,6 +36,7 @@ class SessionPreferences @Inject constructor(
         val API_SECRET = stringPreferencesKey("lw_apisecret")
         val SESSION_KEY = stringPreferencesKey("lw_sessionkey")
         val USERNAME = stringPreferencesKey("lw_username")
+        val GUEST_MODE = booleanPreferencesKey("lw_guest_mode")
     }
 
     val session: Flow<SessionData> = dataStore.data.map { p ->
@@ -42,6 +45,7 @@ class SessionPreferences @Inject constructor(
             apiSecret = p[Keys.API_SECRET] ?: "",
             sessionKey = p[Keys.SESSION_KEY] ?: "",
             username = p[Keys.USERNAME] ?: "",
+            guestMode = p[Keys.GUEST_MODE] ?: false,
         )
     }
 
@@ -57,7 +61,12 @@ class SessionPreferences @Inject constructor(
     suspend fun setSignedIn(username: String) {
         dataStore.edit {
             it[Keys.USERNAME] = username
+            it[Keys.GUEST_MODE] = false
         }
+    }
+
+    suspend fun setGuestMode(enabled: Boolean) {
+        dataStore.edit { it[Keys.GUEST_MODE] = enabled }
     }
 
     /** Stores a real Last.fm session key (`sk`) obtained via
@@ -73,6 +82,7 @@ class SessionPreferences @Inject constructor(
         dataStore.edit {
             it.remove(Keys.SESSION_KEY)
             it.remove(Keys.USERNAME)
+            it[Keys.GUEST_MODE] = false
             // API key/secret are intentionally kept — matches the web app's
             // signOut(), which only clears the session, not the developer credentials.
         }
@@ -85,6 +95,7 @@ class SessionPreferences @Inject constructor(
             it.remove(Keys.USERNAME)
             it.remove(Keys.API_KEY)
             it.remove(Keys.API_SECRET)
+            it[Keys.GUEST_MODE] = false
         }
     }
 
