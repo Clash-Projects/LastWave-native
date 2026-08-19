@@ -1,5 +1,6 @@
 package com.lastwave.app.data.repository
 
+import android.net.Uri
 import com.lastwave.app.data.local.SessionPreferences
 import com.lastwave.app.data.model.AuthState
 import com.lastwave.app.data.network.LastFmApiService
@@ -21,28 +22,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Sign-in is API key + API secret + Last.fm username, nothing else — no
- * browser, no Custom Tab, no embedded WebView, no OAuth redirect. This
- * matches how the original web app's own sign-in worked: paste your
- * credentials and the app just starts working.
- *
- * It's able to work this way because almost everything LastWave calls
- * (recent tracks, top tracks, Discover, Generate, user stats) is an
- * unsigned Last.fm read that only ever needed api_key + a username — the
- * full auth.getToken -> browser authorize -> auth.getSession dance this
- * replaces was only ever required to obtain a session key (`sk`), and a
- * session key is only needed for one thing in this whole app:
- * track.scrobble.delete. That one signed write already degrades
- * gracefully without a session key (see deleteScrobble below /
- * DeleteScrobbleResult.AuthorizationRequired) instead of being blocked on
- * sign-in for everyone.
- *
- * "Signing in" here is really just "verifying the credentials work" —
- * user.getInfo is a free, unsigned, read-only call, so it's used purely to
- * confirm the API key is valid and the username exists before saving them
- * and treating the app as signed in.
- */
+/** Owns Last.fm web authentication, session persistence, and legacy credential entry. */
 @Singleton
 class AuthRepository @Inject constructor(
     private val api: LastFmApiService,
@@ -80,55 +60,14 @@ class AuthRepository @Inject constructor(
         sessionPreferences.setGuestMode(true)
     }
 
-    /**
-     * Real Last.fm web-auth flow, using LastWave's own baked-in app key
-     * (LastFmAppCredentials) so nobody has to paste anything — the
-     * standard three-step dance Last.fm's own API docs describe:
-     *  1. auth.getToken (unsigned) — a short-lived token.
-     *  2. The person approves that token at last.fm/api/auth/?api_key=...
-     *     &token=... in a WebView (see LoginScreen's embedded WebView).
-     *  3. auth.getSession (signed, with that now-approved token) exchanges
-     *     it for a real session key AND their username — both obtained
-     *     from Last.fm itself, no password ever touches this app.
-     *
-     * This session key is exactly what LastWave's scrobbler needs for
-     * track.scrobble / track.updateNowPlaying, and what
-     * track.scrobble.delete needs — so signing in this way makes
-     * scrobbling work immediately, no separate "enable scrobbling"
-     * password step required afterwards at all.
-     */
-    suspend fun fetchAuthToken(): Result<String> {
-        return try {
-            val response = api.get(
-                mapOf(
-                    "method" to "auth.getToken",
-                    "api_key" to LastFmAppCredentials.API_KEY,
-                    "format" to "json",
-                ),
-            )
-            val body = response.body()?.string() ?: return Result.failure(LastFmException("Empty response from Last.fm"))
-            val parsed = json.parseToJsonElement(body).jsonObject
-            val errorCode = (parsed["error"] as? kotlinx.serialization.json.JsonPrimitive)?.intOrNull
-            if (errorCode != null) {
-                val rawMessage = (parsed["message"] as? kotlinx.serialization.json.JsonPrimitive)?.content
-                return Result.failure(LastFmException(LastFmErrors.friendlyMessage(errorCode, rawMessage), errorCode))
-            }
-            val token = parsed["token"]?.jsonPrimitive?.content
-            if (token.isNullOrBlank()) Result.failure(LastFmException("Last.fm didn't return an auth token"))
-            else Result.success(token)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    /** The URL LoginScreen's embedded WebView loads — the person approves
-     *  LastWave there, same page Last.fm's own official clients send you
-     *  to. `cb` points back at a scheme only this app's WebView recognizes
-     *  (see LoginScreen's WebViewClient) — Last.fm redirects there once
-     *  approved, which is how the WebView knows to close and continue,
-     *  instead of guessing from page content. */
-    fun authUrl(token: String): String =
-        "https://www.last.fm/api/auth/?api_key=${LastFmAppCredentials.API_KEY}&token=$token&cb=lastwave://auth-callback"
+    /** Starts web auth; Last.fm returns an authorized token through the app callback. */
+    fun authUrl(): String =
+        Uri.parse("https://www.last.fm/api/auth/")
+            .buildUpon()
+            .appendQueryParameter("api_key", LastFmAppCredentials.API_KEY)
+            .appendQueryParameter("cb", LAST_FM_AUTH_CALLBACK_URI)
+            .build()
+            .toString()
 
     suspend fun completeWebAuth(token: String): Result<String> {
         transientState.value = AuthState.SigningIn

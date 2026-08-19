@@ -48,9 +48,8 @@ import com.lastwave.app.ui.theme.ExpressivePillShape
  * browser, with its own saved passwords and autofill, not a bare WebView
  * this app draws itself), done. No API key, secret, username, or password
  * fields at all — the app key is baked in (LastFmAppCredentials) and the
- * session comes straight from Last.fm's own auth.getSession exchange. See
- * AuthViewModel's doc comment for why completion is detected by resuming
- * the app rather than a redirect callback.
+ * session comes straight from Last.fm's own auth.getSession exchange. The
+ * callback returns to LastWave and completes sign-in automatically.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,23 +65,15 @@ fun LoginScreen(
 ) {
     val context = LocalContext.current
 
-    // Opens the Custom Tab the moment we have a token to approve. Keyed on
-    // the token itself (not just "is AwaitingApproval") so re-entering
-    // this same state after a failed completion attempt (see
-    // AuthViewModel.onReturnedFromBrowser — same token, browser reopens)
-    // re-triggers this launch too.
-    val awaitingToken = (webAuthState as? WebAuthState.AwaitingApproval)?.token
-    LaunchedEffect(awaitingToken) {
+    // The web flow returns its authorized token through the app callback.
+    val awaitingUrl = (webAuthState as? WebAuthState.AwaitingApproval)?.authUrl
+    LaunchedEffect(awaitingUrl) {
         val state = webAuthState as? WebAuthState.AwaitingApproval ?: return@LaunchedEffect
         CustomTabsIntent.Builder().build().launchUrl(context, android.net.Uri.parse(state.authUrl))
     }
 
-    // The actual completion trigger: when this Activity/screen resumes —
-    // meaning the person switched back from the browser — attempt the
-    // token exchange. Only matters while AwaitingApproval; harmless
-    // no-op otherwise (see AuthViewModel.onReturnedFromBrowser's own guard
-    // too, this is just belt-and-suspenders against calling it from an
-    // unrelated resume).
+    // Fallback for a resumed Activity; MainActivity normally delivers the
+    // callback directly before this lifecycle event.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -143,7 +134,7 @@ fun LoginScreen(
                             TextButton(onClick = onCancelWebAuth) { Text("Cancel") }
                         }
                         else -> {
-                            val busy = state is AuthState.SigningIn || webAuthState is WebAuthState.FetchingToken || webAuthState is WebAuthState.CompletingSignIn
+                            val busy = state is AuthState.SigningIn || webAuthState is WebAuthState.CompletingSignIn
                             Button(
                                 onClick = onBeginSignIn,
                                 enabled = !busy,

@@ -1,6 +1,7 @@
 package com.lastwave.app
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -14,22 +15,21 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.lastwave.app.data.repository.LastFmAuthCallbackCoordinator
 import com.lastwave.app.ui.navigation.LastWaveNavHost
 import com.lastwave.app.ui.navigation.Screen
 import com.lastwave.app.ui.player.PlayerHost
 import com.lastwave.app.ui.theme.LastWaveTheme
 import com.lastwave.app.ui.theme.ThemeViewModel
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
-// Sign-in opens Last.fm's real web-auth flow in Chrome Custom Tabs (see
-// ui/auth/LoginScreen.kt / AuthRepository.authUrl). The AndroidManifest
-// registers this Activity for lastwave://auth-callback (Last.fm's cb=
-// redirect target) so approving in the browser brings this app back to
-// the foreground automatically — singleTop reuses this same instance so
-// Compose/ViewModel state (the in-progress AwaitingApproval token) isn't
-// lost, and LoginScreen's own onResume check then completes sign-in.
+// Last.fm redirects its Custom Tab to this Activity after approval.
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var lastFmAuthCallback: LastFmAuthCallbackCoordinator
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity() {
         // Must be called before super.onCreate() and before setContent().
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+        lastFmAuthCallback.capture(intent)
         splashScreen.setOnExitAnimationListener { provider ->
             provider.view.animate()
                 .alpha(0f)
@@ -68,5 +69,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        lastFmAuthCallback.capture(intent)
     }
 }

@@ -28,7 +28,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:theme="@style/Theme.LastWave.Splash"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize">
@@ -43,11 +43,10 @@
                  (see AuthRepository.authUrl's cb= param). Opened via Chrome
                  Custom Tabs (real Chrome, not this app's own WebView), so
                  this is what brings the app back to the foreground
-                 automatically the moment the person approves — singleTop
+                 automatically the moment the person approves — singleTask
                  above means it reuses this same MainActivity instance
-                 rather than creating a new one, so Login's in-progress
-                 AwaitingApproval state survives the round trip and its
-                 onResume check (see LoginScreen.kt) picks up right away. -->
+                 rather than creating a new one; MainActivity then passes
+                 the callback token directly to the login ViewModel. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
