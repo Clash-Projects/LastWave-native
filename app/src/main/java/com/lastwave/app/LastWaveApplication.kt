@@ -5,10 +5,30 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import com.lastwave.app.data.repository.ThemeRepository
+import com.lastwave.app.widget.WidgetUpdater
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @HiltAndroidApp
 class LastWaveApplication : Application(), ImageLoaderFactory {
+
+    @Inject lateinit var themeRepository: ThemeRepository
+    @Inject lateinit var applicationScope: CoroutineScope
+
+    override fun onCreate() {
+        super.onCreate()
+        // A widget is a separate RemoteViews surface, so it needs an explicit
+        // refresh whenever LastWave's live theme changes.
+        applicationScope.launch(Dispatchers.IO) {
+            themeRepository.uiState.collect {
+                WidgetUpdater.refreshTheme(this@LastWaveApplication)
+            }
+        }
+    }
 
     /**
      * App-wide Coil configuration (purely a performance concern — request

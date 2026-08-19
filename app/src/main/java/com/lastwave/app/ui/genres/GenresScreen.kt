@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -60,7 +62,7 @@ import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
-import com.lastwave.app.ui.shell.FloatingNavDefaults
+import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 
 /**
  * Faithful port of genres.js (§5): bar-chart genre list with a period
@@ -99,9 +101,13 @@ fun GenresScreen(
                     Text("No genre data yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> LazyColumn(
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp).let {
-                        PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = FloatingNavDefaults.ContentBottomPadding)
-                    },
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 8.dp,
+                        bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
+                            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                    ),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     items(state.stats, key = { it.name }) { stat ->

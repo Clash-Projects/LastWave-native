@@ -33,6 +33,7 @@ import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveGroup
 import com.lastwave.app.ui.common.ExpressiveGroupTrackRow
 import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 private val FriendsContainerShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
 /**
@@ -101,7 +102,8 @@ fun FriendsScreen(
                     .padding(horizontal = 12.dp)
                     .padding(
                         top = 12.dp,
-                        bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                        bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
+                            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
                     )
                     // The actual bug: this Column never had a scroll
                     // modifier at all, so anything past whatever fit in

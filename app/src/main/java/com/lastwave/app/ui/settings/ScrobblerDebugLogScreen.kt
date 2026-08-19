@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.ui.common.ExpressiveHeader
 
@@ -71,7 +72,8 @@ fun ScrobblerDebugLogScreen(
                     start = 16.dp,
                     end = 16.dp,
                     top = 12.dp,
-                    bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                    bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
+                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
                 ),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {

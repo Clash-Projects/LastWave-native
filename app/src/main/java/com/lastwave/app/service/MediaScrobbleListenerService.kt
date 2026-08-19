@@ -1,6 +1,7 @@
 package com.lastwave.app.service
 
 import android.content.ComponentName
+import android.graphics.Bitmap
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
@@ -8,6 +9,10 @@ import android.media.session.PlaybackState
 import android.os.SystemClock
 import android.service.notification.NotificationListenerService
 import android.util.Log
+import androidx.core.graphics.drawable.toBitmap
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
 import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.repository.ScrobbleRepository
 import com.lastwave.app.widget.ActiveMediaSessionHolder
@@ -106,6 +111,7 @@ class MediaScrobbleListenerService : NotificationListenerService() {
     private var sessionsListener: MediaSessionManager.OnActiveSessionsChangedListener? = null
     private var pollJob: Job? = null
     private val watched = mutableMapOf<android.media.session.MediaSession.Token, WatchedSession>()
+    private var widgetSignature: String = ""
 
     /** The track key (artist|title) LastWave most recently told Last.fm is
      *  "now playing", across ALL watched sessions — not per-session. Last.fm
@@ -136,6 +142,11 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         // position seen for this session, used purely to notice a big
         // backward jump (a restart/repeat), not for anything else.
         var lastPositionMs: Long = 0L
+        var lastActiveElapsed: Long = SystemClock.elapsedRealtime()
+        var widgetArtworkUri: String? = null
+        var widgetArtwork: Bitmap? = null
+        var widgetArtworkJob: Job? = null
+        var widgetTrackTitle: String = ""
     }
 
     override fun onCreate() {
@@ -144,15 +155,22 @@ class MediaScrobbleListenerService : NotificationListenerService() {
             serviceScope.launch {
                 scrobblerPreferences.settings.collect { s ->
                     val wasEnabled = enabled
+                    val newlySelected = s.selectedPackages - selectedPackages
                     enabled = s.enabled
                     submitNowPlaying = s.submitNowPlaying
                     scrobblePercent = s.scrobblePercent
                     val changedPackages = selectedPackages != s.selectedPackages
                     selectedPackages = s.selectedPackages
                     if (wasEnabled != enabled || changedPackages) {
-                        debugLog.log("Settings: enabled=$enabled, nowPlaying=$submitNowPlaying, percent=$scrobblePercent%, watching=${selectedPackages.size} app(s)")
+                        debugLog.log("Settings: enabled=$enabled, nowPlaying=$submitNowPlaying, percent=$scrobblePercent%, scrobbling=${selectedPackages.size} app(s); widgets watch all sessions")
                     }
                     if (changedPackages) refreshActiveSessions()
+                    if (enabled && (!wasEnabled || newlySelected.isNotEmpty())) {
+                        val packages = if (!wasEnabled) selectedPackages else newlySelected
+                        watched.values.toList()
+                            .filter { it.controller.packageName in packages }
+                            .forEach(::rearmScrobbling)
+                    }
                 }
             }
         }.onFailure { Log.w(TAG, "onCreate settings collector failed to start", it) }
@@ -220,8 +238,7 @@ class MediaScrobbleListenerService : NotificationListenerService() {
      *  one the moment a track starts) is often faster than waiting for the
      *  next poll tick or the active-sessions-changed callback. */
     override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification?) {
-        val pkg = sbn?.packageName ?: return
-        if (pkg !in selectedPackages) return
+        if (sbn == null) return
         runCatching { refreshActiveSessions() }.onFailure { Log.w(TAG, "onNotificationPosted refresh failed", it) }
     }
     override fun onNotificationRemoved(sbn: android.service.notification.StatusBarNotification?) {}
@@ -260,7 +277,6 @@ class MediaScrobbleListenerService : NotificationListenerService() {
 
         controllers.forEach { controller ->
             runCatching {
-                if (controller.packageName !in selectedPackages) return@forEach
                 val token = controller.sessionToken
                 if (watched.containsKey(token)) return@forEach
                 debugLog.log("New session bound: ${controller.packageName}")
@@ -289,15 +305,19 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         val session = watched.remove(token) ?: return
         session.callback?.let { runCatching { session.controller.unregisterCallback(it) } }
         session.scrobbleJob?.cancel()
+        session.widgetArtworkJob?.cancel()
         // No more tracked sessions at all — fall back to the widget's
         // empty "nothing playing" state instead of leaving stale info up,
         // and drop the transport-control target since it's no longer valid.
         if (watched.isEmpty()) {
             ActiveMediaSessionHolder.controller = null
+            widgetSignature = ""
             serviceScope.launch {
                 runCatching { WidgetUpdater.clear(applicationContext) }
                     .onFailure { Log.w(TAG, "widget clear failed", it) }
             }
+        } else {
+            publishBestWidgetState()
         }
     }
 
@@ -327,7 +347,14 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         val rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
         val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
-        if (rawArtist.isNullOrBlank() || title.isNullOrBlank()) return
+        if (title.isNullOrBlank()) return
+        session.lastActiveElapsed = SystemClock.elapsedRealtime()
+        // Some players publish a title but omit artist. Keep those visible
+        // in widgets; incomplete metadata is still excluded from scrobbling.
+        if (rawArtist.isNullOrBlank()) {
+            publishBestWidgetState(session)
+            return
+        }
         val artist = cleanArtist(rawArtist)
         val key = "$artist|$title"
         val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)
@@ -354,6 +381,7 @@ class MediaScrobbleListenerService : NotificationListenerService() {
                 session.scrobbleJob?.cancel()
                 scheduleScrobbleCheck(session, key, artist, title, album, durationMs)
             }
+            publishBestWidgetState(session)
             return
         }
 
@@ -373,11 +401,11 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         session.startedAtEpochSec = System.currentTimeMillis() / 1000
         session.scrobbleJob?.cancel()
 
-        if (session.playingSinceElapsed != null) {
+        if (session.playingSinceElapsed != null && isSelectedForScrobbling(session)) {
             announceNowPlaying(key, artist, title, album)
         }
         scheduleScrobbleCheck(session, key, artist, title, album, durationMs)
-        publishWidgetState(session, session.playingSinceElapsed != null)
+        publishBestWidgetState(session)
     }
 
     /** Fires on EVERY playback-state transition, not just track changes —
@@ -400,6 +428,7 @@ class MediaScrobbleListenerService : NotificationListenerService() {
     private fun onStateChanged(session: WatchedSession, state: PlaybackState?) {
         val playing = state?.state == PlaybackState.STATE_PLAYING
         val position = state?.position ?: -1L
+        session.lastActiveElapsed = SystemClock.elapsedRealtime()
 
         if (position >= 0L && session.trackKey.isNotBlank()) {
             // A backward jump of more than 8s, landing back near the very
@@ -425,7 +454,9 @@ class MediaScrobbleListenerService : NotificationListenerService() {
                     val artist = cleanArtist(rawArtist)
                     val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)
                     val durationMs = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
-                    if (playing) announceNowPlaying(session.trackKey, artist, title, album, forceReannounce = true)
+                    if (playing && isSelectedForScrobbling(session)) {
+                        announceNowPlaying(session.trackKey, artist, title, album, forceReannounce = true)
+                    }
                     scheduleScrobbleCheck(session, session.trackKey, artist, title, album, durationMs)
                 }
             }
@@ -440,7 +471,7 @@ class MediaScrobbleListenerService : NotificationListenerService() {
                     val rawArtist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
                         ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
                     val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
-                    if (!rawArtist.isNullOrBlank() && !title.isNullOrBlank()) {
+                    if (!rawArtist.isNullOrBlank() && !title.isNullOrBlank() && isSelectedForScrobbling(session)) {
                         announceNowPlaying(session.trackKey, cleanArtist(rawArtist), title, metadata.getString(MediaMetadata.METADATA_KEY_ALBUM))
                     }
                 }
@@ -451,7 +482,7 @@ class MediaScrobbleListenerService : NotificationListenerService() {
             }
             session.playingSinceElapsed = null
         }
-        publishWidgetState(session, playing)
+        publishBestWidgetState(session)
     }
 
     /** Pushes the session's current title/artist/art/playing-state into the
@@ -462,19 +493,120 @@ class MediaScrobbleListenerService : NotificationListenerService() {
      *  separate connection needed. Best-effort: art may be null for apps
      *  that don't publish album art on their MediaSession, in which case
      *  the widget falls back to showing just the app icon. */
-    private fun publishWidgetState(session: WatchedSession, playing: Boolean) {
+    private fun publishBestWidgetState(preferred: WatchedSession? = null) {
+        val best = watched.values
+            .filter { !it.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() }
+            .maxWithOrNull(
+                compareBy<WatchedSession> { widgetPlaybackRank(it.controller.playbackState?.state) }
+                    .thenBy { if (it === preferred) 1 else 0 }
+                    .thenBy { it.lastActiveElapsed },
+            ) ?: return
+        val metadata = best.controller.metadata ?: return
+        val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim().orEmpty()
+        val rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
+            ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
+            ?: metadata.getString(MediaMetadata.METADATA_KEY_AUTHOR)
+        val sourceApp = applicationLabel(best.controller.packageName)
+        val artist = rawArtist?.takeIf(String::isNotBlank)?.let(::cleanArtist) ?: sourceApp
+        val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)
+        if (best.widgetTrackTitle != title) {
+            best.widgetTrackTitle = title
+            best.widgetArtworkJob?.cancel()
+            best.widgetArtworkUri = null
+            best.widgetArtwork = null
+        }
+        val embeddedArt = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        if (embeddedArt != null) best.widgetArtwork = embeddedArt
+        val artUri = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
+            ?: metadata.getString(MediaMetadata.METADATA_KEY_ART_URI)
+        if (embeddedArt == null && !artUri.isNullOrBlank() && artUri != best.widgetArtworkUri) {
+            requestWidgetArtwork(best, artUri)
+        }
+        val art = embeddedArt ?: best.widgetArtwork
+        val playing = best.controller.playbackState?.state == PlaybackState.STATE_PLAYING
+        val signature = "${best.controller.packageName}|$title|$artist|$album|$playing|${System.identityHashCode(art)}"
+        if (signature == widgetSignature) return
+        widgetSignature = signature
+        ActiveMediaSessionHolder.controller = best.controller
+        serviceScope.launch {
+            runCatching {
+                WidgetUpdater.publish(
+                    context = applicationContext,
+                    title = title,
+                    artist = artist,
+                    album = album,
+                    sourceApp = sourceApp,
+                    sourcePackage = best.controller.packageName,
+                    art = art,
+                    isPlaying = playing,
+                )
+            }.onFailure { Log.w(TAG, "widget publish failed", it) }
+        }
+    }
+
+    private fun widgetPlaybackRank(state: Int?): Int = when (state) {
+        PlaybackState.STATE_PLAYING -> 5
+        PlaybackState.STATE_BUFFERING, PlaybackState.STATE_CONNECTING -> 4
+        PlaybackState.STATE_PAUSED -> 3
+        PlaybackState.STATE_FAST_FORWARDING, PlaybackState.STATE_REWINDING -> 2
+        else -> 1
+    }
+
+    private fun requestWidgetArtwork(session: WatchedSession, uri: String) {
+        session.widgetArtworkUri = uri
+        session.widgetArtwork = null
+        session.widgetArtworkJob?.cancel()
+        session.widgetArtworkJob = serviceScope.launch {
+            val bitmap = runCatching {
+                val result = applicationContext.imageLoader.execute(
+                    ImageRequest.Builder(applicationContext)
+                        .data(uri)
+                        .size(720)
+                        .allowHardware(false)
+                        .build(),
+                )
+                (result as? SuccessResult)?.drawable?.toBitmap()
+            }.getOrNull()
+            if (session.widgetArtworkUri != uri) return@launch
+            session.widgetArtwork = bitmap
+            widgetSignature = ""
+            publishBestWidgetState(session)
+        }
+    }
+
+    private fun applicationLabel(packageName: String): String = runCatching {
+        val info = packageManager.getApplicationInfo(packageName, 0)
+        packageManager.getApplicationLabel(info).toString()
+    }.getOrDefault(packageName.substringAfterLast('.'))
+
+    private fun isSelectedForScrobbling(session: WatchedSession): Boolean =
+        session.controller.packageName in selectedPackages
+
+    private fun rearmScrobbling(session: WatchedSession) {
         val metadata = session.controller.metadata ?: return
         val rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
         val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
         if (rawArtist.isNullOrBlank() || title.isNullOrBlank()) return
-        val art = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-            ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
-        ActiveMediaSessionHolder.controller = session.controller
-        serviceScope.launch {
-            runCatching { WidgetUpdater.publish(applicationContext, title, cleanArtist(rawArtist), art, playing) }
-                .onFailure { Log.w(TAG, "widget publish failed", it) }
-        }
+        val artist = cleanArtist(rawArtist)
+        val key = "$artist|$title"
+        session.trackKey = key
+        session.accumulatedMs = 0L
+        session.scrobbledForKey = ""
+        session.startedAtEpochSec = System.currentTimeMillis() / 1000
+        val playing = session.controller.playbackState?.state == PlaybackState.STATE_PLAYING
+        session.playingSinceElapsed = if (playing) SystemClock.elapsedRealtime() else null
+        session.scrobbleJob?.cancel()
+        if (playing) announceNowPlaying(key, artist, title, metadata.getString(MediaMetadata.METADATA_KEY_ALBUM))
+        scheduleScrobbleCheck(
+            session,
+            key,
+            artist,
+            title,
+            metadata.getString(MediaMetadata.METADATA_KEY_ALBUM),
+            metadata.getLong(MediaMetadata.METADATA_KEY_DURATION),
+        )
     }
 
     private fun announceNowPlaying(key: String, artist: String, title: String, album: String?, forceReannounce: Boolean = false) {
@@ -488,8 +620,8 @@ class MediaScrobbleListenerService : NotificationListenerService() {
     }
 
     private fun scheduleScrobbleCheck(session: WatchedSession, key: String, artist: String, title: String, album: String?, durationMs: Long) {
-        if (!enabled) {
-            debugLog.log("Scrobbling disabled — not scheduling \"$title\"")
+        if (!enabled || !isSelectedForScrobbling(session)) {
+            debugLog.log("Scrobbling disabled/not selected for ${session.controller.packageName} — not scheduling \"$title\"")
             return
         }
         // Last.fm's own scrobble rule: a track must be longer than 30s, and
@@ -525,6 +657,7 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         session.scrobbleJob = serviceScope.launch {
             while (true) {
                 delay(3_000)
+                if (!enabled || !isSelectedForScrobbling(session)) return@launch
                 if (session.trackKey != key) {
                     debugLog.log("\"$title\" changed/stopped before reaching its ${thresholdMs / 1000}s threshold — not scrobbled")
                     return@launch
@@ -560,7 +693,9 @@ class MediaScrobbleListenerService : NotificationListenerService() {
                                 // fresh signal Last.fm needs) keeps the
                                 // now-playing status correct for however
                                 // much of the track is still left.
-                                if (result == ScrobbleRepository.Result.Success && session.trackKey == key && session.playingSinceElapsed != null) {
+                                if (result == ScrobbleRepository.Result.Success && session.trackKey == key &&
+                                    session.playingSinceElapsed != null && isSelectedForScrobbling(session)
+                                ) {
                                     announceNowPlaying(key, artist, title, album, forceReannounce = true)
                                 }
                             }

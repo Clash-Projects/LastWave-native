@@ -61,6 +61,7 @@ import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
+import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 
 /** Faithful port of search.js (§6): 3-tab search (Tracks/Artists/Albums)
  *  with idle/loading/empty/results states and the shared track/artist/
@@ -161,7 +162,8 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                     SearchStatus.RESULTS -> LazyColumn(
                         contentPadding = PaddingValues(
                             top = 8.dp,
-                            bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                            bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
+                                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                         )
                     ) {
                         items(state.results, key = { it.entityId ?: it.url.ifBlank { it.name + it.artist.orEmpty() } }) { item ->

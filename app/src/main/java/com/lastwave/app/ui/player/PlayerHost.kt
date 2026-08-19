@@ -111,6 +111,13 @@ val LocalAddToPlaylist = staticCompositionLocalOf<(PlayableTrack) -> Unit> {
     error("Add-to-playlist is only available inside PlayerHost")
 }
 
+/**
+ * Extra list-end clearance needed while the collapsed player overlays a
+ * screen. Its measured card is about 75dp tall; 88dp also preserves a small
+ * visual gap so a final row can scroll completely above the card.
+ */
+val LocalMiniPlayerScrollClearance = staticCompositionLocalOf { 0.dp }
+
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     val player: MusicPlayer,
@@ -165,6 +172,7 @@ fun PlayerHost(
     CompositionLocalProvider(
         LocalMusicPlayer provides viewModel.player,
         LocalAddToPlaylist provides requestAddToPlaylist,
+        LocalMiniPlayerScrollClearance provides if (state.current != null) 88.dp else 0.dp,
     ) {
         Box(Modifier.fillMaxSize()) {
             content()

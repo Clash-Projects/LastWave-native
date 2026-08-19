@@ -1,31 +1,81 @@
 package com.lastwave.app.widget
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.media.session.MediaController
+import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
+import android.provider.Settings
 import androidx.glance.GlanceId
 import androidx.glance.action.ActionParameters
 import androidx.glance.appwidget.action.ActionCallback
+import com.lastwave.app.service.MediaScrobbleListenerService
 
-/**
- * Toggles play/pause on whichever session [ActiveMediaSessionHolder] is
- * currently pointing at. If no session is available (e.g. the scrobbler
- * hasn't been granted Notification Listener access, or nothing has played
- * since the last reboot), this is a no-op — there's deliberately no error
- * state shown on the widget itself, matching how the platform's own media
- * controls behave when a session disappears mid-interaction.
- */
+private fun resolveController(context: Context): MediaController? {
+    val held = ActiveMediaSessionHolder.controller
+    held?.let {
+        val state = runCatching { it.playbackState?.state }.getOrNull()
+        if (state == PlaybackState.STATE_PLAYING || state == PlaybackState.STATE_BUFFERING) return it
+    }
+
+    // ActionCallbacks may start in a fresh process. Re-resolve the live
+    // controller from Android instead of depending only on an in-memory field.
+    val resolved = runCatching {
+        val manager = context.getSystemService(MediaSessionManager::class.java) ?: return@runCatching null
+        val listener = ComponentName(context, MediaScrobbleListenerService::class.java)
+        manager.getActiveSessions(listener)
+            .filter { it.metadata != null }
+            .maxByOrNull { controllerRank(it.playbackState?.state) }
+            ?.also { ActiveMediaSessionHolder.controller = it }
+    }.getOrNull()
+    return resolved ?: held
+}
+
+private fun controllerRank(state: Int?): Int = when (state) {
+    PlaybackState.STATE_PLAYING -> 5
+    PlaybackState.STATE_BUFFERING, PlaybackState.STATE_CONNECTING -> 4
+    PlaybackState.STATE_PAUSED -> 3
+    PlaybackState.STATE_FAST_FORWARDING, PlaybackState.STATE_REWINDING -> 2
+    else -> 1
+}
+
 class TogglePlayPauseAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val controller = ActiveMediaSessionHolder.controller ?: return
-        val playing = controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+        val controller = resolveController(context) ?: return
         runCatching {
-            if (playing) controller.transportControls.pause() else controller.transportControls.play()
+            if (controller.playbackState?.state == PlaybackState.STATE_PLAYING) {
+                controller.transportControls.pause()
+            } else {
+                controller.transportControls.play()
+            }
+        }
+    }
+}
+
+class SkipPreviousAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        resolveController(context)?.let { controller ->
+            runCatching { controller.transportControls.skipToPrevious() }
         }
     }
 }
 
 class SkipNextAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
-        val controller = ActiveMediaSessionHolder.controller ?: return
-        runCatching { controller.transportControls.skipToNext() }
+        resolveController(context)?.let { controller ->
+            runCatching { controller.transportControls.skipToNext() }
+        }
+    }
+}
+
+class OpenMusicAccessAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
     }
 }

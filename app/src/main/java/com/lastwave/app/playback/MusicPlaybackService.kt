@@ -7,11 +7,21 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
 import android.media.MediaMetadata
+import android.media.session.MediaController
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
+import android.view.View
+import android.widget.RemoteViews
+import androidx.compose.ui.graphics.toArgb
+import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.drawable.toBitmap
 import coil.imageLoader
 import coil.request.ImageRequest
@@ -21,7 +31,9 @@ import com.lastwave.app.R
 import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.local.ScrobblerSettings
 import com.lastwave.app.data.repository.ScrobbleRepository
+import com.lastwave.app.data.repository.ThemeRepository
 import com.lastwave.app.service.ScrobbleDebugLog
+import com.lastwave.app.widget.ActiveMediaSessionHolder
 import com.lastwave.app.widget.WidgetUpdater
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -46,9 +58,11 @@ class MusicPlaybackService : Service() {
     @Inject lateinit var scrobbleRepository: ScrobbleRepository
     @Inject lateinit var scrobblerPreferences: ScrobblerPreferences
     @Inject lateinit var debugLog: ScrobbleDebugLog
+    @Inject lateinit var themeRepository: ThemeRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var mediaSession: MediaSession
+    private lateinit var ownController: MediaController
     private var settings = ScrobblerSettings()
     private var detectorJob: Job? = null
     private var detectedKey = ""
@@ -60,6 +74,7 @@ class MusicPlaybackService : Service() {
     private var artworkBitmap: Bitmap? = null
     private var notificationSignature = ""
     private var widgetSignature = ""
+    private var notificationPalette = NotificationPalette.default()
 
     override fun onCreate() {
         super.onCreate()
@@ -77,8 +92,17 @@ class MusicPlaybackService : Service() {
             setSessionActivity(openAppPendingIntent())
             isActive = true
         }
+        ownController = MediaController(this, mediaSession.sessionToken)
+        notificationPalette = NotificationPalette.from(themeRepository.uiState.value.colorScheme)
         startForeground(NOTIFICATION_ID, buildNotification(musicPlayer.state.value, null))
         scope.launch { scrobblerPreferences.settings.collect { settings = it } }
+        scope.launch {
+            themeRepository.uiState.collectLatest { theme ->
+                notificationPalette = NotificationPalette.from(theme.colorScheme)
+                notificationSignature = ""
+                publishNotification(musicPlayer.state.value, force = true)
+            }
+        }
         scope.launch {
             musicPlayer.state.collectLatest { state ->
                 requestArtwork(state.current?.artworkUrl)
@@ -110,6 +134,7 @@ class MusicPlaybackService : Service() {
         else @Suppress("DEPRECATION") stopForeground(true)
         mediaSession.isActive = false
         mediaSession.release()
+        ActiveMediaSessionHolder.clear(ownController)
         scope.cancel()
         super.onDestroy()
     }
@@ -200,15 +225,34 @@ class MusicPlaybackService : Service() {
                 .setState(playbackState, state.positionMs, if (state.isPlaying) state.speed else 0f)
                 .build(),
         )
+        val active = ActiveMediaSessionHolder.controller
+        val otherAppIsPlaying = active?.packageName != packageName &&
+            active?.playbackState?.state == PlaybackState.STATE_PLAYING
+        if (track != null && (state.isPlaying || active == null || !otherAppIsPlaying)) {
+            ActiveMediaSessionHolder.controller = ownController
+        }
     }
 
     private fun publishWidget(state: MusicPlayerState) {
         val track = state.current ?: return
+        val active = ActiveMediaSessionHolder.controller
+        val otherAppIsPlaying = active?.packageName != packageName &&
+            active?.playbackState?.state == PlaybackState.STATE_PLAYING
+        if (!state.isPlaying && otherAppIsPlaying) return
         val signature = "${track.title}|${track.artist}|${state.isPlaying}|$artworkUrl|${artworkBitmap != null}"
         if (signature == widgetSignature) return
         widgetSignature = signature
         scope.launch(Dispatchers.IO) {
-            WidgetUpdater.publish(this@MusicPlaybackService, track.title, track.artist, artworkBitmap, state.isPlaying)
+            WidgetUpdater.publish(
+                context = this@MusicPlaybackService,
+                title = track.title,
+                artist = track.artist,
+                album = track.album,
+                sourceApp = getString(R.string.app_name),
+                sourcePackage = packageName,
+                art = artworkBitmap,
+                isPlaying = state.isPlaying,
+            )
         }
     }
 
@@ -234,7 +278,7 @@ class MusicPlaybackService : Service() {
                 imageLoader.execute(
                     ImageRequest.Builder(this@MusicPlaybackService)
                         .data(expectedUrl)
-                        .size(1024)
+                        .size(512)
                         .allowHardware(false)
                         .build(),
                 )
@@ -262,28 +306,142 @@ class MusicPlaybackService : Service() {
         } else {
             @Suppress("DEPRECATION") Notification.Builder(this)
         }
+        val compact = notificationRemoteViews(
+            layout = R.layout.notification_player_compact,
+            widthDp = 520,
+            heightDp = 72,
+            state = state,
+            art = art,
+            expanded = false,
+        )
+        val expanded = notificationRemoteViews(
+            layout = R.layout.notification_player_expanded,
+            widthDp = 520,
+            heightDp = 128,
+            state = state,
+            art = art,
+            expanded = true,
+        )
+        val style = Notification.DecoratedMediaCustomViewStyle()
+            .setMediaSession(mediaSession.sessionToken)
+            .setShowActionsInCompactView(0, 1, 2)
+
         return builder
             .setSmallIcon(R.drawable.ic_widget_play)
             .setContentTitle(state.current?.title ?: "LastWave")
             .setContentText(state.current?.artist ?: "Music player")
             .setSubText(state.current?.album)
             .setContentIntent(openAppPendingIntent())
-            .setLargeIcon(art)
+            .setLargeIcon(scaledBitmap(art, 384))
             .setOnlyAlertOnce(true)
             .setOngoing(state.isPlaying)
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_TRANSPORT)
-            .setColor(BRAND_COLOR)
+            .setColor(notificationPalette.primary)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setStyle(Notification.MediaStyle().setMediaSession(mediaSession.sessionToken).setShowActionsInCompactView(0, 1, 2))
+            .setStyle(style)
+            .setCustomContentView(compact)
+            .setCustomBigContentView(expanded)
+            .setCustomHeadsUpContentView(compact)
             .addAction(Notification.Action.Builder(R.drawable.ic_widget_skip_previous, "Previous", serviceAction(ACTION_PREVIOUS, 1)).build())
             .addAction(Notification.Action.Builder(if (state.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play, "Play or pause", serviceAction(ACTION_TOGGLE, 2)).build())
             .addAction(Notification.Action.Builder(R.drawable.ic_widget_skip_next, "Next", serviceAction(ACTION_NEXT, 3)).build())
             .addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, "Stop", serviceAction(ACTION_STOP, 4)).build())
             .apply {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) setColorized(art != null)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) setColorized(true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+                }
             }
             .build()
+    }
+
+    private fun notificationRemoteViews(
+        layout: Int,
+        widthDp: Int,
+        heightDp: Int,
+        state: MusicPlayerState,
+        art: Bitmap?,
+        expanded: Boolean,
+    ): RemoteViews = RemoteViews(packageName, layout).apply {
+        val palette = notificationPalette
+        setImageViewBitmap(R.id.notification_background, glassBackground(widthDp, heightDp, palette))
+        if (art != null) setImageViewBitmap(R.id.notification_artwork, scaledBitmap(art, 192))
+        else setImageViewResource(R.id.notification_artwork, R.mipmap.ic_launcher)
+        setTextViewText(R.id.notification_title, state.current?.title ?: "LastWave")
+        setTextViewText(R.id.notification_artist, state.current?.artist ?: "Music player")
+        setTextColor(R.id.notification_title, palette.onSurface)
+        setTextColor(R.id.notification_artist, palette.onSurfaceVariant)
+        setImageViewResource(
+            R.id.notification_play_pause,
+            if (state.isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play,
+        )
+        setInt(R.id.notification_previous, "setColorFilter", palette.onSurface)
+        setInt(R.id.notification_next, "setColorFilter", palette.onSurface)
+        setInt(R.id.notification_play_surface, "setColorFilter", palette.primary)
+        setInt(R.id.notification_play_pause, "setColorFilter", palette.onPrimary)
+        setOnClickPendingIntent(R.id.notification_root, openAppPendingIntent())
+        setOnClickPendingIntent(R.id.notification_previous, serviceAction(ACTION_PREVIOUS, 1))
+        setOnClickPendingIntent(R.id.notification_play_pause, serviceAction(ACTION_TOGGLE, 2))
+        setOnClickPendingIntent(R.id.notification_next, serviceAction(ACTION_NEXT, 3))
+        if (expanded) {
+            setTextColor(R.id.notification_brand, palette.primary)
+            setTextViewText(R.id.notification_album, state.current?.album.orEmpty())
+            setTextColor(R.id.notification_album, palette.onSurfaceVariant)
+            setViewVisibility(
+                R.id.notification_album,
+                if (state.current?.album.isNullOrBlank()) View.GONE else View.VISIBLE,
+            )
+        }
+    }
+
+    private fun glassBackground(widthDp: Int, heightDp: Int, palette: NotificationPalette): Bitmap {
+        // Keep these bitmaps intentionally pixel-sized, not density-scaled:
+        // RemoteViews crosses Binder and oversized bitmaps can exceed its
+        // transaction limit. The ImageView stretches this small gradient.
+        val width = widthDp.coerceAtLeast(1)
+        val height = heightDp.coerceAtLeast(1)
+        val radius = 26f
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val bounds = RectF(0f, 0f, width.toFloat(), height.toFloat())
+        val start = ColorUtils.setAlphaComponent(
+            ColorUtils.blendARGB(palette.surface, palette.primary, 0.20f),
+            232,
+        )
+        val end = ColorUtils.setAlphaComponent(
+            ColorUtils.blendARGB(palette.surface, palette.tertiary, 0.13f),
+            218,
+        )
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(0f, 0f, width.toFloat(), height.toFloat(), start, end, Shader.TileMode.CLAMP)
+        }
+        canvas.drawRoundRect(bounds, radius, radius, fill)
+        val highlight = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ColorUtils.setAlphaComponent(palette.onSurface, 35)
+            style = Paint.Style.STROKE
+            strokeWidth = 1f
+        }
+        canvas.drawRoundRect(
+            RectF(1f, 1f, width - 1f, height - 1f),
+            radius,
+            radius,
+            highlight,
+        )
+        return bitmap
+    }
+
+    private fun scaledBitmap(source: Bitmap?, maxEdge: Int): Bitmap? {
+        source ?: return null
+        val largest = maxOf(source.width, source.height)
+        if (largest <= maxEdge) return source
+        val scale = maxEdge.toFloat() / largest
+        return Bitmap.createScaledBitmap(
+            source,
+            (source.width * scale).toInt().coerceAtLeast(1),
+            (source.height * scale).toInt().coerceAtLeast(1),
+            true,
+        )
     }
 
     private fun serviceAction(action: String, requestCode: Int): PendingIntent = PendingIntent.getService(
@@ -306,10 +464,38 @@ class MusicPlaybackService : Service() {
     private companion object {
         const val CHANNEL_ID = "lastwave_playback"
         const val NOTIFICATION_ID = 4102
-        const val BRAND_COLOR = 0xFFC9FB00.toInt()
         const val ACTION_PREVIOUS = "com.lastwave.app.playback.PREVIOUS"
         const val ACTION_TOGGLE = "com.lastwave.app.playback.TOGGLE"
         const val ACTION_NEXT = "com.lastwave.app.playback.NEXT"
         const val ACTION_STOP = "com.lastwave.app.playback.STOP"
+    }
+}
+
+private data class NotificationPalette(
+    val primary: Int,
+    val onPrimary: Int,
+    val surface: Int,
+    val onSurface: Int,
+    val onSurfaceVariant: Int,
+    val tertiary: Int,
+) {
+    companion object {
+        fun from(scheme: androidx.compose.material3.ColorScheme) = NotificationPalette(
+            primary = scheme.primary.toArgb(),
+            onPrimary = scheme.onPrimary.toArgb(),
+            surface = scheme.surfaceContainerHigh.toArgb(),
+            onSurface = scheme.onSurface.toArgb(),
+            onSurfaceVariant = scheme.onSurfaceVariant.toArgb(),
+            tertiary = scheme.tertiary.toArgb(),
+        )
+
+        fun default() = NotificationPalette(
+            primary = 0xFFFFB4AB.toInt(),
+            onPrimary = 0xFF690005.toInt(),
+            surface = 0xFF211A1A.toInt(),
+            onSurface = 0xFFEDE0DE.toInt(),
+            onSurfaceVariant = 0xFFD8C2BF.toInt(),
+            tertiary = 0xFFE7C089.toInt(),
+        )
     }
 }

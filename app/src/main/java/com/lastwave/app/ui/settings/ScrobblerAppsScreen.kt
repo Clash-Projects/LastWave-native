@@ -45,6 +45,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.ui.common.ExpressiveGroupSelectRow
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.groupPositionFor
+import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 
 @Composable
 fun ScrobblerAppsScreen(
@@ -117,7 +118,8 @@ fun ScrobblerAppsScreen(
                         start = 16.dp,
                         end = 16.dp,
                         top = 4.dp,
-                        bottom = 32.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                        bottom = 32.dp + LocalMiniPlayerScrollClearance.current +
+                            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
                     ),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {

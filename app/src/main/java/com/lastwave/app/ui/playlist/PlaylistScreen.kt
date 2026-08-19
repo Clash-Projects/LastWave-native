@@ -290,7 +290,8 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
             Surface(
                 shape = ExpressivePillShape,
                 color = MaterialTheme.colorScheme.inverseSurface,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = FloatingNavDefaults.ContentBottomPadding + 12.dp),
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .padding(bottom = FloatingNavDefaults.contentBottomPadding() + 12.dp),
             ) {
                 Text(msg, color = MaterialTheme.colorScheme.inverseOnSurface, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
             }

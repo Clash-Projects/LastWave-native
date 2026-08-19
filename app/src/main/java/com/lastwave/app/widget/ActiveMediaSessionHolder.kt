@@ -18,4 +18,8 @@ import android.media.session.MediaController
  */
 object ActiveMediaSessionHolder {
     @Volatile var controller: MediaController? = null
+
+    fun clear(expected: MediaController) {
+        if (controller?.sessionToken == expected.sessionToken) controller = null
+    }
 }

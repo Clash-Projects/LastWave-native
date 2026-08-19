@@ -74,6 +74,7 @@ import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.common.groupShape
+import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.theme.ExpressivePillShape
 
 @Composable
@@ -158,7 +159,8 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                             // (nav bar / gesture area) — this skeleton had a
                             // flat 16dp instead, so its last row or two could
                             // sit right against, or under, the system bar.
-                            bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                            bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
+                                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
                         ),
                         // Same grouped-surface language as the real feed
                         // below (GroupGap, position-based rounding) instead
@@ -208,7 +210,8 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                             start = 16.dp,
                             end = 16.dp,
                             top = 12.dp,
-                            bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                            bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
+                                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                         ),
                         // One continuous group for the whole feed — only
                         // the very first row is rounded on top (TOP), every

@@ -102,6 +102,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.R
 import com.lastwave.app.data.local.AccentMode
 import com.lastwave.app.ui.common.ExpressiveHeader
@@ -234,7 +235,8 @@ fun SettingsScreen(
                 start = 16.dp,
                 end = 16.dp,
                 top = 22.dp,
-                bottom = 32.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                bottom = 32.dp + LocalMiniPlayerScrollClearance.current +
+                    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
             ),
             verticalArrangement = Arrangement.spacedBy(28.dp),
             modifier = Modifier,
@@ -538,7 +540,10 @@ fun SettingsScreen(
             kotlinx.coroutines.delay(3000)
             viewModel.dismissToast()
         }
-        Box(Modifier.fillMaxSize().padding(bottom = 24.dp), contentAlignment = Alignment.BottomCenter) {
+        Box(
+            Modifier.fillMaxSize().padding(bottom = 24.dp + LocalMiniPlayerScrollClearance.current),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
             Surface(shape = ExpressivePillShape, color = MaterialTheme.colorScheme.inverseSurface, tonalElevation = 6.dp) {
                 Text(msg, color = MaterialTheme.colorScheme.inverseOnSurface, modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
             }

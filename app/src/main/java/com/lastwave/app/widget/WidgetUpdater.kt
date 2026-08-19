@@ -3,8 +3,8 @@ package com.lastwave.app.widget
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
-import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.appwidget.updateAll
 import java.io.File
 import java.io.FileOutputStream
@@ -12,64 +12,89 @@ import java.io.FileOutputStream
 private const val TAG = "WidgetUpdater"
 private const val ART_FILE_NAME = "widget_now_playing_art.png"
 
-/**
- * The only place that writes to [NowPlayingWidget]'s persisted state.
- * Called from [com.lastwave.app.service.MediaScrobbleListenerService]
- * whenever the tracked session's metadata or playback state changes.
- *
- * Album art can't be stored directly in Glance's Preferences-backed
- * widget state (it only holds primitives), so it's written once to a
- * small cache file in app-private storage and just the path is stored —
- * this also means the widget still has last-known art immediately after
- * a process restart, before the scrobbler service reconnects.
- */
+/** Writes and refreshes the shared state of all four widget providers. */
 object WidgetUpdater {
-
     suspend fun publish(
         context: Context,
         title: String,
         artist: String,
+        album: String?,
+        sourceApp: String,
+        sourcePackage: String,
         art: Bitmap?,
         isPlaying: Boolean,
     ) {
         val artPath = art?.let { bitmap -> writeArt(context, bitmap) }
-        updateAll(context) { prefs ->
-            prefs[NowPlayingWidget.Keys.title] = title
-            prefs[NowPlayingWidget.Keys.artist] = artist
-            prefs[NowPlayingWidget.Keys.isPlaying] = isPlaying
-            prefs[NowPlayingWidget.Keys.hasSession] = true
-            if (artPath != null) prefs[NowPlayingWidget.Keys.artPath] = artPath
-            else prefs.remove(NowPlayingWidget.Keys.artPath)
-        }
+        NowPlayingWidgetSnapshot.write(
+            context,
+            NowPlayingWidgetSnapshot(
+                title = title,
+                artist = artist,
+                album = album.orEmpty(),
+                sourceApp = sourceApp,
+                sourcePackage = sourcePackage,
+                artPath = artPath,
+                isPlaying = isPlaying,
+                hasSession = true,
+            ),
+        )
+        updateAll(context)
     }
 
-    /** Called when the last watched session goes away — widget falls back
-     *  to its empty "nothing playing" state rather than showing stale info. */
     suspend fun clear(context: Context) {
-        updateAll(context) { prefs ->
-            prefs[NowPlayingWidget.Keys.hasSession] = false
-            prefs[NowPlayingWidget.Keys.isPlaying] = false
-        }
+        val current = NowPlayingWidgetSnapshot.read(context)
+        NowPlayingWidgetSnapshot.write(
+            context,
+            current.copy(artPath = null, isPlaying = false, hasSession = false),
+        )
+        updateAll(context)
     }
 
-    private suspend fun updateAll(
-        context: Context,
-        edit: (androidx.datastore.preferences.core.MutablePreferences) -> Unit,
-    ) {
+    /** Recompose all placed widgets after the app's live color scheme changes. */
+    suspend fun refreshTheme(context: Context) {
+        updateAll(context)
+    }
+
+    private suspend fun updateAll(context: Context) {
         runCatching {
             val manager = GlanceAppWidgetManager(context)
-            val ids = manager.getGlanceIds(NowPlayingWidget::class.java)
-            if (ids.isEmpty()) return // no instance of the widget on any home screen
-            ids.forEach { id ->
-                updateAppWidgetState(context, id) { prefs -> edit(prefs) }
-            }
-            NowPlayingWidget().updateAll(context)
+            updateWidget(context, manager, NowPlayingWidget::class.java, NowPlayingWidget())
+            updateWidget(context, manager, CompactNowPlayingWidget::class.java, CompactNowPlayingWidget())
+            updateWidget(context, manager, ArtworkNowPlayingWidget::class.java, ArtworkNowPlayingWidget())
+            updateWidget(context, manager, GlassNowPlayingWidget::class.java, GlassNowPlayingWidget())
         }.onFailure { Log.w(TAG, "widget update failed", it) }
     }
 
+    private suspend fun <T : GlanceAppWidget> updateWidget(
+        context: Context,
+        manager: GlanceAppWidgetManager,
+        widgetClass: Class<T>,
+        widget: T,
+    ) {
+        val ids = manager.getGlanceIds(widgetClass)
+        if (ids.isNotEmpty()) widget.updateAll(context)
+    }
+
+    @Synchronized
     private fun writeArt(context: Context, bitmap: Bitmap): String? = runCatching {
         val file = File(context.filesDir, ART_FILE_NAME)
-        FileOutputStream(file).use { out -> bitmap.compress(Bitmap.CompressFormat.PNG, 90, out) }
+        val pending = File(context.filesDir, "$ART_FILE_NAME.pending")
+        val largest = maxOf(bitmap.width, bitmap.height)
+        val cached = if (largest <= 384) bitmap else {
+            val scale = 384f / largest
+            Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * scale).toInt().coerceAtLeast(1),
+                (bitmap.height * scale).toInt().coerceAtLeast(1),
+                true,
+            )
+        }
+        FileOutputStream(pending).use { out -> cached.compress(Bitmap.CompressFormat.PNG, 90, out) }
+        if (cached !== bitmap) cached.recycle()
+        if (!pending.renameTo(file)) {
+            pending.copyTo(file, overwrite = true)
+            pending.delete()
+        }
         file.absolutePath
     }.onFailure { Log.w(TAG, "failed to cache widget art", it) }.getOrNull()
 }

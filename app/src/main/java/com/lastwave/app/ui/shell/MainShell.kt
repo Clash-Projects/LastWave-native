@@ -52,6 +52,7 @@ import com.lastwave.app.ui.generate.GenerateScreen
 import com.lastwave.app.ui.generate.MixLauncher
 import com.lastwave.app.ui.home.HomeScreen
 import com.lastwave.app.ui.playlist.PlaylistScreen
+import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.launch
@@ -83,7 +84,9 @@ object FloatingNavDefaults {
      */
     @Composable
     fun contentBottomPadding(): Dp =
-        ContentBottomPadding + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        ContentBottomPadding +
+            LocalMiniPlayerScrollClearance.current +
+            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 }
 
 // Hoisted to plain top-level vals instead of being constructed inside a
