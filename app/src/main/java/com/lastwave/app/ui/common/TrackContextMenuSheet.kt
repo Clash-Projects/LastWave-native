@@ -36,7 +36,6 @@ import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -167,6 +166,7 @@ fun TrackContextMenuSheet(
     target: TrackMenuTarget,
     capabilities: TrackMenuCapabilities,
     onDismiss: () -> Unit,
+    onPlayInLastWave: (() -> Unit)? = null,
     onStartMix: ((trackName: String, artistName: String) -> Unit)? = null,
     onExploreGenre: ((genre: String) -> Unit)? = null,
     onDeleteScrobble: ((trackName: String, artistName: String) -> Unit)? = null,
@@ -253,7 +253,12 @@ fun TrackContextMenuSheet(
                         }
                     }
                     val playable = PlayableTrack(title = t.name, artist = t.artist)
-                    add { pos -> MenuActionRow(Icons.Filled.PlayCircle, "Play in LastWave", position = pos) { musicPlayer.play(playable); onDismiss() } }
+                    add { pos ->
+                        MenuActionRow(Icons.Filled.PlayCircle, "Play in LastWave", position = pos) {
+                            onPlayInLastWave?.invoke() ?: musicPlayer.play(playable)
+                            onDismiss()
+                        }
+                    }
                     add { pos -> MenuActionRow(Icons.Filled.QueuePlayNext, "Play next", position = pos) { musicPlayer.playNext(playable); onDismiss() } }
                     add { pos -> MenuActionRow(Icons.Filled.QueueMusic, "Add to queue", position = pos) { musicPlayer.addToQueue(playable); onDismiss() } }
                     add { pos -> MenuActionRow(Icons.Filled.PlaylistAdd, "Add to playlist", position = pos) { addToPlaylist(playable); onDismiss() } }
@@ -417,7 +422,11 @@ private fun MenuInfoRow(
             Spacer(Modifier.width(16.dp))
             Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             if (loading) {
-                CircularProgressIndicator(modifier = Modifier.padding(start = 8.dp).width(14.dp), strokeWidth = 2.dp)
+                ExpressiveInlineLoadingIndicator(
+                    modifier = Modifier.padding(start = 8.dp),
+                    size = 14.dp,
+                    strokeWidth = 2.dp,
+                )
             } else if (onClick != null) {
                 Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
             }

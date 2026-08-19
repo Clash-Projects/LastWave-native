@@ -12,7 +12,7 @@ import java.io.FileOutputStream
 private const val TAG = "WidgetUpdater"
 private const val ART_FILE_NAME = "widget_now_playing_art.png"
 
-/** Writes and refreshes the shared state of all four widget providers. */
+/** Writes and refreshes the shared state of the now-playing widget. */
 object WidgetUpdater {
     suspend fun publish(
         context: Context,
@@ -59,9 +59,6 @@ object WidgetUpdater {
         runCatching {
             val manager = GlanceAppWidgetManager(context)
             updateWidget(context, manager, NowPlayingWidget::class.java, NowPlayingWidget())
-            updateWidget(context, manager, CompactNowPlayingWidget::class.java, CompactNowPlayingWidget())
-            updateWidget(context, manager, ArtworkNowPlayingWidget::class.java, ArtworkNowPlayingWidget())
-            updateWidget(context, manager, GlassNowPlayingWidget::class.java, GlassNowPlayingWidget())
         }.onFailure { Log.w(TAG, "widget update failed", it) }
     }
 

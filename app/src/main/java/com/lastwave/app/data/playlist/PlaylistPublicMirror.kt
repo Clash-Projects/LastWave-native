@@ -15,7 +15,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val MIRROR_TYPE = "lastwave-playlists"
-private const val MIRROR_SCHEMA = 1
+private const val MIRROR_SCHEMA = 3
 private const val TAG = "PlaylistPublicMirror"
 
 @Serializable
@@ -27,6 +27,8 @@ data class PlaylistMirrorEntry(
     val tracks: List<StoredTrack>,
     val createdAtMillis: Long,
     val discoverSignature: String? = null,
+    val customCoverUri: String? = null,
+    val isCompleted: Boolean = false,
 )
 
 @Serializable
@@ -120,6 +122,8 @@ class PlaylistPublicMirror @Inject constructor(
                     }.getOrDefault(emptyList()),
                     createdAtMillis = entity.createdAtMillis,
                     discoverSignature = entity.discoverSignature,
+                    customCoverUri = entity.customCoverUri,
+                    isCompleted = entity.isCompleted,
                 )
             },
         )
@@ -134,5 +138,7 @@ class PlaylistPublicMirror @Inject constructor(
         tracksJson = json.encodeToString(tracks),
         createdAtMillis = createdAtMillis,
         discoverSignature = discoverSignature,
+        customCoverUri = customCoverUri,
+        isCompleted = isCompleted,
     )
 }

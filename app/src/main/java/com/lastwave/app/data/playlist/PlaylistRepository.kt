@@ -35,6 +35,8 @@ data class SavedPlaylist(
     val tracks: List<GeneratedTrack>,
     val createdAtMillis: Long,
     val discoverSignature: String? = null,
+    val customCoverUri: String? = null,
+    val isCompleted: Boolean = false,
 )
 
 private const val MAX_SAVED_PLAYLISTS = 20
@@ -91,7 +93,10 @@ class PlaylistRepository @Inject constructor(
         val existing = getAll()
         val firstKey = tracks.firstOrNull()?.key
         existing.firstOrNull {
-            it.mode == mode && it.title.equals(title, ignoreCase = true) && it.tracks.firstOrNull()?.key == firstKey
+            !it.isCompleted &&
+                it.mode == mode &&
+                it.title.equals(title, ignoreCase = true) &&
+                it.tracks.firstOrNull()?.key == firstKey
         }
             ?.let { return it }
 
@@ -128,7 +133,9 @@ class PlaylistRepository @Inject constructor(
 
     suspend fun createCustom(title: String): SavedPlaylist {
         val cleanTitle = title.trim()
-        getAll().firstOrNull { it.mode == "custom" && it.title.equals(cleanTitle, ignoreCase = true) }
+        getAll().firstOrNull {
+            !it.isCompleted && it.mode == "custom" && it.title.equals(cleanTitle, ignoreCase = true)
+        }
             ?.let { return it }
         return save(
             title = cleanTitle,
@@ -150,11 +157,40 @@ class PlaylistRepository @Inject constructor(
         return updated.toDomain()
     }
 
-    suspend fun addTrack(id: Long, track: GeneratedTrack): SavedPlaylist? {
+    suspend fun setCustomCover(id: Long, uri: String?): SavedPlaylist? {
+        awaitStartupSync()
+        val entity = dao.getById(id) ?: return null
+        val cleanUri = uri?.trim()?.takeIf { it.isNotBlank() }
+        val updated = entity.copy(customCoverUri = cleanUri)
+        dao.upsert(updated)
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
+        return updated.toDomain()
+    }
+
+    /** Archives a finished playlist. It remains in backups/public storage,
+     *  but playlist-facing UI can omit it from the active list. */
+    suspend fun setCompleted(id: Long, completed: Boolean = true): SavedPlaylist? {
+        awaitStartupSync()
+        val entity = dao.getById(id) ?: return null
+        if (entity.isCompleted == completed) return entity.toDomain()
+        val updated = entity.copy(isCompleted = completed)
+        dao.upsert(updated)
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
+        return updated.toDomain()
+    }
+
+    suspend fun addTrack(
+        id: Long,
+        track: GeneratedTrack,
+        allowDuplicate: Boolean = false,
+    ): SavedPlaylist? {
         awaitStartupSync()
         val entity = dao.getById(id) ?: return null
         val playlist = entity.toDomain()
-        if (playlist.mode != "custom" || playlist.tracks.any { it.key == track.key }) return playlist
+        if (playlist.mode != "custom") return playlist
+        if (!allowDuplicate && playlist.tracks.any { it.key == track.key }) return playlist
         val updatedTracksJson = json.encodeToString((playlist.tracks + track).map { it.toStored() })
         val updated = entity.copy(tracksJson = updatedTracksJson)
         dao.upsert(updated)
@@ -206,7 +242,7 @@ class PlaylistRepository @Inject constructor(
         tracks.joinToString("|") { it.key }
 
     suspend fun findByDiscoverSignature(signature: String): SavedPlaylist? =
-        getAll().firstOrNull { it.discoverSignature == signature }
+        getAll().firstOrNull { !it.isCompleted && it.discoverSignature == signature }
 
     private suspend fun syncPublicMirror() {
         publicMirror.writeFromDatabase().onFailure { e ->
@@ -221,6 +257,16 @@ class PlaylistRepository @Inject constructor(
         } catch (e: Exception) {
             emptyList()
         }
-        return SavedPlaylist(id, title, subtitle, mode, tracks, createdAtMillis, discoverSignature)
+        return SavedPlaylist(
+            id = id,
+            title = title,
+            subtitle = subtitle,
+            mode = mode,
+            tracks = tracks,
+            createdAtMillis = createdAtMillis,
+            discoverSignature = discoverSignature,
+            customCoverUri = customCoverUri,
+            isCompleted = isCompleted,
+        )
     }
 }

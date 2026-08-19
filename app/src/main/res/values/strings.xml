@@ -1,12 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LastWave</string>
-    <string name="widget_classic_name">LastWave Player</string>
-    <string name="widget_classic_description">A balanced now-playing bar for every media app</string>
-    <string name="widget_compact_name">LastWave Compact</string>
-    <string name="widget_compact_description">A compact player with previous, play and next controls</string>
-    <string name="widget_artwork_name">LastWave Artwork</string>
-    <string name="widget_artwork_description">An artwork-first player for every media app</string>
-    <string name="widget_glass_name">LastWave Glass</string>
-    <string name="widget_glass_description">A large glass-tonal player using the LastWave theme</string>
+    <string name="widget_name">LastWave Player</string>
+    <string name="widget_description">Artwork, track details and playback controls for every media app</string>
 </resources>

@@ -81,54 +81,17 @@
             android:stopWithTask="false"
             android:foregroundServiceType="mediaPlayback" />
 
-        <!-- Four home-screen players. All share the same cross-app active
-             MediaSession state, controls and live LastWave color scheme. -->
+        <!-- One cross-app now-playing widget using the live LastWave color scheme. -->
         <receiver
             android:name=".widget.NowPlayingWidgetReceiver"
             android:exported="false"
-            android:label="@string/widget_classic_name">
+            android:label="@string/widget_name">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/now_playing_widget_info" />
-        </receiver>
-
-        <receiver
-            android:name=".widget.CompactNowPlayingWidgetReceiver"
-            android:exported="false"
-            android:label="@string/widget_compact_name">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/compact_now_playing_widget_info" />
-        </receiver>
-
-        <receiver
-            android:name=".widget.ArtworkNowPlayingWidgetReceiver"
-            android:exported="false"
-            android:label="@string/widget_artwork_name">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/artwork_now_playing_widget_info" />
-        </receiver>
-
-        <receiver
-            android:name=".widget.GlassNowPlayingWidgetReceiver"
-            android:exported="false"
-            android:label="@string/widget_glass_name">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/glass_now_playing_widget_info" />
         </receiver>
 
         <!-- Retained for the Playlist module's M3U export (SAF/legacy write) -->

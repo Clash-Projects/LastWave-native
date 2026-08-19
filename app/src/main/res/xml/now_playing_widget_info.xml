@@ -10,5 +10,5 @@
     android:widgetCategory="home_screen"
     android:initialLayout="@layout/glance_default_loading_layout"
     android:previewImage="@mipmap/ic_launcher"
-    android:description="@string/widget_classic_description"
+    android:description="@string/widget_description"
     android:updatePeriodMillis="0" />

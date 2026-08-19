@@ -18,7 +18,7 @@ import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val SCHEMA_VERSION = 2
+private const val SCHEMA_VERSION = 4
 private const val BACKUP_TYPE = "lastwave-backup"
 
 @Serializable
@@ -33,6 +33,8 @@ data class BackupPlaylistSnapshot(
     val tracksJson: String,
     val createdAtMillis: Long,
     val discoverSignature: String? = null,
+    val customCoverUri: String? = null,
+    val isCompleted: Boolean = false,
 )
 
 /** Added in schema v2. Absent/empty on older backup files — restoring one
@@ -93,7 +95,17 @@ class BackupRepository @Inject constructor(
             }
         }
         val playlists = playlistDao.getAll().map {
-            BackupPlaylistSnapshot(it.id, it.title, it.subtitle, it.mode, it.tracksJson, it.createdAtMillis, it.discoverSignature)
+            BackupPlaylistSnapshot(
+                id = it.id,
+                title = it.title,
+                subtitle = it.subtitle,
+                mode = it.mode,
+                tracksJson = it.tracksJson,
+                createdAtMillis = it.createdAtMillis,
+                discoverSignature = it.discoverSignature,
+                customCoverUri = it.customCoverUri,
+                isCompleted = it.isCompleted,
+            )
         }
         val seenTracks = seenTrackDao.getAll().map { BackupSeenTrackSnapshot(it.trackKey, it.lastSeenMillis) }
         val backup = BackupFile(
@@ -126,7 +138,17 @@ class BackupRepository @Inject constructor(
                 backup.prefs.booleans.forEach { (k, v) -> mutablePrefs[booleanPreferencesKey(k)] = v }
             }
             playlistDao.replaceAll(backup.playlists.map { p ->
-                SavedPlaylistEntity(p.id, p.title, p.subtitle, p.mode, p.tracksJson, p.createdAtMillis, p.discoverSignature)
+                SavedPlaylistEntity(
+                    id = p.id,
+                    title = p.title,
+                    subtitle = p.subtitle,
+                    mode = p.mode,
+                    tracksJson = p.tracksJson,
+                    createdAtMillis = p.createdAtMillis,
+                    discoverSignature = p.discoverSignature,
+                    customCoverUri = p.customCoverUri,
+                    isCompleted = p.isCompleted,
+                )
             })
             if (backup.seenTracks.isNotEmpty()) {
                 seenTrackDao.clear()

@@ -1,6 +1,8 @@
 package com.lastwave.app.ui.search
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,8 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +57,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.data.search.SearchResultItem
 import com.lastwave.app.data.search.SearchTab
 import com.lastwave.app.ui.common.ArtworkImage
+import com.lastwave.app.ui.common.ExpressiveMotion
+import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
@@ -134,15 +136,23 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
         val tabIndex = when (state.tab) {
             SearchTab.TRACKS -> 0; SearchTab.ARTISTS -> 1; SearchTab.ALBUMS -> 2; SearchTab.USERS -> 3
         }
-        ScrollableTabRow(selectedTabIndex = tabIndex, edgePadding = 16.dp) {
+        ScrollableTabRow(
+            selectedTabIndex = tabIndex,
+            edgePadding = 16.dp,
+            modifier = Modifier.safeHorizontalContentPadding(),
+        ) {
             Tab(selected = tabIndex == 0, onClick = { viewModel.setTab(SearchTab.TRACKS) }, text = { Text("Tracks") })
             Tab(selected = tabIndex == 1, onClick = { viewModel.setTab(SearchTab.ARTISTS) }, text = { Text("Artists") })
             Tab(selected = tabIndex == 2, onClick = { viewModel.setTab(SearchTab.ALBUMS) }, text = { Text("Albums") })
             Tab(selected = tabIndex == 3, onClick = { viewModel.setTab(SearchTab.USERS) }, text = { Text("Users") })
         }
 
-        Box(Modifier.fillMaxSize()) {
-            Crossfade(targetState = state.status, label = "searchState") { status ->
+        Box(Modifier.fillMaxSize().safeHorizontalContentPadding()) {
+            Crossfade(
+                targetState = state.status,
+                animationSpec = tween(ExpressiveMotion.Standard, easing = FastOutSlowInEasing),
+                label = "searchState",
+            ) { status ->
                 when (status) {
                     SearchStatus.IDLE -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -162,14 +172,14 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                     SearchStatus.RESULTS -> LazyColumn(
                         contentPadding = PaddingValues(
                             top = 8.dp,
-                            bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
-                                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                            bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding()
                         )
                     ) {
                         items(state.results, key = { it.entityId ?: it.url.ifBlank { it.name + it.artist.orEmpty() } }) { item ->
                             SearchResultRow(
                                 item = item,
                                 tab = state.tab,
+                                modifier = Modifier.animateItem(),
                                 onClick = { viewModel.playResult(item) },
                                 onLongClick = {
                                     if (state.tab == SearchTab.TRACKS) {
@@ -217,6 +227,7 @@ private fun SearchResultRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onMenu: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     // Last.fm's API has no add-friend/remove-friend method at all — the
@@ -236,7 +247,7 @@ private fun SearchResultRow(
     }
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .combinedClickable(
                 enabled = tab != SearchTab.USERS,

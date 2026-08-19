@@ -3,8 +3,6 @@ package com.lastwave.app.ui.shell
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -14,14 +12,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import com.lastwave.app.ui.common.PredictiveBackScreen
+import com.lastwave.app.ui.common.ExpressiveMotion
 import com.lastwave.app.ui.generate.GenerateScreen
 import com.lastwave.app.ui.generate.MixLauncher
 import com.lastwave.app.ui.home.HomeScreen
@@ -86,7 +87,7 @@ object FloatingNavDefaults {
     fun contentBottomPadding(): Dp =
         ContentBottomPadding +
             LocalMiniPlayerScrollClearance.current +
-            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            WindowInsets.safeDrawing.asPaddingValues().calculateBottomPadding()
 }
 
 // Hoisted to plain top-level vals instead of being constructed inside a
@@ -95,13 +96,9 @@ object FloatingNavDefaults {
 private val DockShape: Shape = RoundedCornerShape(32.dp)
 private val PillShape: Shape = RoundedCornerShape(50)
 
-// Snappier than the previous StiffnessLow: same expressive bounce
-// (dampingRatio unchanged) but a shorter settle time, which is both more
-// responsive-feeling and cheaper (fewer animation frames in flight).
-// A generic function (not a fixed-type val) because this same tuning is
-// used for a Color spec, an IntSize spec (animateContentSize/expand/shrink),
-// and so on — each call site needs its own correctly-typed instance.
-private fun <T> navSpring() = spring<T>(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow)
+// One shared spring keeps tab selection, label expansion, and pager controls
+// visually coherent while preserving each call site's inferred value type.
+private fun <T> navSpring() = ExpressiveMotion.spatialSpring<T>()
 
 @Composable
 fun MainShell(
@@ -196,7 +193,9 @@ private fun FloatingNavBar(
         tonalElevation = 5.dp,
         shadowElevation = 10.dp,
         modifier = modifier
-            .navigationBarsPadding()
+            .windowInsetsPadding(
+                WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
+            )
             .padding(horizontal = 24.dp, vertical = 12.dp),
     ) {
         Row(
@@ -257,7 +256,7 @@ private fun FloatingNavItem(
             Icon(icon, contentDescription = label, tint = contentColor, modifier = Modifier.size(24.dp))
             AnimatedVisibility(
                 visible = selected,
-                enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMedium)) + expandHorizontally(animationSpec = navSpring()),
+                enter = fadeIn(animationSpec = navSpring()) + expandHorizontally(animationSpec = navSpring()),
                 exit = fadeOut() + shrinkHorizontally(animationSpec = navSpring()),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

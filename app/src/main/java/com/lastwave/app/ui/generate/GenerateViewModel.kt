@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.generate.GenerateRepository
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.GenerationStatus
+import com.lastwave.app.data.generate.RECOMMENDATION_TRACK_COUNT
 import com.lastwave.app.data.naming.PlaylistNamer
 import com.lastwave.app.data.playlist.PlaylistRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -204,19 +205,37 @@ class GenerateViewModel @Inject constructor(
 
                 onProgress("Gathering recommendations\u2026")
 
+                val targetCount = if (mode == GenerateMode.RECOMMENDATIONS) {
+                    RECOMMENDATION_TRACK_COUNT
+                } else {
+                    state.trackCount
+                }
+
                 val raw: List<GeneratedTrack> = when (mode) {
-                    GenerateMode.TOP -> repository.fetchTopTracks(state.trackCount, state.period)
-                    GenerateMode.LIBRARY -> repository.fetchTopTracks(state.trackCount, state.period)
-                    GenerateMode.RECENT -> repository.fetchRecentTracks(state.trackCount)
-                    GenerateMode.SIMILAR_TRACKS -> repository.fetchSimilarTracks(state.seedTrackName, state.seedArtistName, state.trackCount)
-                    GenerateMode.SIMILAR_ARTISTS -> repository.fetchSimilarArtistTracks(state.seedArtistQuery, state.trackCount)
-                    GenerateMode.TAG -> repository.fetchTagTracks(state.tagInput, state.trackCount)
-                    GenerateMode.MIX -> repository.fetchMix(state.trackCount, onProgress)
-                    GenerateMode.RECOMMENDATIONS -> repository.fetchRecommendations(state.trackCount, onProgress)
+                    GenerateMode.TOP -> repository.fetchTopTracks(targetCount, state.period)
+                    GenerateMode.LIBRARY -> repository.fetchTopTracks(targetCount, state.period)
+                    GenerateMode.RECENT -> repository.fetchRecentTracks(targetCount)
+                    GenerateMode.SIMILAR_TRACKS -> repository.fetchSimilarTracks(state.seedTrackName, state.seedArtistName, targetCount)
+                    GenerateMode.SIMILAR_ARTISTS -> repository.fetchSimilarArtistTracks(state.seedArtistQuery, targetCount)
+                    GenerateMode.TAG -> repository.fetchTagTracks(state.tagInput, targetCount)
+                    GenerateMode.MIX -> repository.fetchMix(targetCount, onProgress)
+                    GenerateMode.RECOMMENDATIONS -> repository.fetchRecommendations(targetCount, onProgress)
                 }
 
                 onProgress("Pre-checking availability\u2026")
-                val finalTracks = repository.precheck(raw).take(state.trackCount)
+                val finalTracks = if (mode == GenerateMode.RECOMMENDATIONS) {
+                    // RecommendationEngine already applies its own diversity
+                    // stages. Do not discard fresh tracks afterward via the
+                    // generic per-artist cap and accidentally save under 35.
+                    repository.deduplicate(raw).take(targetCount)
+                } else {
+                    repository.precheck(raw).take(targetCount)
+                }
+                if (mode == GenerateMode.RECOMMENDATIONS && finalTracks.size < targetCount) {
+                    throw IllegalStateException(
+                        "Found only ${finalTracks.size} of $targetCount fresh tracks. Please try again.",
+                    )
+                }
                 repository.markAsSeen(finalTracks)
 
                 onProgress("Saving playlist\u2026")

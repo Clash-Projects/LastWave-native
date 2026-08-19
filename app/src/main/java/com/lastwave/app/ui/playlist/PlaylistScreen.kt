@@ -1,9 +1,11 @@
 package com.lastwave.app.ui.playlist
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -13,7 +15,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,8 +29,6 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -46,11 +46,11 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,6 +73,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,6 +84,7 @@ import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.PlaylistCover
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
@@ -104,8 +106,21 @@ import java.util.Locale
 @Composable
 fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
+    var coverEditorPlaylistId by remember { mutableStateOf<Long?>(null) }
+    var coverPickerPlaylistId by remember { mutableStateOf<Long?>(null) }
+    val coverPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val playlistId = coverPickerPlaylistId
+        if (uri != null && playlistId != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            viewModel.setCustomCover(playlistId, uri.toString())
+        }
+        coverPickerPlaylistId = null
+    }
 
     // Re-reads from Room whenever this tab regains visibility — this is how
     // a playlist just saved by Generate shows up here without polling.
@@ -128,20 +143,6 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
                         modifier = Modifier.size(40.dp),
                     ) {
                         Icon(Icons.Filled.Add, contentDescription = "Create custom playlist")
-                    }
-                    IconButton(
-                        onClick = viewModel::shuffleAllPlaylists,
-                        enabled = !state.isShufflingPlaylists && state.playlists.any { it.tracks.isNotEmpty() },
-                        modifier = Modifier.size(40.dp),
-                    ) {
-                        if (state.isShufflingPlaylists) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                            )
-                        } else {
-                            Icon(Icons.Filled.Shuffle, contentDescription = "Shuffle 25 songs from each playlist")
-                        }
                     }
                     Box {
                         Surface(
@@ -248,6 +249,8 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
                                     onRegenerate = { viewModel.regenerate(playlist.id) },
                                     onGenerateSimilar = { viewModel.generateSimilar(playlist.id) },
                                     onRename = { viewModel.requestRename(playlist.id) },
+                                    onEditCover = { coverEditorPlaylistId = playlist.id },
+                                    onComplete = { viewModel.completePlaylist(playlist.id) },
                                     onDelete = { viewModel.requestDelete(playlist.id) },
                                     onRemoveTrack = { trackIndex -> viewModel.removeTrack(playlist.id, trackIndex) },
                                     onPlay = { startIndex ->
@@ -362,6 +365,58 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
         )
     }
 
+    coverEditorPlaylistId?.let { playlistId ->
+        state.playlists.firstOrNull { it.id == playlistId }?.let { playlist ->
+            AlertDialog(
+                onDismissRequest = { coverEditorPlaylistId = null },
+                title = { Text("Playlist cover") },
+                text = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        PlaylistCover(playlist = playlist, modifier = Modifier.size(132.dp), cornerRadius = 26.dp)
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            if (playlist.customCoverUri.isNullOrBlank()) {
+                                "Automatic cover uses the first song with available artwork metadata."
+                            } else {
+                                "This playlist is using your selected image."
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            coverPickerPlaylistId = playlist.id
+                            coverEditorPlaylistId = null
+                            coverPicker.launch(arrayOf("image/*"))
+                        },
+                    ) {
+                        Text(if (playlist.customCoverUri.isNullOrBlank()) "Choose image" else "Change image")
+                    }
+                },
+                dismissButton = {
+                    Row {
+                        if (!playlist.customCoverUri.isNullOrBlank()) {
+                            TextButton(
+                                onClick = {
+                                    viewModel.setCustomCover(playlist.id, null)
+                                    coverEditorPlaylistId = null
+                                },
+                            ) { Text("Use automatic") }
+                        }
+                        TextButton(onClick = { coverEditorPlaylistId = null }) { Text("Done") }
+                    }
+                },
+            )
+        }
+    }
+
     if (state.deleteScrobbleAuthRequired) {
         AlertDialog(
             onDismissRequest = viewModel::dismissDeleteScrobbleAuthRequired,
@@ -445,6 +500,8 @@ private fun PlaylistCard(
     onRegenerate: () -> Unit,
     onGenerateSimilar: () -> Unit,
     onRename: () -> Unit,
+    onEditCover: () -> Unit,
+    onComplete: () -> Unit,
     onDelete: () -> Unit,
     onRemoveTrack: (Int) -> Unit,
     onPlay: (Int) -> Unit,
@@ -469,7 +526,7 @@ private fun PlaylistCard(
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CoverGrid(playlist.tracks)
+                PlaylistCover(playlist = playlist, modifier = Modifier.size(60.dp))
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text(playlist.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -489,7 +546,20 @@ private fun PlaylistCard(
                     modifier = Modifier.padding(horizontal = 14.dp),
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
                 )
-                Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 2.dp), horizontalArrangement = Arrangement.End) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 10.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.Start,
+                ) {
+                    IconButton(onClick = onComplete) {
+                        Icon(
+                            Icons.Filled.CheckCircle,
+                            contentDescription = "Mark playlist complete",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                     Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                         Surface(
                             onClick = { onPlay(0) },
@@ -506,6 +576,9 @@ private fun PlaylistCard(
                         }
                     }
                     Spacer(Modifier.width(4.dp))
+                    IconButton(onClick = onEditCover) {
+                        Icon(Icons.Filled.PhotoLibrary, contentDescription = "Choose playlist cover")
+                    }
                     if (playlist.mode == "custom") {
                         IconButton(onClick = onRename) { Icon(Icons.Filled.Edit, contentDescription = "Rename playlist") }
                     } else {
@@ -518,7 +591,11 @@ private fun PlaylistCard(
                     IconButton(onClick = onExport) { Icon(Icons.Filled.Download, contentDescription = "Export") }
                     if (playlist.mode != "custom") {
                         IconButton(onClick = onGenerateSimilar, enabled = !isGeneratingSimilar) {
-                            if (isGeneratingSimilar) CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp) else Icon(Icons.Filled.Shuffle, contentDescription = "Generate Similar")
+                            if (isGeneratingSimilar) {
+                                com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator(modifier = Modifier.size(18.dp))
+                            } else {
+                                Icon(Icons.Filled.Shuffle, contentDescription = "Generate Similar")
+                            }
                         }
                     }
                     IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error) }
@@ -534,36 +611,6 @@ private fun PlaylistCard(
                             onMenuClick = { onTrackMenu(track) },
                         )
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CoverGrid(tracks: List<GeneratedTrack>) {
-    val artworkTracks = tracks.take(4)
-    Box(Modifier.size(60.dp).clip(RoundedCornerShape(14.dp))) {
-        if (tracks.isEmpty()) {
-            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        } else if (artworkTracks.size < 4) {
-            val first = artworkTracks.first()
-            ArtworkImage(name = first.name, artist = first.artist, embeddedUrl = first.artworkUrl, fallbackIcon = Icons.Filled.MusicNote, modifier = Modifier.fillMaxSize())
-        } else {
-            Column(Modifier.fillMaxSize()) {
-                Row(Modifier.weight(1f)) {
-                    val t0 = artworkTracks[0]
-                    ArtworkImage(name = t0.name, artist = t0.artist, embeddedUrl = t0.artworkUrl, fallbackIcon = Icons.Filled.MusicNote, modifier = Modifier.weight(1f).fillMaxHeight())
-                    val t1 = artworkTracks[1]
-                    ArtworkImage(name = t1.name, artist = t1.artist, embeddedUrl = t1.artworkUrl, fallbackIcon = Icons.Filled.MusicNote, modifier = Modifier.weight(1f).fillMaxHeight())
-                }
-                Row(Modifier.weight(1f)) {
-                    val t2 = artworkTracks[2]
-                    ArtworkImage(name = t2.name, artist = t2.artist, embeddedUrl = t2.artworkUrl, fallbackIcon = Icons.Filled.MusicNote, modifier = Modifier.weight(1f).fillMaxHeight())
-                    val t3 = artworkTracks[3]
-                    ArtworkImage(name = t3.name, artist = t3.artist, embeddedUrl = t3.artworkUrl, fallbackIcon = Icons.Filled.MusicNote, modifier = Modifier.weight(1f).fillMaxHeight())
                 }
             }
         }

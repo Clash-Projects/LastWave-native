@@ -21,7 +21,6 @@ import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -124,17 +123,13 @@ fun LoginScreen(
             when (val state = authState) {
                 is AuthState.SignedIn -> SignedInCard(username = state.username, onSignOut = onSignOut)
 
-                AuthState.Unknown -> CircularProgressIndicator()
+                AuthState.Unknown -> com.lastwave.app.ui.common.ExpressiveLoadingIndicator()
 
                 else -> Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                     when (webAuthState) {
                         is WebAuthState.AwaitingApproval -> {
-                            CircularProgressIndicator()
-                            Spacer(Modifier.height(16.dp))
-                            Text(
-                                "Waiting for approval in the browser\u2026",
-                                style = MaterialTheme.typography.bodyMedium,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            com.lastwave.app.ui.common.ExpressiveLoadingIndicator(
+                                message = "Waiting for approval in the browser\u2026",
                             )
                             Spacer(Modifier.height(16.dp))
                             OutlinedButton(
@@ -156,7 +151,10 @@ fun LoginScreen(
                                 modifier = Modifier.fillMaxWidth().height(52.dp),
                             ) {
                                 if (busy) {
-                                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                    com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator(
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        size = 20.dp,
+                                    )
                                 } else {
                                     Text("Connect with Last.fm")
                                 }

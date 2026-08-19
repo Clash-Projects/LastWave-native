@@ -1,12 +1,14 @@
 package com.lastwave.app.ui.discover
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,19 +17,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -41,7 +36,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,16 +59,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.ExpressiveMotion
 import com.lastwave.app.ui.common.GroupGap
 import com.lastwave.app.ui.common.GroupPosition
 import com.lastwave.app.ui.common.HeaderActionIcon
+import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.common.groupShape
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
+import com.lastwave.app.ui.player.LocalMusicPlayer
 import com.lastwave.app.ui.theme.ExpressivePillShape
 
 @Composable
@@ -122,8 +121,14 @@ private fun shimmerBrush(): Brush {
 @Composable
 fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsState()
+    val musicPlayer = LocalMusicPlayer.current
     val listState = rememberLazyListState()
     var menuTrack by remember { mutableStateOf<GeneratedTrack?>(null) }
+    val playbackQueue = remember(state.tracks) { state.tracks.map(GeneratedTrack::toPlayableTrack) }
+    val playFromDiscover: (GeneratedTrack) -> Unit = { track ->
+        val index = state.tracks.indexOfFirst { it.key == track.key }.coerceAtLeast(0)
+        musicPlayer.playQueue(playbackQueue, index)
+    }
 
     val shouldLoadMore by remember {
         derivedStateOf {
@@ -146,9 +151,13 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
             },
         )
 
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().safeHorizontalContentPadding()) {
             val shimmer = shimmerBrush()
-            Crossfade(targetState = state.isLoading && state.tracks.isEmpty(), label = "discoverState") { isLoading ->
+            Crossfade(
+                targetState = state.isLoading && state.tracks.isEmpty(),
+                animationSpec = tween(ExpressiveMotion.Standard, easing = FastOutSlowInEasing),
+                label = "discoverState",
+            ) { isLoading ->
                 if (isLoading) {
                     LazyColumn(
                         contentPadding = PaddingValues(
@@ -159,8 +168,7 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                             // (nav bar / gesture area) — this skeleton had a
                             // flat 16dp instead, so its last row or two could
                             // sit right against, or under, the system bar.
-                            bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
-                                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                            bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                         ),
                         // Same grouped-surface language as the real feed
                         // below (GroupGap, position-based rounding) instead
@@ -210,8 +218,7 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                             start = 16.dp,
                             end = 16.dp,
                             top = 12.dp,
-                            bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
-                                WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                            bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding()
                         ),
                         // One continuous group for the whole feed — only
                         // the very first row is rounded on top (TOP), every
@@ -231,12 +238,17 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                             DiscoverCard(
                                 track = track,
                                 position = position,
+                                onPlay = { playFromDiscover(track) },
                                 onMenu = { menuTrack = track },
                                 modifier = Modifier.animateItem(),
                             )
                         }
                         if (state.isLoadingMore) {
-                            item { Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(modifier = Modifier.size(24.dp)) } }
+                            item {
+                                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                    com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator()
+                                }
+                            }
                         }
                     }
                 }
@@ -258,6 +270,7 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
         TrackContextMenuSheet(
             target = TrackMenuTarget.Track(track.name, track.artist, track.url),
             capabilities = TrackMenuCapabilities(showCopyActions = true, showDeleteScrobble = true),
+            onPlayInLastWave = { playFromDiscover(track) },
             onDismiss = { menuTrack = null },
         )
     }
@@ -267,17 +280,15 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
 private fun DiscoverCard(
     track: GeneratedTrack,
     position: GroupPosition,
+    onPlay: () -> Unit,
     onMenu: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     com.lastwave.app.ui.common.ExpressiveGroupTrackRow(
         title = track.name,
         subtitle = track.artist,
         position = position,
-        onClick = {
-            musicPlayer.play(com.lastwave.app.playback.PlayableTrack(track.name, track.artist, album = track.album, artworkUrl = track.artworkUrl))
-        },
+        onClick = onPlay,
         modifier = modifier,
         leading = {
             ArtworkImage(name = track.name, artist = track.artist, embeddedUrl = track.artworkUrl, fallbackIcon = Icons.Filled.MusicNote, modifier = Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)))
@@ -285,6 +296,13 @@ private fun DiscoverCard(
         trailing = { com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenu) },
     )
 }
+
+private fun GeneratedTrack.toPlayableTrack() = PlayableTrack(
+    title = name,
+    artist = artist,
+    album = album,
+    artworkUrl = artworkUrl,
+)
 
 @Composable
 private fun SkeletonCard(

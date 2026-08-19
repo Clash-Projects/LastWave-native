@@ -19,9 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -43,7 +40,6 @@ import androidx.compose.material.icons.filled.Headset
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,6 +52,7 @@ import androidx.compose.material3.TextButton
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.HeaderActionIcon
+import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
@@ -108,7 +105,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import coil.compose.SubcomposeAsyncImage
 import com.lastwave.app.data.repository.HomeSortMode
@@ -183,13 +179,16 @@ fun HomeScreen(
         },
     ) { scaffoldPadding ->
         if (uiState.isLoading) {
-            Box(Modifier.fillMaxSize().padding(scaffoldPadding), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+            Box(
+                Modifier.fillMaxSize().padding(scaffoldPadding).safeHorizontalContentPadding(),
+                contentAlignment = Alignment.Center,
+            ) {
+                com.lastwave.app.ui.common.ExpressiveLoadingIndicator(message = "Loading your listening history")
             }
             return@Scaffold
         }
 
-        Column(Modifier.fillMaxSize().padding(scaffoldPadding)) {
+        Column(Modifier.fillMaxSize().padding(scaffoldPadding).safeHorizontalContentPadding()) {
             HeaderRow(
                 displayUsername = if (uiState.isViewingFriend) uiState.viewingUsername else uiState.username,
                 isViewingFriend = uiState.isViewingFriend,

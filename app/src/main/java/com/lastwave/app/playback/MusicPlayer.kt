@@ -82,6 +82,7 @@ class MusicPlayer @Inject constructor(
     private var ticker: Job? = null
     private var playRequest: Job? = null
     private var queueEnrichmentJob: Job? = null
+    private var unavailableSkipJob: Job? = null
     private var sleepTimerDeadlineMs: Long? = null
     private var sleepTimerStep = 0
     private val _state = MutableStateFlow(MusicPlayerState())
@@ -94,6 +95,10 @@ class MusicPlayer @Inject constructor(
         }
         override fun onPlayerError(error: PlaybackException) {
             _state.update { it.copy(error = error.message ?: error.errorCodeName, isBuffering = false) }
+            scheduleUnavailableMediaSkip(
+                failedIndex = player.currentMediaItemIndex,
+                failedMediaId = player.currentMediaItem?.mediaId,
+            )
         }
     }
 
@@ -167,6 +172,7 @@ class MusicPlayer @Inject constructor(
 
     fun play(track: PlayableTrack) {
         playRequest?.cancel()
+        unavailableSkipJob?.cancel()
         playRequest = applicationScope.launch {
             withContext(Dispatchers.Main.immediate) {
                 ensureForegroundService()
@@ -213,6 +219,7 @@ class MusicPlayer @Inject constructor(
         val selectedIndex = startIndex.coerceIn(tracks.indices)
         playRequest?.cancel()
         queueEnrichmentJob?.cancel()
+        unavailableSkipJob?.cancel()
         playRequest = applicationScope.launch {
             withContext(Dispatchers.Main.immediate) {
                 ensureForegroundService()
@@ -247,6 +254,7 @@ class MusicPlayer @Inject constructor(
             } catch (error: Exception) {
                 withContext(Dispatchers.Main.immediate) {
                     _state.update { it.copy(isBuffering = false, error = error.message ?: "Unable to play this playlist") }
+                    scheduleUnavailableQueueSkip(tracks, selectedIndex)
                 }
             }
         }
@@ -329,6 +337,7 @@ class MusicPlayer @Inject constructor(
     fun stopAndClear() = onMain {
         playRequest?.cancel()
         queueEnrichmentJob?.cancel()
+        unavailableSkipJob?.cancel()
         sleepTimerDeadlineMs = null
         sleepTimerStep = 0
         player.stop()
@@ -383,6 +392,47 @@ class MusicPlayer @Inject constructor(
         }
     }
 
+    /** A generated Last.fm track can have no playable YouTube Music match.
+     * Keep the queue moving instead of leaving the player stopped on it. */
+    @MainThread
+    private fun scheduleUnavailableQueueSkip(tracks: List<PlayableTrack>, failedIndex: Int) {
+        val nextIndex = failedIndex + 1
+        if (nextIndex !in tracks.indices) return
+        unavailableSkipJob?.cancel()
+        unavailableSkipJob = applicationScope.launch(Dispatchers.Main.immediate) {
+            delay(UNAVAILABLE_SKIP_DELAY_MS)
+            if (_state.value.currentIndex == failedIndex && !player.isPlaying) {
+                unavailableSkipJob = null
+                playQueue(tracks, nextIndex)
+            }
+        }
+    }
+
+    /** Handles failures raised by ExoPlayer after the queue has been prepared,
+     * including unresolved entries reached during an automatic transition. */
+    @MainThread
+    private fun scheduleUnavailableMediaSkip(failedIndex: Int, failedMediaId: String?) {
+        val suggestedNext = player.nextMediaItemIndex
+        val nextIndex = suggestedNext.takeIf { it != C.INDEX_UNSET && it != failedIndex }
+            ?: (failedIndex + 1).takeIf { it < player.mediaItemCount }
+            ?: 0.takeIf { player.repeatMode == Player.REPEAT_MODE_ALL && player.mediaItemCount > 1 }
+            ?: C.INDEX_UNSET
+        if (failedIndex == C.INDEX_UNSET || nextIndex == C.INDEX_UNSET) return
+        unavailableSkipJob?.cancel()
+        unavailableSkipJob = applicationScope.launch(Dispatchers.Main.immediate) {
+            delay(UNAVAILABLE_SKIP_DELAY_MS)
+            if (player.currentMediaItemIndex != failedIndex || player.currentMediaItem?.mediaId != failedMediaId) {
+                return@launch
+            }
+            unavailableSkipJob = null
+            ensureForegroundService()
+            _state.update { it.copy(error = null, isBuffering = true) }
+            player.seekToDefaultPosition(nextIndex)
+            player.prepare()
+            player.play()
+        }
+    }
+
     private fun onMain(action: () -> Unit) {
         applicationScope.launch(Dispatchers.Main.immediate) { action() }
     }
@@ -428,6 +478,7 @@ class MusicPlayer @Inject constructor(
     }
 
     private companion object {
+        const val UNAVAILABLE_SKIP_DELAY_MS = 2_500L
         val SLEEP_TIMER_MINUTES = intArrayOf(0, 15, 30, 60)
     }
 }

@@ -29,6 +29,8 @@ data class SavedPlaylistEntity(
     val tracksJson: String,
     val createdAtMillis: Long,
     val discoverSignature: String? = null,
+    val customCoverUri: String? = null,
+    val isCompleted: Boolean = false,
 )
 
 @Dao

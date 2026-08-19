@@ -26,15 +26,3 @@ abstract class LastWaveWidgetReceiver : GlanceAppWidgetReceiver() {
 class NowPlayingWidgetReceiver : LastWaveWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = NowPlayingWidget()
 }
-
-class CompactNowPlayingWidgetReceiver : LastWaveWidgetReceiver() {
-    override val glanceAppWidget: GlanceAppWidget = CompactNowPlayingWidget()
-}
-
-class ArtworkNowPlayingWidgetReceiver : LastWaveWidgetReceiver() {
-    override val glanceAppWidget: GlanceAppWidget = ArtworkNowPlayingWidget()
-}
-
-class GlassNowPlayingWidgetReceiver : LastWaveWidgetReceiver() {
-    override val glanceAppWidget: GlanceAppWidget = GlassNowPlayingWidget()
-}

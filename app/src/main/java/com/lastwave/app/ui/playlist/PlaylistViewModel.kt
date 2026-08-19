@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.artwork.ArtworkRepository
 import com.lastwave.app.data.generate.GenerateRepository
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.generate.RECOMMENDATION_TRACK_COUNT
 import com.lastwave.app.data.naming.PlaylistNamer
 import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.playlist.PlaylistExportEvents
@@ -39,7 +40,6 @@ data class PlaylistUiState(
     val toastMessage: String? = null,
     val deleteScrobbleAuthRequired: Boolean = false,
     val isGenerating: Boolean = false,
-    val isShufflingPlaylists: Boolean = false,
     val generatingMessage: String = "",
     val createDialogVisible: Boolean = false,
     val renamePlaylistId: Long? = null,
@@ -100,7 +100,10 @@ class PlaylistViewModel @Inject constructor(
     fun load(justGeneratedId: Long? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            val all = sortPlaylists(playlistRepository.getAll(), _uiState.value.sortMode)
+            val all = sortPlaylists(
+                playlistRepository.getAll().filterNot { it.isCompleted },
+                _uiState.value.sortMode,
+            )
             val newest = justGeneratedId ?: all.maxByOrNull { it.createdAtMillis }?.id
             _uiState.update {
                 it.copy(
@@ -112,8 +115,8 @@ class PlaylistViewModel @Inject constructor(
                 )
             }
             if (justGeneratedId != null) {
-                // Pre-enrich the first few tracks of the newest card so its
-                // cover grid isn't empty on first render (§4.3).
+                // Pre-enrich likely automatic-cover candidates so the newest
+                // playlist can show artwork immediately on first render.
                 all.firstOrNull { it.id == justGeneratedId }?.let { pl ->
                     artworkRepository.enrichBatch(pl.tracks.take(6).map { it.name to it.artist })
                 }
@@ -133,53 +136,6 @@ class PlaylistViewModel @Inject constructor(
         PlaylistSortMode.DATE_ASC -> playlists.sortedBy { it.createdAtMillis }
         PlaylistSortMode.NAME -> playlists.sortedBy { it.title.lowercase() }
         PlaylistSortMode.TRACK_COUNT -> playlists.sortedByDescending { it.tracks.size }
-    }
-
-    fun shuffleAllPlaylists() {
-        if (_uiState.value.isShufflingPlaylists) return
-
-        val sourcePlaylists = _uiState.value.playlists.filter { it.tracks.isNotEmpty() }
-        if (sourcePlaylists.isEmpty()) {
-            _uiState.update { it.copy(toastMessage = "No playlist songs to shuffle") }
-            return
-        }
-
-        viewModelScope.launch {
-            _uiState.update { it.copy(isShufflingPlaylists = true) }
-            try {
-                val uniqueTracks = LinkedHashMap<String, GeneratedTrack>()
-                sourcePlaylists.shuffled().forEach { playlist ->
-                    playlist.tracks
-                        .shuffled()
-                        .distinctBy { it.key }
-                        .take(25)
-                        .forEach { track -> uniqueTracks.putIfAbsent(track.key, track) }
-                }
-
-                val shuffledTracks = uniqueTracks.values.shuffled()
-                val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())
-                val saved = playlistRepository.save(
-                    title = title,
-                    subtitle = "Up to 25 from each \u00b7 ${sourcePlaylists.size} playlists",
-                    mode = "shuffle",
-                    tracks = shuffledTracks,
-                )
-                _uiState.update {
-                    it.copy(
-                        isShufflingPlaylists = false,
-                        toastMessage = "Created ${saved.title} with ${shuffledTracks.size} songs",
-                    )
-                }
-                load(justGeneratedId = saved.id)
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isShufflingPlaylists = false,
-                        toastMessage = e.message ?: "Couldn't create shuffled playlist",
-                    )
-                }
-            }
-        }
     }
 
     fun regenerateLatest() {
@@ -225,6 +181,39 @@ class PlaylistViewModel @Inject constructor(
             playlistRepository.rename(id, title)
             _uiState.update { it.copy(renamePlaylistId = null, toastMessage = "Playlist renamed") }
             load()
+        }
+    }
+
+    fun setCustomCover(id: Long, uri: String?) {
+        viewModelScope.launch {
+            playlistRepository.setCustomCover(id, uri)
+            _uiState.update {
+                it.copy(toastMessage = if (uri.isNullOrBlank()) "Using automatic playlist cover" else "Playlist cover updated")
+            }
+            load()
+        }
+    }
+
+    fun completePlaylist(id: Long) {
+        val playlist = _uiState.value.playlists.firstOrNull { it.id == id } ?: return
+        viewModelScope.launch {
+            try {
+                // Persist every track first. If this fails, the playlist stays
+                // visible so completing it can be retried safely.
+                generateRepository.rememberInDiscoveryHistory(playlist.tracks)
+                playlistRepository.setCompleted(id)
+                _uiState.update {
+                    it.copy(
+                        playlists = it.playlists.filterNot { item -> item.id == id },
+                        expandedIds = it.expandedIds - id,
+                        toastMessage = "${playlist.title} completed · ${playlist.tracks.size} tracks added to Discovery History",
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(toastMessage = e.message ?: "Couldn't complete playlist")
+                }
+            }
         }
     }
 
@@ -292,14 +281,28 @@ class PlaylistViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(regeneratingId = id) }
             try {
-                val raw: List<GeneratedTrack> = when (playlist.mode) {
-                    "top", "library" -> generateRepository.fetchTopTracks(playlist.tracks.size.coerceAtLeast(5), "overall")
-                    "recent" -> generateRepository.fetchRecentTracks(playlist.tracks.size.coerceAtLeast(5))
-                    "mix" -> generateRepository.fetchMix(playlist.tracks.size.coerceAtLeast(5))
-                    "recommendations" -> generateRepository.fetchRecommendations(playlist.tracks.size.coerceAtLeast(5))
-                    else -> generateRepository.fetchMix(playlist.tracks.size.coerceAtLeast(5))
+                val targetCount = if (playlist.mode == "recommendations") {
+                    RECOMMENDATION_TRACK_COUNT
+                } else {
+                    playlist.tracks.size.coerceAtLeast(5)
                 }
-                val finalTracks = generateRepository.precheck(raw).take(playlist.tracks.size.coerceAtLeast(5))
+                val raw: List<GeneratedTrack> = when (playlist.mode) {
+                    "top", "library" -> generateRepository.fetchTopTracks(targetCount, "overall")
+                    "recent" -> generateRepository.fetchRecentTracks(targetCount)
+                    "mix" -> generateRepository.fetchMix(targetCount)
+                    "recommendations" -> generateRepository.fetchRecommendations(targetCount)
+                    else -> generateRepository.fetchMix(targetCount)
+                }
+                val finalTracks = if (playlist.mode == "recommendations") {
+                    generateRepository.deduplicate(raw).take(targetCount)
+                } else {
+                    generateRepository.precheck(raw).take(targetCount)
+                }
+                if (playlist.mode == "recommendations" && finalTracks.size < targetCount) {
+                    throw IllegalStateException(
+                        "Found only ${finalTracks.size} of $targetCount fresh tracks. Please try again.",
+                    )
+                }
                 generateRepository.markAsSeen(finalTracks)
                 val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())
                 val saved = playlistRepository.save(title, playlist.subtitle, playlist.mode, finalTracks)

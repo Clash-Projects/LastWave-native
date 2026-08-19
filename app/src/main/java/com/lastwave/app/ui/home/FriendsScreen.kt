@@ -4,19 +4,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,6 +30,8 @@ import com.lastwave.app.ui.common.ExpressiveGroup
 import com.lastwave.app.ui.common.ExpressiveGroupTrackRow
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
+import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.safeHorizontalContentPadding
 private val FriendsContainerShape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
 /**
@@ -99,11 +97,11 @@ fun FriendsScreen(
             Column(
                 Modifier
                     .fillMaxSize()
+                    .safeHorizontalContentPadding()
                     .padding(horizontal = 12.dp)
                     .padding(
                         top = 12.dp,
-                        bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
-                            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                        bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                     )
                     // The actual bug: this Column never had a scroll
                     // modifier at all, so anything past whatever fit in
@@ -115,7 +113,7 @@ fun FriendsScreen(
             ) {
             when {
                 isLoading -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                    com.lastwave.app.ui.common.ExpressiveLoadingIndicator(message = "Loading friends")
                 }
                 friends.isEmpty() -> Text(
                     "No friends found on this Last.fm account.",

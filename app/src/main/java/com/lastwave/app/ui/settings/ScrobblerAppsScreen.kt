@@ -8,11 +8,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,7 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -45,6 +41,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.ui.common.ExpressiveGroupSelectRow
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.groupPositionFor
+import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 
 @Composable
@@ -85,6 +83,7 @@ fun ScrobblerAppsScreen(
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .safeHorizontalContentPadding()
                     .padding(horizontal = 16.dp, vertical = 10.dp),
             )
 
@@ -92,6 +91,7 @@ fun ScrobblerAppsScreen(
                 Row(
                     Modifier
                         .fillMaxWidth()
+                        .safeHorizontalContentPadding()
                         .padding(horizontal = 16.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.End,
                 ) {
@@ -104,9 +104,11 @@ fun ScrobblerAppsScreen(
             }
 
             if (loading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                Box(Modifier.fillMaxSize().safeHorizontalContentPadding(), contentAlignment = Alignment.Center) {
+                    com.lastwave.app.ui.common.ExpressiveLoadingIndicator(message = "Finding media apps")
+                }
             } else if (apps.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize().safeHorizontalContentPadding(), contentAlignment = Alignment.Center) {
                     Text(
                         if (query.isBlank()) "No apps found" else "No apps match \"$query\"",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -118,10 +120,10 @@ fun ScrobblerAppsScreen(
                         start = 16.dp,
                         end = 16.dp,
                         top = 4.dp,
-                        bottom = 32.dp + LocalMiniPlayerScrollClearance.current +
-                            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                        bottom = 32.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                     ),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
+                    modifier = Modifier.safeHorizontalContentPadding(),
                 ) {
                     var lastWasSelected = true
                     itemsIndexed(apps, key = { _, app -> app.packageName }) { index, app ->
@@ -160,6 +162,7 @@ fun ScrobblerAppsScreen(
                             selected = isSelected,
                             position = groupPositionFor(index, apps.size),
                             onClick = { viewModel.toggle(app.packageName) },
+                            modifier = Modifier.animateItem(),
                             leadingContent = if (app.icon != null) {
                                 {
                                     Image(

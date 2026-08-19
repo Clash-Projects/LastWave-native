@@ -20,17 +20,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -62,6 +54,8 @@ import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
+import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 
 /**
@@ -96,8 +90,14 @@ fun GenresScreen(
             )
 
             when {
-                state.isLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { com.lastwave.app.ui.common.ExpressiveLoadingIndicator() }
-                state.stats.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                state.isLoading -> Box(
+                    Modifier.fillMaxSize().safeHorizontalContentPadding(),
+                    contentAlignment = Alignment.Center,
+                ) { com.lastwave.app.ui.common.ExpressiveLoadingIndicator() }
+                state.stats.isEmpty() -> Box(
+                    Modifier.fillMaxSize().safeHorizontalContentPadding(),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Text("No genre data yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> LazyColumn(
@@ -105,13 +105,18 @@ fun GenresScreen(
                         start = 16.dp,
                         end = 16.dp,
                         top = 8.dp,
-                        bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
-                            WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                        bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                     ),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxSize().safeHorizontalContentPadding(),
                 ) {
                     items(state.stats, key = { it.name }) { stat ->
-                        GenreBarRow(name = stat.name, percent = stat.percentOfTop, onClick = { viewModel.openDetail(stat.name) })
+                        GenreBarRow(
+                            name = stat.name,
+                            percent = stat.percentOfTop,
+                            onClick = { viewModel.openDetail(stat.name) },
+                            modifier = Modifier.animateItem(),
+                        )
                     }
                 }
             }
@@ -156,9 +161,14 @@ private fun PeriodDropdown(period: String, onChange: (String) -> Unit) {
 }
 
 @Composable
-private fun GenreBarRow(name: String, percent: Float, onClick: () -> Unit) {
+private fun GenreBarRow(
+    name: String,
+    percent: Float,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val animated by animateFloatAsState(targetValue = percent.coerceIn(0.03f, 1f), animationSpec = tween(600), label = "genreBar")
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Column(modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(name.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text("${(percent * 100).toInt()}%", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -219,11 +229,17 @@ private fun GenreDetailSheet(
 
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(bottom = 12.dp)) {
                 items(state.detailTracks, key = { it.key }) { track ->
-                    GenreTrackRow(track, onMenu = { menuTrack = track })
+                    GenreTrackRow(
+                        track,
+                        onMenu = { menuTrack = track },
+                        modifier = Modifier.animateItem(),
+                    )
                 }
                 if (state.detailLoading) {
                     item {
-                        Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(modifier = Modifier.size(24.dp)) }
+                        Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                            com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator()
+                        }
                     }
                 }
                 if (!state.detailLoading && state.detailTracks.isEmpty()) {
@@ -257,10 +273,14 @@ private fun SortPill(current: GenreDetailSort, onChange: (GenreDetailSort) -> Un
 }
 
 @Composable
-private fun GenreTrackRow(track: GeneratedTrack, onMenu: () -> Unit) {
+private fun GenreTrackRow(
+    track: GeneratedTrack,
+    onMenu: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     Row(
-        Modifier.fillMaxWidth()
+        modifier.fillMaxWidth()
             .clickable { musicPlayer.play(com.lastwave.app.playback.PlayableTrack(track.name, track.artist, album = track.album, artworkUrl = track.artworkUrl)) }
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

@@ -23,6 +23,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "GenerateRepository"
+const val RECOMMENDATION_TRACK_COUNT = 35
 
 /** 21 days / 3000 entries — exact constants from app.js's _SEEN_TTL/_SEEN_MAX. */
 private const val SEEN_TTL_MILLIS = 21L * 24 * 60 * 60 * 1000
@@ -123,12 +124,29 @@ class GenerateRepository @Inject constructor(
 
     suspend fun markAsSeen(tracks: List<GeneratedTrack>) {
         try {
-            val now = System.currentTimeMillis()
-            seenTrackDao.upsertAll(tracks.map { SeenTrackEntity(it.key, now) })
-            seenTrackDao.trimToNewest(SEEN_MAX)
+            rememberInDiscoveryHistory(tracks)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to record seen tracks", e)
         }
+    }
+
+    /** Strong write used when completing a playlist: callers are notified
+     *  if history persistence fails, so the playlist is not hidden first. */
+    suspend fun rememberInDiscoveryHistory(tracks: List<GeneratedTrack>) {
+        if (tracks.isEmpty()) return
+        val now = System.currentTimeMillis()
+        seenTrackDao.upsertAll(tracks.map { SeenTrackEntity(it.key, now) })
+        seenTrackDao.trimToNewest(SEEN_MAX)
+    }
+
+    /** Every key shown by Settings' "Clear Discovery History" action.
+     *  Recommendation generation treats this as a hard blacklist, without
+     *  the normal 21-day freshness expiry used by the other modes. */
+    private suspend fun discoveryHistoryKeys(): Set<String> = try {
+        seenTrackDao.getAll().mapTo(mutableSetOf()) { it.trackKey }
+    } catch (e: Exception) {
+        Log.e(TAG, "Discovery-history read failed", e)
+        throw IllegalStateException("Couldn't read Discovery History", e)
     }
 
     suspend fun clearSeenTracks() = try {
@@ -360,13 +378,19 @@ class GenerateRepository @Inject constructor(
         // current session playlist (session playlist isn't tracked at the
         // repository layer here, so this covers the persisted equivalents —
         // saved playlists — exactly as the original's _plLoad() pass does).
+        // Last.fm's source endpoints have no per-request exclusion list, so
+        // Every key currently stored in Discovery History is enforced here
+        // as a hard local blacklist, without the normal 21-day expiry.
         val blacklist = (profile.recentTrackKeys + profile.topTrackKeys).toMutableSet()
+        blacklist.addAll(discoveryHistoryKeys())
         try {
             val lovedRes = call(mapOf("method" to "user.getlovedtracks", "user" to username(), "limit" to "200"))
             GenerateJson.normalise(lovedRes["lovedtracks"]?.jsonObject?.get("track")).forEach { blacklist.add(it.key) }
         } catch (e: Exception) { Log.d(TAG, "fetchRecommendations loved-tracks miss", e) }
         try {
-            playlistRepository.getAll().forEach { pl -> pl.tracks.forEach { blacklist.add(it.key) } }
+            playlistRepository.getAll()
+                .filterNot { it.isCompleted }
+                .forEach { playlist -> playlist.tracks.forEach { blacklist.add(it.key) } }
         } catch (e: Exception) { Log.d(TAG, "fetchRecommendations saved-playlists blacklist miss", e) }
 
         val engine = RecommendationEngine(

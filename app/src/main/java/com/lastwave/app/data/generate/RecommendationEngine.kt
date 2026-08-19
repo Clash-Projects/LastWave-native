@@ -7,8 +7,9 @@ import kotlin.random.Random
 
 private const val RTAG = "RecommendationEngine"
 
-/** Exact constants from app.js's _RECO_* consts. */
+/** Core recommendation constants plus a bounded API-refill guard. */
 private const val RECO_MAX_CYCLES = 5
+private const val RECO_REFILL_ATTEMPTS = 24
 private const val RECO_ARTIST_CAP = 2
 private const val RECO_ALBUM_CAP = 2
 private const val RECO_GENRE_CAP_RATIO = 0.35
@@ -72,12 +73,9 @@ private class RecoContext(
 }
 
 /**
- * Faithful port of app.js's fetchRecommendations() + its full scoring/
- * selection/interleave machinery (_recoScore, _recoSelectFinal,
- * _recoInterleave, and the 7-source _RECO_PIPELINE). This is the most
- * complex algorithm in the app — every constant, formula, and pipeline
- * order below was checked line-by-line against app.js rather than
- * reconstructed from memory.
+ * Port of app.js's scoring/interleave machinery and 7-source pipeline.
+ * Selection is intentionally stricter here: history freshness never
+ * relaxes, and the source pipeline refills instead of using heard tracks.
  *
  * [rawCall] is GenerateRepository's authenticated Last.fm call primitive —
  * injected rather than duplicated so this engine and the simple fetch
@@ -162,6 +160,7 @@ class RecommendationEngine(
         val pool = if (cycle == 1) ctx.profile.recentTracksRaw else ctx.profile.topTracksRaw
         val seeds = pool.shuffled().drop((cycle - 1) * 6).take(6)
         for (s in seeds) {
+            if (ctx.pool.size >= ctx.total) break
             if (s.name.isBlank() || s.artist.isBlank()) continue
             try {
                 val d = rawCall(mapOf("method" to "track.getsimilar", "track" to s.name, "artist" to s.artist, "limit" to "30"))
@@ -190,6 +189,7 @@ class RecommendationEngine(
         val batch = ctx.pendingArtists.take(12)
         repeat(batch.size) { ctx.pendingArtists.removeAt(0) }
         for (artistName in batch) {
+            if (ctx.pool.size >= ctx.total) break
             try {
                 val page = ceil(Random.nextDouble() * 6).toInt().coerceAtLeast(1)
                 val d = rawCall(mapOf("method" to "artist.gettoptracks", "artist" to artistName, "limit" to "10", "page" to page.toString()))
@@ -201,6 +201,7 @@ class RecommendationEngine(
     private suspend fun srcGenreMatches(ctx: RecoContext, cycle: Int) {
         val tags = ctx.profile.topTags.toList().shuffled().drop((cycle - 1) * 4).take(4)
         for (tag in tags) {
+            if (ctx.pool.size >= ctx.total) break
             ctx.exploredTags.add(tag)
             try {
                 val page = (Random.nextDouble() * 10).toInt() + 2
@@ -215,6 +216,7 @@ class RecommendationEngine(
         val neighbors = ctx.exploredTags.mapNotNull { RECO_GENRE_NEIGHBORS[it] }
         val unique = neighbors.distinct().filter { !ctx.exploredTags.contains(it) }.take(4)
         for (tag in unique) {
+            if (ctx.pool.size >= ctx.total) break
             ctx.exploredTags.add(tag)
             try {
                 val page = (Random.nextDouble() * 6).toInt() + 1
@@ -245,6 +247,7 @@ class RecommendationEngine(
     private suspend fun srcDiscoveryPool(ctx: RecoContext) {
         val wide = ctx.profile.topArtistNames.shuffled()
         for (artistName in wide) {
+            if (ctx.pool.size >= ctx.total) break
             try {
                 val page = ceil(Random.nextDouble() * 8).toInt().coerceAtLeast(1)
                 val d = rawCall(mapOf("method" to "artist.gettoptracks", "artist" to artistName, "limit" to "15", "page" to page.toString()))
@@ -253,7 +256,57 @@ class RecommendationEngine(
         }
     }
 
-    // ── Selection — exact port of _recoSelectFinal's 6-stage relaxation ──
+    /** Targeted fallback used only while fewer than [RecoContext.total]
+     *  eligible tracks exist. Random pages expand the pool without ever
+     *  bypassing [RecoContext.blacklist]. */
+    private suspend fun srcFreshRefill(ctx: RecoContext, attempt: Int) {
+        val limit = maxOf(50, ctx.total * 2).coerceAtMost(200).toString()
+        val tag = ctx.profile.topTags.randomOrNull()
+        val artist = ctx.profile.topArtistNames.randomOrNull()
+        val useTag = tag != null && (attempt % 2 == 0 || artist == null)
+
+        if (useTag) {
+            try {
+                val page = 2 + ((attempt * 7) % 48)
+                val data = rawCall(
+                    mapOf(
+                        "method" to "tag.gettoptracks",
+                        "tag" to tag!!,
+                        "limit" to limit,
+                        "page" to page.toString(),
+                    ),
+                )
+                ctx.addAll(jsonTracks(data, "tracks", "track"), 1, "tag:$tag", isPrimaryGenre = true)
+            } catch (e: Exception) {
+                Log.d(RTAG, "fresh tag refill miss for $tag", e)
+            }
+            return
+        }
+
+        if (artist != null) {
+            try {
+                val similar = rawCall(
+                    mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "30"),
+                )
+                val candidateArtist = jsonNames(similar, "similarartists", "artist").shuffled().firstOrNull()
+                    ?: return
+                val page = 1 + ((attempt * 5) % 12)
+                val data = rawCall(
+                    mapOf(
+                        "method" to "artist.gettoptracks",
+                        "artist" to candidateArtist,
+                        "limit" to limit,
+                        "page" to page.toString(),
+                    ),
+                )
+                ctx.addAll(tracks = jsonTracks(data, "toptracks", "track"), weight = 2, tag = "artist:${candidateArtist.lowercase()}")
+            } catch (e: Exception) {
+                Log.d(RTAG, "fresh artist refill miss for $artist", e)
+            }
+        }
+    }
+
+    // ── Selection — progressive diversity relaxation, strict freshness ──
 
     private fun selectFinal(scored: List<Scored>, total: Int): List<GeneratedTrack> {
         val genreCap = maxOf(2, ceil(total * RECO_GENRE_CAP_RATIO).toInt())
@@ -293,12 +346,13 @@ class RecommendationEngine(
             return picked
         }
 
+        // Diversity may relax, freshness never does. A recommendation track
+        // already present in Discovery History must never fill a thin pool.
         var result = attempt(RECO_ARTIST_CAP, true, true, true)
-        if (result.size < total) result = attempt(RECO_ARTIST_CAP, true, true, false)
-        if (result.size < total) result = attempt(3, true, true, false)
-        if (result.size < total) result = attempt(3, true, false, false)
-        if (result.size < total) result = attempt(3, false, false, false)
-        if (result.size < total) result = attempt(99, false, false, false)
+        if (result.size < total) result = attempt(3, true, true, true)
+        if (result.size < total) result = attempt(3, true, false, true)
+        if (result.size < total) result = attempt(3, false, false, true)
+        if (result.size < total) result = attempt(99, false, false, true)
         return result
     }
 
@@ -327,29 +381,43 @@ class RecommendationEngine(
         return out
     }
 
-    /** Main entry point — port of fetchRecommendations(total). */
+    /** Main entry point for a complete, strictly fresh recommendation set. */
     suspend fun run(total: Int, profile: TasteProfile, blacklist: Set<String>): List<GeneratedTrack> {
         onProgress("Reading your listening mood\u2026")
         val ctx = RecoContext(total, profile, blacklist)
 
         var cycle = 1
-        while (cycle <= RECO_MAX_CYCLES) {
+        while (cycle <= RECO_MAX_CYCLES && ctx.pool.size < total) {
             onProgress(if (cycle == 1) "Reading your listening mood\u2026" else "Digging deeper for more discoveries (round $cycle)\u2026")
 
             srcSimilarTracks(ctx, cycle)
-            srcSimilarArtists(ctx, cycle)
-            srcArtistTopTracks(ctx)
-            srcGenreMatches(ctx, cycle)
-            srcTagMatches(ctx)
-            srcRelatedArtists(ctx)
-            srcDiscoveryPool(ctx)
+            if (ctx.pool.size < total) {
+                srcSimilarArtists(ctx, cycle)
+                srcArtistTopTracks(ctx)
+            }
+            if (ctx.pool.size < total) srcGenreMatches(ctx, cycle)
+            if (ctx.pool.size < total) srcTagMatches(ctx)
+            if (ctx.pool.size < total) srcRelatedArtists(ctx)
+            if (ctx.pool.size < total) srcDiscoveryPool(ctx)
 
             val freshKeys = isFresh(ctx.pool.values.map { it.track }).map { it.key }.toSet()
             val freshCount = ctx.pool.keys.count { it in freshKeys }
-            Log.d(RTAG, "cycle $cycle: pool=${ctx.pool.size} unique, fresh=$freshCount, need~${ceil(total * 1.6)}")
+            Log.d(RTAG, "cycle $cycle: pool=${ctx.pool.size} unique, fresh=$freshCount, need=$total")
 
-            if (ctx.pool.size >= total * 1.6 || freshCount >= total * 1.4) break
             cycle++
+        }
+
+        var refillAttempt = 0
+        while (ctx.pool.size < total && refillAttempt < RECO_REFILL_ATTEMPTS) {
+            onProgress("Finding fresh tracks\u2026 ${ctx.pool.size}/$total")
+            srcFreshRefill(ctx, refillAttempt)
+            refillAttempt++
+        }
+
+        if (ctx.pool.size < total) {
+            throw IllegalStateException(
+                "Found only ${ctx.pool.size} of $total new tracks outside Discovery History. Please try again.",
+            )
         }
 
         onProgress("Curating your personal recommendations\u2026")
@@ -372,15 +440,9 @@ class RecommendationEngine(
         Log.d(RTAG, "selected ${final.size}/$total from candidate pool")
 
         if (final.size < total) {
-            Log.w(RTAG, "pool too small, filling ${total - final.size} slot(s) from the user's own library as a last resort")
-            val usedKeys = final.map { it.key }.toMutableSet()
-            val backup = (profile.topTracksRaw + profile.recentTracksRaw)
-            for (t in backup) {
-                if (final.size >= total) break
-                if (t.key in usedKeys) continue
-                usedKeys.add(t.key)
-                final = final + t
-            }
+            throw IllegalStateException(
+                "Found only ${final.size} of $total tracks that are still fresh. Please try again.",
+            )
         }
 
         // Dedup + cap

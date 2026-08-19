@@ -29,13 +29,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -62,7 +55,6 @@ import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -106,6 +98,8 @@ import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.R
 import com.lastwave.app.data.local.AccentMode
 import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.theme.ExpressivePillShape
 
 private data class AccentPreset(val name: String, val hex: String)
@@ -235,11 +229,10 @@ fun SettingsScreen(
                 start = 16.dp,
                 end = 16.dp,
                 top = 22.dp,
-                bottom = 32.dp + LocalMiniPlayerScrollClearance.current +
-                    WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                bottom = 32.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding()
             ),
             verticalArrangement = Arrangement.spacedBy(28.dp),
-            modifier = Modifier,
+            modifier = Modifier.safeHorizontalContentPadding(),
         ) {
             item {
                 AccountCard(
@@ -525,7 +518,7 @@ fun SettingsScreen(
                     enabled = !state.sessionKeyLoading,
                 ) {
                     if (state.sessionKeyLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator(size = 18.dp)
                     } else {
                         Text("Enable")
                     }
@@ -541,7 +534,14 @@ fun SettingsScreen(
             viewModel.dismissToast()
         }
         Box(
-            Modifier.fillMaxSize().padding(bottom = 24.dp + LocalMiniPlayerScrollClearance.current),
+            Modifier
+                .fillMaxSize()
+                .safeHorizontalContentPadding()
+                .padding(
+                    bottom = 24.dp +
+                        LocalMiniPlayerScrollClearance.current +
+                        safeDrawingBottomPadding(),
+                ),
             contentAlignment = Alignment.BottomCenter,
         ) {
             Surface(shape = ExpressivePillShape, color = MaterialTheme.colorScheme.inverseSurface, tonalElevation = 6.dp) {

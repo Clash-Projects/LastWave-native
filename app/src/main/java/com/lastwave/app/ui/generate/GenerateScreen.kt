@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.lastwave.app.data.generate.RECOMMENDATION_TRACK_COUNT
 import com.lastwave.app.ui.common.ExpressiveGroup
 import com.lastwave.app.ui.common.ExpressiveGroupSelectRow
 import com.lastwave.app.ui.common.ExpressiveHeader
@@ -176,18 +177,28 @@ fun GenerateScreen(
                                     GenerateMode.SIMILAR_ARTISTS -> SimilarArtistSeedOptions(state, viewModel)
                                     GenerateMode.TAG -> TagOptions(state.tagInput, viewModel::setTagInput, viewModel::setGenreChip)
                                     GenerateMode.MIX -> HintText("Mix includes: top tracks, recent plays & similar artists' tracks.")
-                                    GenerateMode.RECOMMENDATIONS -> HintText("Track count is set by the slider below")
+                                    GenerateMode.RECOMMENDATIONS -> HintText(
+                                        "$RECOMMENDATION_TRACK_COUNT tracks, all outside Discovery History",
+                                    )
                                 }
 
                                 Spacer(Modifier.height(20.dp))
-                                Text("Track count: ${state.trackCount}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
-                                Slider(
-                                    value = state.trackCount.toFloat(),
-                                    onValueChange = { viewModel.setTrackCount(it.toInt()) },
-                                    valueRange = 5f..35f,
-                                    steps = 29,
-                                    enabled = !state.isGenerating,
-                                )
+                                if (mode == GenerateMode.RECOMMENDATIONS) {
+                                    Text(
+                                        "Track count: $RECOMMENDATION_TRACK_COUNT (fixed)",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                } else {
+                                    Text("Track count: ${state.trackCount}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+                                    Slider(
+                                        value = state.trackCount.toFloat(),
+                                        onValueChange = { viewModel.setTrackCount(it.toInt()) },
+                                        valueRange = 5f..35f,
+                                        steps = 29,
+                                        enabled = !state.isGenerating,
+                                    )
+                                }
                                 Spacer(Modifier.height(10.dp))
                                 Button(
                                     onClick = viewModel::generate,
@@ -325,7 +336,10 @@ private fun SimilarTrackSeedOptions(state: GenerateUiState, viewModel: GenerateV
         Column(Modifier.height(160.dp)) {
             LazyColumn {
                 items(state.seedTrackResults, key = { it.key }) { t ->
-                    TextButton(onClick = { viewModel.pickSeedTrack(t) }, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(
+                        onClick = { viewModel.pickSeedTrack(t) },
+                        modifier = Modifier.fillMaxWidth().animateItem(),
+                    ) {
                         Text("${t.name} \u2014 ${t.artist}", modifier = Modifier.weight(1f))
                     }
                 }
@@ -356,7 +370,10 @@ private fun SimilarArtistSeedOptions(state: GenerateUiState, viewModel: Generate
         Column(Modifier.height(160.dp)) {
             LazyColumn {
                 items(state.seedArtistResults, key = { it }) { name ->
-                    TextButton(onClick = { viewModel.pickSeedArtist(name) }, modifier = Modifier.fillMaxWidth()) {
+                    TextButton(
+                        onClick = { viewModel.pickSeedArtist(name) },
+                        modifier = Modifier.fillMaxWidth().animateItem(),
+                    ) {
                         Text(name, modifier = Modifier.weight(1f))
                     }
                 }

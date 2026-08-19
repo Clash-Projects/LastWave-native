@@ -4,10 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.safeHorizontalContentPadding
 
 /**
  * Watch MediaScrobbleListenerService's actual decisions live — added after
@@ -57,7 +56,7 @@ fun ScrobblerDebugLogScreen(
         )
 
         if (entries.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().safeHorizontalContentPadding(), contentAlignment = Alignment.Center) {
                 Text(
                     "Nothing logged yet.\nPlay a track from one of your chosen apps and watch it appear here.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -72,10 +71,10 @@ fun ScrobblerDebugLogScreen(
                     start = 16.dp,
                     end = 16.dp,
                     top = 12.dp,
-                    bottom = 24.dp + LocalMiniPlayerScrollClearance.current +
-                        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+                    bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                 ),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.safeHorizontalContentPadding(),
             ) {
                 items(entries) { entry ->
                     Text(
@@ -83,6 +82,7 @@ fun ScrobblerDebugLogScreen(
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.animateItem(),
                     )
                 }
             }

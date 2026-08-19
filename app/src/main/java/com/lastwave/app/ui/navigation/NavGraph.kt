@@ -1,14 +1,23 @@
 package com.lastwave.app.ui.navigation
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.runtime.remember
 import androidx.navigation.NavHostController
@@ -24,6 +33,8 @@ import com.lastwave.app.ui.discover.DiscoverScreen
 import com.lastwave.app.ui.genres.GenresScreen
 import com.lastwave.app.ui.shell.MainShell
 import com.lastwave.app.ui.common.PredictiveBackScreen
+import com.lastwave.app.ui.common.ExpressiveLoadingIndicator
+import com.lastwave.app.ui.common.ExpressiveMotion
 import com.lastwave.app.ui.genres.GenreExplorer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -53,7 +64,14 @@ fun LastWaveNavHost(
         }
     }
 
-    NavHost(navController = navController, startDestination = Screen.Splash.route) {
+    NavHost(
+        navController = navController,
+        startDestination = Screen.Splash.route,
+        enterTransition = { ExpressiveMotion.forwardEnter() },
+        exitTransition = { ExpressiveMotion.forwardExit() },
+        popEnterTransition = { ExpressiveMotion.backEnter() },
+        popExitTransition = { ExpressiveMotion.backExit() },
+    ) {
 
         // Resolves the persisted session BEFORE showing any interactive UI.
         // This is what makes login persistent: without this gate, the app
@@ -80,9 +98,7 @@ fun LastWaveNavHost(
                 }
             }
 
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            LaunchGate()
         }
 
         composable(Screen.Login.route) {
@@ -219,6 +235,31 @@ fun LastWaveNavHost(
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 DiscoverScreen(onBack = { navController.popBackStack() })
             }
+        }
+    }
+}
+
+@Composable
+private fun LaunchGate() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                tonalElevation = 6.dp,
+                shadowElevation = 10.dp,
+                modifier = Modifier.size(88.dp),
+            ) {
+                androidx.compose.foundation.Image(
+                    painter = painterResource(com.lastwave.app.R.drawable.ic_launcher_foreground),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Spacer(Modifier.height(18.dp))
+            Text("LastWave", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(20.dp))
+            ExpressiveLoadingIndicator(message = "Preparing your music")
         }
     }
 }
