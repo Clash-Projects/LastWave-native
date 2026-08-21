@@ -66,8 +66,20 @@ class SettingsViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
 
-    val session: StateFlow<SessionData> = sessionPreferences.session
-        .stateIn(viewModelScope, SharingStarted.Eagerly, SessionData())
+    val authState: StateFlow<com.lastwave.app.data.model.AuthState> = authRepository.authState
+
+    val session: StateFlow<SessionData> = kotlinx.coroutines.flow.combine(
+        sessionPreferences.session,
+        authRepository.authState,
+    ) { sess, auth ->
+        if (sess.username.isNotBlank()) {
+            sess
+        } else if (auth is com.lastwave.app.data.model.AuthState.SignedIn && auth.username.isNotBlank()) {
+            sess.copy(username = auth.username)
+        } else {
+            sess
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, SessionData())
 
     val theme: StateFlow<ThemeUiState> = themeRepository.uiState
 

@@ -47,8 +47,8 @@ object BotGuardTokenGenerator {
     private const val REQUEST_KEY = "O43z0dpjhgX20SCx4KAo"
     private const val JS_BRIDGE = "BotGuardBridge"
 
-    private const val COLD_START_TIMEOUT_MS = 30_000L
-    private const val WARM_TIMEOUT_MS = 5_000L
+    private const val COLD_START_TIMEOUT_MS = 1_500L
+    private const val WARM_TIMEOUT_MS = 1_000L
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)

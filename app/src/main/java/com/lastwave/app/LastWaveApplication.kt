@@ -47,9 +47,19 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
      *    seen rows are pure in-memory hits.
      *  - Hardware acceleration enabled for fast GPU texture uploading.
      */
-    override fun newImageLoader(): ImageLoader =
-        ImageLoader.Builder(this)
-            .okHttpClient(okHttpClient)
+    override fun newImageLoader(): ImageLoader {
+        val imageClient = okHttpClient.newBuilder()
+            .dispatcher(okhttp3.Dispatcher().apply {
+                maxRequests = 128
+                maxRequestsPerHost = 32
+            })
+            .connectionPool(okhttp3.ConnectionPool(32, 5, java.util.concurrent.TimeUnit.MINUTES))
+            .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+
+        return ImageLoader.Builder(this)
+            .okHttpClient(imageClient)
             .memoryCache {
                 MemoryCache.Builder(this)
                     .maxSizePercent(0.35)
@@ -64,4 +74,5 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
             .respectCacheHeaders(false)
             .allowHardware(true)
             .build()
+    }
 }

@@ -274,25 +274,31 @@ class HomeViewModel @Inject constructor(
         val target = _uiState.value.viewingUsername
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isRefreshing = true) }
-            val recent = homeRepository.fetchRecentTracks(username = target)
-            recent.fold(
-                onSuccess = { page ->
-                    val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
-                    notifyNowPlayingArtwork(nowPlaying)
-                    _uiState.update {
-                        it.copy(
-                            isRefreshing = false,
-                            nowPlaying = nowPlaying,
-                            allTracks = merged,
-                            page = page.page,
-                            totalPages = page.totalPages,
-                            error = null,
-                        )
-                    }
-                    preloadPeriodTracks()
-                },
-                onFailure = { e -> _uiState.update { it.copy(isRefreshing = false, error = e.message) } },
-            )
+            try {
+                val recent = homeRepository.fetchRecentTracks(username = target)
+                recent.fold(
+                    onSuccess = { page ->
+                        val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
+                        notifyNowPlayingArtwork(nowPlaying)
+                        _uiState.update {
+                            it.copy(
+                                isRefreshing = false,
+                                nowPlaying = nowPlaying,
+                                allTracks = merged,
+                                page = page.page,
+                                totalPages = page.totalPages,
+                                error = null,
+                            )
+                        }
+                        preloadPeriodTracks()
+                    },
+                    onFailure = { e -> _uiState.update { it.copy(isRefreshing = false, error = e.message) } },
+                )
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isRefreshing = false, error = e.message) }
+            } finally {
+                _uiState.update { it.copy(isRefreshing = false) }
+            }
         }
     }
 
