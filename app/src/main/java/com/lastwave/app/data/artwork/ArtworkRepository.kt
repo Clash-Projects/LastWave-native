@@ -44,6 +44,7 @@ class ArtworkRepository @Inject constructor(
     private val cacheDao: ArtworkCacheDao,
     private val lastFm: LastFmTrackInfoProvider,
     private val itunes: ITunesArtworkProvider,
+    private val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
 ) {
     private val _resolved = MutableStateFlow<Map<String, String>>(emptyMap())
     val resolved: StateFlow<Map<String, String>> = _resolved.asStateFlow()
@@ -56,7 +57,7 @@ class ArtworkRepository @Inject constructor(
                 val cachedEntities = cacheDao.getAll()
                 val now = System.currentTimeMillis()
                 val validMap = cachedEntities
-                    .filter { now - it.timestampMillis < DISK_CACHE_TTL_MILLIS }
+                    .filter { it.url.isNotBlank() && now - it.timestampMillis < DISK_CACHE_TTL_MILLIS }
                     .associate { it.cacheKey to it.url }
                 _resolved.update { validMap + it }
                 Log.d(TAG, "Pre-warmed memory cache with ${validMap.size} artwork entries")
@@ -80,10 +81,6 @@ class ArtworkRepository @Inject constructor(
         } catch (t: Throwable) {
             Log.e(CRASH_TAG, "Artwork lookup crashed and was suppressed | Track: $name | Artist: $artist | Cache key: $key", t)
             inFlightMutex.withLock { inFlight.remove(key) }
-            // Don't cache this as a permanent failure — a crash (e.g. a
-            // transient Room error) shouldn't be treated the same as a
-            // confirmed "no artwork anywhere" result. Next resolve() call
-            // for this key will simply try again.
         }
     }
 
@@ -92,8 +89,10 @@ class ArtworkRepository @Inject constructor(
 
         // 1. Memory cache — instant, no I/O.
         _resolved.value[key]?.let {
-            Log.d(TAG, "Cache hit (memory) | Track: $name | Artist: $artist")
-            return
+            if (it.isNotBlank()) {
+                Log.d(TAG, "Cache hit (memory) | Track: $name | Artist: $artist")
+                return
+            }
         }
 
         val alreadyRunning = inFlightMutex.withLock {
@@ -109,17 +108,14 @@ class ArtworkRepository @Inject constructor(
                 Log.e(CRASH_TAG, "Room read failed, treating as cache miss | Track: $name | Artist: $artist", e)
                 null
             }
-            if (cached != null && System.currentTimeMillis() - cached.timestampMillis < DISK_CACHE_TTL_MILLIS) {
+            if (cached != null && cached.url.isNotBlank() && System.currentTimeMillis() - cached.timestampMillis < DISK_CACHE_TTL_MILLIS) {
                 Log.d(TAG, "Cache hit (disk) | Track: $name | Artist: $artist | Provider: ${cached.provider} | Downloaded artwork URL: ${cached.url}")
                 publish(key, cached.url)
                 return
             }
             Log.d(TAG, "Cache miss | Track: $name | Artist: $artist")
 
-            // 3. Last.fm track.getInfo — first real network tier. The
-            //    provider itself already catches its own exceptions and
-            //    returns null on failure; this outer try/catch is a second
-            //    line of defense, not a substitute for that.
+            // 3. Last.fm track.getInfo — first real network tier.
             val fromLastFm = safeFetch("Last.fm track.getInfo", name, artist) { lastFm.fetchArtworkUrl(name, artist) }
             if (!fromLastFm.isNullOrBlank()) {
                 Log.d(TAG, "Image loaded successfully | Provider: lastfm | Track: $name | Artist: $artist | Downloaded artwork URL: $fromLastFm")
@@ -127,9 +123,7 @@ class ArtworkRepository @Inject constructor(
                 return
             }
 
-            // 4. iTunes — only tried because Last.fm returned nothing.
-            //    Always on: the Settings toggle for this was removed, the
-            //    fallback itself stays unconditional.
+            // 4. iTunes fallback
             val fromItunes = safeFetch("iTunes", name, artist) { itunes.fetchArtworkUrl(name, artist) }
             if (!fromItunes.isNullOrBlank()) {
                 Log.d(TAG, "Image loaded successfully | Provider: itunes | Track: $name | Artist: $artist | Downloaded artwork URL: $fromItunes")
@@ -137,10 +131,18 @@ class ArtworkRepository @Inject constructor(
                 return
             }
 
-            // 5. Every provider missed — cache "" so we don't re-hit the
-            //    network again until the TTL expires.
-            Log.d(TAG, "Image failed | Track: $name | Artist: $artist | Reason: no artwork from any provider")
-            save(key, "none", "")
+            // 5. YouTube Music catalog artwork fallback (universal coverage)
+            val fromInnerTube = safeFetch("YouTube Music", name, artist) {
+                innerTube.findBestMatch(name, artist).artworkUrl
+            }
+            if (!fromInnerTube.isNullOrBlank()) {
+                Log.d(TAG, "Image loaded successfully | Provider: youtube | Track: $name | Artist: $artist | Downloaded artwork URL: $fromInnerTube")
+                save(key, "youtube", fromInnerTube)
+                return
+            }
+
+            // 6. In-memory temporary placeholder (don't permanently save empty to DB)
+            publish(key, "")
         } finally {
             inFlightMutex.withLock { inFlight.remove(key) }
         }
