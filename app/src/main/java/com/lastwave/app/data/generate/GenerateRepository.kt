@@ -47,36 +47,7 @@ class GenerateRepository @Inject constructor(
     // same moment) into a single network call. Entries are removed the
     // instant their call finishes — this is purely about not paying twice
     // for the same request at the same time, never a longer-lived/stale
-    // cache, so results are always as fresh as an uncached call.
-    private val inFlightScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val inFlightCalls = ConcurrentHashMap<String, Deferred<JsonObject>>()
-
-    /** Exposed (not just private) so RecommendationEngine can share the exact
-     *  same signed/authenticated call path rather than duplicating it. */
-    suspend fun call(params: Map<String, String>): JsonObject {
-        val cacheKey = params.entries.sortedBy { it.key }.joinToString("&") { "${it.key}=${it.value}" }
-        val deferred = inFlightCalls.getOrPut(cacheKey) {
-            inFlightScope.async { performCall(params) }.also { d ->
-                d.invokeOnCompletion { inFlightCalls.remove(cacheKey, d) }
-            }
-        }
-        return deferred.await()
-    }
-
-    private val callSemaphore = kotlinx.coroutines.sync.Semaphore(permits = 3)
-    private var lastCallTime = 0L
-    private val callTimeLock = Any()
-
-    private suspend fun performCall(params: Map<String, String>): JsonObject = callSemaphore.withPermit {
-        val now = System.currentTimeMillis()
-        val delayMs = synchronized(callTimeLock) {
-            val elapsed = now - lastCallTime
-            val wait = if (elapsed < 180L) 180L - elapsed else 0L
-            lastCallTime = now + wait
-            wait
-        }
-        if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
-
+    suspend fun call(params: Map<String, String>): JsonObject = withContext(Dispatchers.IO) {
         val session = sessionPreferences.session.first()
         val apiKey = session.apiKey.ifBlank { com.lastwave.app.data.network.LastFmAppCredentials.API_KEY }
         val response = api.get(params + ("api_key" to apiKey) + ("format" to "json"))
@@ -88,6 +59,7 @@ class GenerateRepository @Inject constructor(
         parsed["error"]?.let { throw IllegalStateException(parsed["message"]?.toString() ?: "Last.fm error") }
         parsed
     }
+
 
 
     /** Whichever profile is currently being viewed on Home (see

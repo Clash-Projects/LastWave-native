@@ -59,36 +59,32 @@ class DiscoverRepository @Inject constructor(
             }
         }
         val feedSeeds = _feed.value.shuffled()
-        val recentSeeds = profile?.recentTracksRaw.orEmpty().shuffled().take(5)
-        val topSeeds = profile?.topTracksRaw.orEmpty().shuffled().take(5)
+        val recentSeeds = profile?.recentTracksRaw.orEmpty().shuffled().take(4)
+        val topSeeds = profile?.topTracksRaw.orEmpty().shuffled().take(4)
         val trackSeeds = (recentSeeds + topSeeds + frontier + feedSeeds.take(2))
             .filter { it.name.isNotBlank() && it.artist.isNotBlank() }
             .distinctBy(GeneratedTrack::key)
-            .take(3)
+            .take(4)
 
         for (seed in trackSeeds) {
             jobs += async(Dispatchers.IO) {
-                withTimeoutOrNull(3000L) {
-                    try {
-                        val tracks = generateRepository.fetchSimilarTracks(seed.name, seed.artist, 20)
-                        pool.addAll(tracks)
-                    } catch (e: Exception) { Log.d(TAG, "refillQueue similar-tracks miss", e) }
-                }
+                try {
+                    val tracks = generateRepository.fetchSimilarTracks(seed.name, seed.artist, 20)
+                    pool.addAll(tracks)
+                } catch (e: Exception) { Log.d(TAG, "refillQueue similar-tracks miss", e) }
             }
         }
 
         val artistSeeds = (profile?.topArtistNames.orEmpty().shuffled().take(2) + feedSeeds.map(GeneratedTrack::artist).take(2))
             .filter(String::isNotBlank)
             .distinctBy { it.lowercase() }
-            .take(2)
+            .take(3)
         for (artistName in artistSeeds) {
             jobs += async(Dispatchers.IO) {
-                withTimeoutOrNull(3000L) {
-                    try {
-                        val tracks = generateRepository.fetchSimilarArtistTracks(artistName, 12)
-                        pool.addAll(tracks)
-                    } catch (e: Exception) { Log.d(TAG, "refillQueue similar-artists miss", e) }
-                }
+                try {
+                    val tracks = generateRepository.fetchSimilarArtistTracks(artistName, 12)
+                    pool.addAll(tracks)
+                } catch (e: Exception) { Log.d(TAG, "refillQueue similar-artists miss", e) }
             }
         }
 
@@ -96,26 +92,22 @@ class DiscoverRepository @Inject constructor(
             .filter(String::isNotBlank)
             .distinct()
             .shuffled()
-            .take(2)
+            .take(3)
 
         for (tag in availableTags) {
             jobs += async(Dispatchers.IO) {
-                withTimeoutOrNull(4000L) {
-                    try {
-                        val tracks = generateRepository.fetchTagTracks(tag, 20)
-                        pool.addAll(tracks)
-                    } catch (e: Exception) { Log.d(TAG, "refillQueue tag miss", e) }
-                }
+                try {
+                    val tracks = generateRepository.fetchTagTracks(tag, 20)
+                    pool.addAll(tracks)
+                } catch (e: Exception) { Log.d(TAG, "refillQueue tag miss", e) }
             }
         }
 
         jobs += async(Dispatchers.IO) {
-            withTimeoutOrNull(4000L) {
-                try {
-                    val chartTracks = generateRepository.fetchChartTracks(30)
-                    pool.addAll(chartTracks)
-                } catch (_: Exception) {}
-            }
+            try {
+                val chartTracks = generateRepository.fetchChartTracks(30)
+                pool.addAll(chartTracks)
+            } catch (_: Exception) {}
         }
 
         jobs.awaitAll()
@@ -193,4 +185,5 @@ class DiscoverRepository @Inject constructor(
         explorationSeeds.clear()
         _feed.value = emptyList()
     }
+
 }
