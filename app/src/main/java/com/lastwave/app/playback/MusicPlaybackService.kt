@@ -59,6 +59,7 @@ class MusicPlaybackService : Service() {
     @Inject lateinit var scrobblerPreferences: ScrobblerPreferences
     @Inject lateinit var debugLog: ScrobbleDebugLog
     @Inject lateinit var themeRepository: ThemeRepository
+    @Inject lateinit var artworkRepository: com.lastwave.app.data.artwork.ArtworkRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var mediaSession: MediaSession
@@ -111,15 +112,26 @@ class MusicPlaybackService : Service() {
         }
         scope.launch {
             musicPlayer.state.collectLatest { state ->
-                requestArtwork(state.current?.artworkUrl)
+                requestArtwork(state.current)
                 publishSystemState(state)
                 publishNotification(state)
                 publishWidget(state)
                 detectTransition(state)
             }
         }
+        scope.launch {
+            artworkRepository.resolved.collect { map ->
+                val current = musicPlayer.state.value.current ?: return@collect
+                val key = com.lastwave.app.data.artwork.ArtworkNormalizer.cacheKey(current.title, current.artist)
+                val resolvedUrl = map[key]
+                if (!resolvedUrl.isNullOrBlank() && resolvedUrl != artworkUrl) {
+                    fetchArtwork(resolvedUrl)
+                }
+            }
+        }
         startDetector()
     }
+
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -358,13 +370,36 @@ class MusicPlaybackService : Service() {
         getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(state, artworkBitmap))
     }
 
-    private fun requestArtwork(url: String?) {
-        val cleanUrl = url?.takeIf(String::isNotBlank)
-        if (cleanUrl == artworkUrl) return
+    private fun requestArtwork(track: PlayableTrack?) {
+        if (track == null) {
+            artworkUrl = null
+            artworkBitmap = null
+            return
+        }
+
+        val directUrl = track.artworkUrl?.takeIf(String::isNotBlank)
+        if (directUrl != null) {
+            fetchArtwork(directUrl)
+            return
+        }
+
+        // If track artwork is missing (e.g. from lists/generator), resolve via ArtworkRepository
+        val key = com.lastwave.app.data.artwork.ArtworkNormalizer.cacheKey(track.title, track.artist)
+        val cached = artworkRepository.resolved.value[key]?.takeIf(String::isNotBlank)
+        if (cached != null) {
+            fetchArtwork(cached)
+        } else {
+            scope.launch(Dispatchers.IO) {
+                artworkRepository.resolve(track.title, track.artist)
+            }
+        }
+    }
+
+    private fun fetchArtwork(url: String) {
+        val cleanUrl = url.trim()
+        if (cleanUrl == artworkUrl && artworkBitmap != null) return
         artworkUrl = cleanUrl
-        artworkBitmap = null
         artworkJob?.cancel()
-        if (cleanUrl == null) return
 
         artworkJob = scope.launch {
             val expectedUrl = cleanUrl
@@ -386,6 +421,7 @@ class MusicPlaybackService : Service() {
             publishWidget(state)
         }
     }
+
 
     private fun openAppPendingIntent(): PendingIntent = PendingIntent.getActivity(
         this,

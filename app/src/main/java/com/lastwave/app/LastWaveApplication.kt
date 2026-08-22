@@ -75,6 +75,8 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
             }
             .respectCacheHeaders(false)
             .allowHardware(true)
+            .crossfade(150)
             .build()
+
     }
 }

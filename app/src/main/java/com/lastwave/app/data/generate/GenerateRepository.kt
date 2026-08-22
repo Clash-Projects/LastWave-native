@@ -63,7 +63,20 @@ class GenerateRepository @Inject constructor(
         return deferred.await()
     }
 
-    private suspend fun performCall(params: Map<String, String>): JsonObject {
+    private val callSemaphore = kotlinx.coroutines.sync.Semaphore(permits = 3)
+    private var lastCallTime = 0L
+    private val callTimeLock = Any()
+
+    private suspend fun performCall(params: Map<String, String>): JsonObject = callSemaphore.withPermit {
+        val now = System.currentTimeMillis()
+        val delayMs = synchronized(callTimeLock) {
+            val elapsed = now - lastCallTime
+            val wait = if (elapsed < 180L) 180L - elapsed else 0L
+            lastCallTime = now + wait
+            wait
+        }
+        if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
+
         val session = sessionPreferences.session.first()
         val apiKey = session.apiKey.ifBlank { com.lastwave.app.data.network.LastFmAppCredentials.API_KEY }
         val response = api.get(params + ("api_key" to apiKey) + ("format" to "json"))
@@ -73,8 +86,9 @@ class GenerateRepository @Inject constructor(
         }
         val parsed = json.parseToJsonElement(body).jsonObject
         parsed["error"]?.let { throw IllegalStateException(parsed["message"]?.toString() ?: "Last.fm error") }
-        return parsed
+        parsed
     }
+
 
     /** Whichever profile is currently being viewed on Home (see
      *  ViewingProfileState) — a friend's username if the friend-switcher is
@@ -104,20 +118,10 @@ class GenerateRepository @Inject constructor(
         }
     }
 
-    private val playableCheckSemaphore = kotlinx.coroutines.sync.Semaphore(6)
+    /** Instant non-blocking pass-through matching web app.js generation speed.
+     *  Audio resolution is performed on-demand when playing tracks. */
+    suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> = tracks
 
-    /** Filters out tracks that are not found or not playable on YouTube Music. */
-    suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> = coroutineScope {
-        if (tracks.isEmpty()) return@coroutineScope emptyList()
-        val checks = tracks.map { track ->
-            async(Dispatchers.IO) {
-                playableCheckSemaphore.withPermit {
-                    if (innerTube.isPlayable(track.name, track.artist)) track else null
-                }
-            }
-        }
-        checks.awaitAll().filterNotNull()
-    }
 
     // ── Seen-tracks freshness filter — port of _filterFresh/_markAsSeen ──
 

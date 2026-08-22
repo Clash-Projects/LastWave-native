@@ -155,9 +155,10 @@ private fun dateLabelOf(millis: Long): String? {
 private fun isSameDay(a: Calendar, b: Calendar): Boolean =
     a.get(Calendar.YEAR) == b.get(Calendar.YEAR) && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
 
-private const val NOW_PLAYING_POLL_MS = 5_000L
-private const val RECENT_TRACKS_POLL_MS = 8_000L
+private const val NOW_PLAYING_POLL_MS = 12_000L
+private const val RECENT_TRACKS_POLL_MS = 30_000L
 private const val LISTEN_TICK_MS = 1_000L
+
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -426,12 +427,18 @@ class HomeViewModel @Inject constructor(
             while (true) {
                 delay(NOW_PLAYING_POLL_MS)
                 val target = _uiState.value.viewingUsername
-                homeRepository.fetchRecentTracks(limit = 2, username = target).onSuccess { page ->
-                    val (nowPlaying, _) = mergeRecentWithTop(page.nowPlaying, emptyList(), cachedTopTracks)
-                    notifyNowPlayingArtwork(nowPlaying)
-                    _uiState.update { state ->
-                        val trackChanged = nowPlaying?.name != state.nowPlaying?.name || nowPlaying?.artist != state.nowPlaying?.artist
-                        state.copy(nowPlaying = nowPlaying, listenElapsedSeconds = if (trackChanged) 0 else state.listenElapsedSeconds)
+                if (target.isNotBlank() && !target.equals("Guest User", ignoreCase = true)) {
+                    val result = runCatching { homeRepository.fetchRecentTracks(limit = 2, username = target) }.getOrNull()
+                    result?.onSuccess { page ->
+                        val (nowPlaying, _) = mergeRecentWithTop(page.nowPlaying, emptyList(), cachedTopTracks)
+                        notifyNowPlayingArtwork(nowPlaying)
+                        _uiState.update { state ->
+                            val trackChanged = nowPlaying?.name != state.nowPlaying?.name || nowPlaying?.artist != state.nowPlaying?.artist
+                            state.copy(nowPlaying = nowPlaying, listenElapsedSeconds = if (trackChanged) 0 else state.listenElapsedSeconds)
+                        }
+                    }?.onFailure {
+                        // On error or rate limit, back off for 20 seconds before retrying
+                        delay(20_000L)
                     }
                 }
             }
@@ -440,33 +447,21 @@ class HomeViewModel @Inject constructor(
             while (true) {
                 delay(RECENT_TRACKS_POLL_MS)
                 val target = _uiState.value.viewingUsername
-                homeRepository.fetchRecentTracks(username = target).onSuccess { page ->
-                    val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
-                    notifyNowPlayingArtwork(nowPlaying)
-                    _uiState.update { state ->
-                        // This used to replace allTracks wholesale with
-                        // just this fresh page-1 fetch every single poll —
-                        // silently discarding every page the user had
-                        // already scrolled down and loaded via
-                        // loadNextPage(). That's exactly what looked like
-                        // "the list stops loading anything past a certain
-                        // point" / general glitchiness: infinite scroll
-                        // progress was being wiped out every ~8 seconds.
-                        // Now it only ever ADDS genuinely-new recent
-                        // tracks to the front, same dedup key
-                        // (name|artist + timestamp) loadNextPage already
-                        // uses, and leaves everything already loaded
-                        // alone. Filtered to timestampMillis != null so
-                        // the top-tracks "filler" entries mergeRecentWithTop
-                        // adds to pad out a short recent page (which have
-                        // no real timestamp) never get treated as if
-                        // they're freshly-played and prepended above
-                        // actually-recent tracks.
-                        val recentOnly = merged.filter { it.timestampMillis != null }
-                        val existingKeys = state.allTracks.map { it.key to it.timestampMillis }.toSet()
-                        val newOnes = recentOnly.filter { (it.key to it.timestampMillis) !in existingKeys }
-                        val combined = (newOnes + state.allTracks).distinctBy { it.key to it.timestampMillis }
-                        state.copy(nowPlaying = nowPlaying, allTracks = combined, totalPages = page.totalPages)
+                if (target.isNotBlank() && !target.equals("Guest User", ignoreCase = true)) {
+                    val result = runCatching { homeRepository.fetchRecentTracks(username = target) }.getOrNull()
+                    result?.onSuccess { page ->
+                        val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
+                        notifyNowPlayingArtwork(nowPlaying)
+                        _uiState.update { state ->
+                            val recentOnly = merged.filter { it.timestampMillis != null }
+                            val existingKeys = state.allTracks.map { it.key to it.timestampMillis }.toSet()
+                            val newOnes = recentOnly.filter { (it.key to it.timestampMillis) !in existingKeys }
+                            val combined = (newOnes + state.allTracks).distinctBy { it.key to it.timestampMillis }
+                            state.copy(nowPlaying = nowPlaying, allTracks = combined, totalPages = page.totalPages)
+                        }
+                    }?.onFailure {
+                        // On error or rate limit, back off for 30 seconds before retrying
+                        delay(30_000L)
                     }
                 }
             }
@@ -480,6 +475,7 @@ class HomeViewModel @Inject constructor(
             }
         }
     }
+
 
     fun dismissError() = _uiState.update { it.copy(error = null) }
 }

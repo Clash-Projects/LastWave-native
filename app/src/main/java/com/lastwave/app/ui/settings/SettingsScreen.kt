@@ -392,11 +392,8 @@ fun SettingsScreen(
                         5 -> "Standard (320 kbps MP3)"
                         else -> "Max (Up to 24-bit / 192 kHz)"
                     }
-                    val mb = (downloadTotalBytes ?: 0L).toDouble() / (1024 * 1024)
-                    val formattedStorage = if (mb >= 1000) "%.1f GB".format(mb / 1024) else "%.1f MB".format(mb)
-                    val downloadsSubtitle = if (downloadCount > 0) "$downloadCount song(s) \u2022 $formattedStorage \u2022 Music/LastWave" else "No offline songs downloaded"
 
-                    SettingsGroup(rowCount = 3) { index, position ->
+                    SettingsGroup(rowCount = 2) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.HighQuality,
@@ -417,19 +414,11 @@ fun SettingsScreen(
                                 onClick = { showQualityDialog = true },
                                 position = position,
                             )
-                            2 -> SettingsActionCard(
-                                icon = Icons.Filled.Download,
-                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "Downloads & Offline Music",
-                                subtitle = downloadsSubtitle,
-                                onClick = onOpenDownloads,
-                                position = position,
-                            )
                         }
                     }
                 }
             }
+
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

@@ -76,19 +76,8 @@ class PlaylistRepository @Inject constructor(
         startupSync.await()
     }
 
-    private val playableCheckSemaphore = kotlinx.coroutines.sync.Semaphore(6)
+    private suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> = tracks
 
-    private suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> = coroutineScope {
-        if (tracks.isEmpty()) return@coroutineScope emptyList()
-        val checks = tracks.map { track ->
-            async(Dispatchers.IO) {
-                playableCheckSemaphore.withPermit {
-                    if (innerTube.isPlayable(track.name, track.artist)) track else null
-                }
-            }
-        }
-        checks.awaitAll().filterNotNull()
-    }
 
     /** Newest first — matches _plRenderSaved()'s display order (the
      *  original reverses its append-ordered array before rendering). */

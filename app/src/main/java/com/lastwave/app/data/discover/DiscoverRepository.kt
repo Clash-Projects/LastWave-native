@@ -61,14 +61,14 @@ class DiscoverRepository @Inject constructor(
         val feedSeeds = _feed.value.shuffled()
         val recentSeeds = profile?.recentTracksRaw.orEmpty().shuffled().take(5)
         val topSeeds = profile?.topTracksRaw.orEmpty().shuffled().take(5)
-        val trackSeeds = (recentSeeds + topSeeds + frontier + feedSeeds.take(3))
+        val trackSeeds = (recentSeeds + topSeeds + frontier + feedSeeds.take(2))
             .filter { it.name.isNotBlank() && it.artist.isNotBlank() }
             .distinctBy(GeneratedTrack::key)
-            .take(8)
+            .take(3)
 
         for (seed in trackSeeds) {
             jobs += async(Dispatchers.IO) {
-                withTimeoutOrNull(4000L) {
+                withTimeoutOrNull(3000L) {
                     try {
                         val tracks = generateRepository.fetchSimilarTracks(seed.name, seed.artist, 20)
                         pool.addAll(tracks)
@@ -77,13 +77,13 @@ class DiscoverRepository @Inject constructor(
             }
         }
 
-        val artistSeeds = (profile?.topArtistNames.orEmpty().shuffled().take(4) + feedSeeds.map(GeneratedTrack::artist).take(3))
+        val artistSeeds = (profile?.topArtistNames.orEmpty().shuffled().take(2) + feedSeeds.map(GeneratedTrack::artist).take(2))
             .filter(String::isNotBlank)
             .distinctBy { it.lowercase() }
-            .take(4)
+            .take(2)
         for (artistName in artistSeeds) {
             jobs += async(Dispatchers.IO) {
-                withTimeoutOrNull(4000L) {
+                withTimeoutOrNull(3000L) {
                     try {
                         val tracks = generateRepository.fetchSimilarArtistTracks(artistName, 12)
                         pool.addAll(tracks)
@@ -96,7 +96,8 @@ class DiscoverRepository @Inject constructor(
             .filter(String::isNotBlank)
             .distinct()
             .shuffled()
-            .take(4)
+            .take(2)
+
         for (tag in availableTags) {
             jobs += async(Dispatchers.IO) {
                 withTimeoutOrNull(4000L) {

@@ -229,8 +229,8 @@ class TrackDownloadManager @Inject constructor(
                         mimeType = "audio/mp4"
                         formatBadge = "M4A AAC"
                     } else if (rawMime.contains("webm") || rawMime.contains("opus")) {
-                        extension = "webm"
-                        mimeType = "audio/webm"
+                        extension = "opus"
+                        mimeType = "audio/ogg"
                         formatBadge = "OPUS"
                     } else {
                         extension = "m4a"
@@ -239,6 +239,7 @@ class TrackDownloadManager @Inject constructor(
                     }
                     isQobuz = false
                 }
+
 
                 val safeFilename = sanitizeFilename("$artist - $title") + ".$extension"
 
@@ -465,9 +466,19 @@ class TrackDownloadManager @Inject constructor(
         val resolver = context.contentResolver
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val contentValues = ContentValues().apply {
+            // Android MediaStore Audio only accepts standard audio MIME types
+            val audioMime = when {
+                mimeType.contains("mp4") || mimeType.contains("m4a") || mimeType.contains("aac") -> "audio/mp4"
+                mimeType.contains("flac") -> "audio/flac"
+                mimeType.contains("mp3") || mimeType.contains("mpeg") -> "audio/mpeg"
+                mimeType.contains("ogg") || mimeType.contains("opus") -> "audio/ogg"
+                mimeType.contains("wav") -> "audio/x-wav"
+                else -> "audio/mp4"
+            }
+
+            val audioContentValues = ContentValues().apply {
                 put(MediaStore.Audio.Media.DISPLAY_NAME, filename)
-                put(MediaStore.Audio.Media.MIME_TYPE, mimeType)
+                put(MediaStore.Audio.Media.MIME_TYPE, audioMime)
                 put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/$PUBLIC_DIR_NAME")
                 put(MediaStore.Audio.Media.TITLE, title)
                 put(MediaStore.Audio.Media.ARTIST, artist)
@@ -475,20 +486,35 @@ class TrackDownloadManager @Inject constructor(
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
             }
 
-            val uri = runCatching { resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, contentValues) }.getOrNull()
-                ?: runCatching {
-                    val downloadValues = ContentValues(contentValues).apply {
-                        put(MediaStore.Downloads.MIME_TYPE, if (mimeType.isNotBlank()) mimeType else "application/octet-stream")
-                    }
-                    resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, downloadValues)
-                }.getOrNull()
-                ?: throw IOException("Could not create storage entry for $filename")
+            val audioUri = runCatching { resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, audioContentValues) }.getOrNull()
+            if (audioUri != null) {
+                val stream = resolver.openOutputStream(audioUri, "wt")
+                    ?: resolver.openOutputStream(audioUri)
+                if (stream != null) return Triple(stream, audioUri, null)
+            }
 
-            val stream = resolver.openOutputStream(uri, "wt")
-                ?: resolver.openOutputStream(uri)
-                ?: throw IOException("Could not open output stream for $uri")
+            // Fallback 1: MediaStore.Downloads (pure download columns only)
+            val downloadContentValues = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, filename)
+                put(MediaStore.Downloads.MIME_TYPE, if (mimeType.isNotBlank()) mimeType else "application/octet-stream")
+                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_DIR_NAME")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
 
-            return Triple(stream, uri, null)
+            val downloadUri = runCatching { resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, downloadContentValues) }.getOrNull()
+            if (downloadUri != null) {
+                val stream = resolver.openOutputStream(downloadUri, "wt")
+                    ?: resolver.openOutputStream(downloadUri)
+                if (stream != null) return Triple(stream, downloadUri, null)
+            }
+
+            // Fallback 2: Direct public / external app music directory
+            val fallbackDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+                ?: File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME).apply { if (!exists()) mkdirs() }
+            if (!fallbackDir.exists()) fallbackDir.mkdirs()
+            val fallbackFile = File(fallbackDir, filename)
+            val stream = FileOutputStream(fallbackFile)
+            return Triple(stream, null, fallbackFile)
         } else {
             // Android 9 and below
             val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
@@ -498,6 +524,7 @@ class TrackDownloadManager @Inject constructor(
             return Triple(stream, null, file)
         }
     }
+
 
     private fun finalizePublicFile(uri: Uri?) {
         if (uri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -608,17 +635,24 @@ class TrackDownloadManager @Inject constructor(
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, filename)
                     put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/$PUBLIC_DIR_NAME")
+                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_DIR_NAME")
+                    put(MediaStore.Downloads.IS_PENDING, 0)
                 }
-                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                    ?: resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, contentValues)
+                val uri = runCatching { resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues) }.getOrNull()
                 if (uri != null) {
                     resolver.openOutputStream(uri, "wt")?.use { os ->
                         os.write(content.toByteArray(Charsets.UTF_8))
                         os.flush()
                     }
                     uri.toString()
-                } else null
+                } else {
+                    val fallbackDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
+                        ?: File(context.filesDir, "lyrics").apply { if (!exists()) mkdirs() }
+                    if (!fallbackDir.exists()) fallbackDir.mkdirs()
+                    val file = File(fallbackDir, filename)
+                    file.writeText(content, Charsets.UTF_8)
+                    file.absolutePath
+                }
             } else {
                 val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
                 if (!musicDir.exists()) musicDir.mkdirs()
@@ -630,6 +664,7 @@ class TrackDownloadManager @Inject constructor(
             null
         }
     }
+
 
     suspend fun deleteDownloadedTrack(track: DownloadedTrackEntity) = withContext(Dispatchers.IO) {
         downloadedTrackDao.delete(track)

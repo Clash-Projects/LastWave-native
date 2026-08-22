@@ -1,6 +1,9 @@
 package com.lastwave.app.data.generate
 
 import android.util.Log
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -55,18 +58,21 @@ private class RecoContext(
     val exploredArtists = mutableSetOf<String>()
     val exploredTags = mutableSetOf<String>()
     val pendingArtists = mutableListOf<String>()
+    private val lock = Any()
 
     fun addAll(tracks: List<GeneratedTrack>, weight: Int, tag: String, isPrimaryGenre: Boolean = false) {
-        for (t in tracks) {
-            if (t.name.isBlank() || t.artist.isBlank()) continue
-            val key = t.key
-            if (key in blacklist) continue
-            val cur = pool[key]
-            if (cur != null) {
-                if (weight > cur.weight) cur.weight = weight
-                cur.tags.add(tag)
-            } else {
-                pool[key] = Candidate(t, weight, mutableSetOf(tag), isPrimaryGenre)
+        synchronized(lock) {
+            for (t in tracks) {
+                if (t.name.isBlank() || t.artist.isBlank()) continue
+                val key = t.key
+                if (key in blacklist) continue
+                val cur = pool[key]
+                if (cur != null) {
+                    if (weight > cur.weight) cur.weight = weight
+                    cur.tags.add(tag)
+                } else {
+                    pool[key] = Candidate(t, weight, mutableSetOf(tag), isPrimaryGenre)
+                }
             }
         }
     }
@@ -154,105 +160,174 @@ class RecommendationEngine(
         return score
     }
 
-    // ── Candidate sources — exact port of _srcSimilarTracks .. _srcDiscoveryPool ──
+    // ── Candidate sources — parallel ports matching Promise.allSettled in app.js ──
 
-    private suspend fun srcSimilarTracks(ctx: RecoContext, cycle: Int) {
+    private suspend fun srcSimilarTracks(ctx: RecoContext, cycle: Int) = coroutineScope {
         val pool = if (cycle == 1) ctx.profile.recentTracksRaw else ctx.profile.topTracksRaw
-        val seeds = pool.shuffled().drop((cycle - 1) * 6).take(6)
-        for (s in seeds) {
-            if (ctx.pool.size >= ctx.total) break
-            if (s.name.isBlank() || s.artist.isBlank()) continue
-            try {
-                val d = rawCall(mapOf("method" to "track.getsimilar", "track" to s.name, "artist" to s.artist, "limit" to "30"))
-                ctx.addAll(jsonTracks(d, "similartracks", "track"), if (cycle == 1) 4 else 3, if (cycle == 1) "mood" else "taste")
-            } catch (e: Exception) { Log.d(RTAG, "srcSimilarTracks miss for ${s.name}", e) }
+        val seeds = pool.shuffled().drop((cycle - 1) * 3).take(3)
+        val deferreds = seeds.map { s ->
+            async {
+                if (s.name.isNotBlank() && s.artist.isNotBlank()) {
+                    try {
+                        val d = rawCall(mapOf("method" to "track.getsimilar", "track" to s.name, "artist" to s.artist, "limit" to "30"))
+                        jsonTracks(d, "similartracks", "track")
+                    } catch (e: Exception) {
+                        Log.d(RTAG, "srcSimilarTracks miss for ${s.name}", e)
+                        emptyList()
+                    }
+                } else emptyList()
+            }
+        }
+        val results = deferreds.awaitAll()
+        for (tracks in results) {
+            if (tracks.isNotEmpty()) {
+                ctx.addAll(tracks, if (cycle == 1) 4 else 3, if (cycle == 1) "mood" else "taste")
+            }
         }
     }
 
-    private suspend fun srcSimilarArtists(ctx: RecoContext, cycle: Int) {
-        val artists = ctx.profile.topArtistNames.shuffled().drop((cycle - 1) * 6).take(6)
-        for (artistName in artists) {
-            try {
-                val d = rawCall(mapOf("method" to "artist.getsimilar", "artist" to artistName, "limit" to "20"))
-                val sims = jsonNames(d, "similarartists", "artist").shuffled()
-                for (sa in sims.take(5)) {
-                    val ak = sa.lowercase()
-                    if (ctx.exploredArtists.contains(ak)) continue
-                    ctx.exploredArtists.add(ak)
-                    ctx.pendingArtists.add(sa)
+    private suspend fun srcSimilarArtists(ctx: RecoContext, cycle: Int) = coroutineScope {
+        val artists = ctx.profile.topArtistNames.shuffled().drop((cycle - 1) * 3).take(3)
+        val deferreds = artists.map { artistName ->
+            async {
+                try {
+                    val d = rawCall(mapOf("method" to "artist.getsimilar", "artist" to artistName, "limit" to "20"))
+                    jsonNames(d, "similarartists", "artist").shuffled()
+                } catch (e: Exception) {
+                    Log.d(RTAG, "srcSimilarArtists miss for $artistName", e)
+                    emptyList()
                 }
-            } catch (e: Exception) { Log.d(RTAG, "srcSimilarArtists miss for $artistName", e) }
+            }
+        }
+        val results = deferreds.awaitAll()
+        for (sims in results) {
+            for (sa in sims.take(5)) {
+                val ak = sa.lowercase()
+                if (ctx.exploredArtists.contains(ak)) continue
+                ctx.exploredArtists.add(ak)
+                ctx.pendingArtists.add(sa)
+            }
         }
     }
 
-    private suspend fun srcArtistTopTracks(ctx: RecoContext) {
-        val batch = ctx.pendingArtists.take(12)
+    private suspend fun srcArtistTopTracks(ctx: RecoContext) = coroutineScope {
+        val batch = ctx.pendingArtists.take(4)
         repeat(batch.size) { ctx.pendingArtists.removeAt(0) }
-        for (artistName in batch) {
-            if (ctx.pool.size >= ctx.total) break
-            try {
-                val page = ceil(Random.nextDouble() * 6).toInt().coerceAtLeast(1)
-                val d = rawCall(mapOf("method" to "artist.gettoptracks", "artist" to artistName, "limit" to "10", "page" to page.toString()))
-                ctx.addAll(jsonTracks(d, "toptracks", "track"), 2, "artist:${artistName.lowercase()}")
-            } catch (e: Exception) { Log.d(RTAG, "srcArtistTopTracks miss for $artistName", e) }
+        val deferreds = batch.map { artistName ->
+            async {
+                try {
+                    val page = ceil(Random.nextDouble() * 6).toInt().coerceAtLeast(1)
+                    val d = rawCall(mapOf("method" to "artist.gettoptracks", "artist" to artistName, "limit" to "10", "page" to page.toString()))
+
+                    artistName to jsonTracks(d, "toptracks", "track")
+                } catch (e: Exception) {
+                    Log.d(RTAG, "srcArtistTopTracks miss for $artistName", e)
+                    artistName to emptyList()
+                }
+            }
+        }
+        val results = deferreds.awaitAll()
+        for ((artistName, tracks) in results) {
+            if (tracks.isNotEmpty()) {
+                ctx.addAll(tracks, 2, "artist:${artistName.lowercase()}")
+            }
         }
     }
 
-    private suspend fun srcGenreMatches(ctx: RecoContext, cycle: Int) {
+    private suspend fun srcGenreMatches(ctx: RecoContext, cycle: Int) = coroutineScope {
         val tags = ctx.profile.topTags.toList().shuffled().drop((cycle - 1) * 4).take(4)
-        for (tag in tags) {
-            if (ctx.pool.size >= ctx.total) break
-            ctx.exploredTags.add(tag)
-            try {
-                val page = (Random.nextDouble() * 10).toInt() + 2
-                val limit = ceil(ctx.total * 0.4).toInt().coerceAtLeast(1)
-                val d = rawCall(mapOf("method" to "tag.gettoptracks", "tag" to tag, "limit" to limit.toString(), "page" to page.toString()))
-                ctx.addAll(jsonTracks(d, "tracks", "track"), 1, "tag:$tag", isPrimaryGenre = true)
-            } catch (e: Exception) { Log.d(RTAG, "srcGenreMatches miss for $tag", e) }
+        for (tag in tags) ctx.exploredTags.add(tag)
+        val limit = ceil(ctx.total * 0.4).toInt().coerceAtLeast(1)
+        val deferreds = tags.map { tag ->
+            async {
+                try {
+                    val page = (Random.nextDouble() * 10).toInt() + 2
+                    val d = rawCall(mapOf("method" to "tag.gettoptracks", "tag" to tag, "limit" to limit.toString(), "page" to page.toString()))
+                    tag to jsonTracks(d, "tracks", "track")
+                } catch (e: Exception) {
+                    Log.d(RTAG, "srcGenreMatches miss for $tag", e)
+                    tag to emptyList()
+                }
+            }
+        }
+        val results = deferreds.awaitAll()
+        for ((tag, tracks) in results) {
+            if (tracks.isNotEmpty()) {
+                ctx.addAll(tracks, 1, "tag:$tag", isPrimaryGenre = true)
+            }
         }
     }
 
-    private suspend fun srcTagMatches(ctx: RecoContext) {
+    private suspend fun srcTagMatches(ctx: RecoContext) = coroutineScope {
         val neighbors = ctx.exploredTags.mapNotNull { RECO_GENRE_NEIGHBORS[it] }
         val unique = neighbors.distinct().filter { !ctx.exploredTags.contains(it) }.take(4)
-        for (tag in unique) {
-            if (ctx.pool.size >= ctx.total) break
-            ctx.exploredTags.add(tag)
-            try {
-                val page = (Random.nextDouble() * 6).toInt() + 1
-                val limit = ceil(ctx.total * 0.3).toInt().coerceAtLeast(1)
-                val d = rawCall(mapOf("method" to "tag.gettoptracks", "tag" to tag, "limit" to limit.toString(), "page" to page.toString()))
-                ctx.addAll(jsonTracks(d, "tracks", "track"), 1, "tag:$tag", isPrimaryGenre = false)
-            } catch (e: Exception) { Log.d(RTAG, "srcTagMatches miss for $tag", e) }
+        for (tag in unique) ctx.exploredTags.add(tag)
+        val limit = ceil(ctx.total * 0.3).toInt().coerceAtLeast(1)
+        val deferreds = unique.map { tag ->
+            async {
+                try {
+                    val page = (Random.nextDouble() * 6).toInt() + 1
+                    val d = rawCall(mapOf("method" to "tag.gettoptracks", "tag" to tag, "limit" to limit.toString(), "page" to page.toString()))
+                    tag to jsonTracks(d, "tracks", "track")
+                } catch (e: Exception) {
+                    Log.d(RTAG, "srcTagMatches miss for $tag", e)
+                    tag to emptyList()
+                }
+            }
+        }
+        val results = deferreds.awaitAll()
+        for ((tag, tracks) in results) {
+            if (tracks.isNotEmpty()) {
+                ctx.addAll(tracks, 1, "tag:$tag", isPrimaryGenre = false)
+            }
         }
     }
 
-    private suspend fun srcRelatedArtists(ctx: RecoContext) {
+    private suspend fun srcRelatedArtists(ctx: RecoContext) = coroutineScope {
         val seedArtists = ctx.exploredArtists.shuffled().take(4)
-        for (artistName in seedArtists) {
-            try {
-                val d = rawCall(mapOf("method" to "artist.getsimilar", "artist" to artistName, "limit" to "15"))
-                val sims = jsonNames(d, "similarartists", "artist").shuffled()
-                for (sa in sims) {
-                    val ak = sa.lowercase()
-                    if (ctx.exploredArtists.contains(ak)) continue
-                    ctx.exploredArtists.add(ak)
-                    ctx.pendingArtists.add(sa)
+        val deferreds = seedArtists.map { artistName ->
+            async {
+                try {
+                    val d = rawCall(mapOf("method" to "artist.getsimilar", "artist" to artistName, "limit" to "15"))
+                    jsonNames(d, "similarartists", "artist").shuffled()
+                } catch (e: Exception) {
+                    Log.d(RTAG, "srcRelatedArtists miss for $artistName", e)
+                    emptyList()
                 }
-            } catch (e: Exception) { Log.d(RTAG, "srcRelatedArtists miss for $artistName", e) }
+            }
+        }
+        val results = deferreds.awaitAll()
+        for (sims in results) {
+            for (sa in sims) {
+                val ak = sa.lowercase()
+                if (ctx.exploredArtists.contains(ak)) continue
+                ctx.exploredArtists.add(ak)
+                ctx.pendingArtists.add(sa)
+            }
         }
         srcArtistTopTracks(ctx)
     }
 
-    private suspend fun srcDiscoveryPool(ctx: RecoContext) {
-        val wide = ctx.profile.topArtistNames.shuffled()
-        for (artistName in wide) {
-            if (ctx.pool.size >= ctx.total) break
-            try {
-                val page = ceil(Random.nextDouble() * 8).toInt().coerceAtLeast(1)
-                val d = rawCall(mapOf("method" to "artist.gettoptracks", "artist" to artistName, "limit" to "15", "page" to page.toString()))
-                ctx.addAll(jsonTracks(d, "toptracks", "track"), 2, "artist:${artistName.lowercase()}")
-            } catch (e: Exception) { Log.d(RTAG, "srcDiscoveryPool miss for $artistName", e) }
+    private suspend fun srcDiscoveryPool(ctx: RecoContext) = coroutineScope {
+        val wide = ctx.profile.topArtistNames.shuffled().take(3)
+        val deferreds = wide.map { artistName ->
+
+            async {
+                try {
+                    val page = ceil(Random.nextDouble() * 8).toInt().coerceAtLeast(1)
+                    val d = rawCall(mapOf("method" to "artist.gettoptracks", "artist" to artistName, "limit" to "15", "page" to page.toString()))
+                    artistName to jsonTracks(d, "toptracks", "track")
+                } catch (e: Exception) {
+                    Log.d(RTAG, "srcDiscoveryPool miss for $artistName", e)
+                    artistName to emptyList()
+                }
+            }
+        }
+        val results = deferreds.awaitAll()
+        for ((artistName, tracks) in results) {
+            if (tracks.isNotEmpty()) {
+                ctx.addAll(tracks, 2, "artist:${artistName.lowercase()}")
+            }
         }
     }
 

@@ -299,19 +299,23 @@ class MusicPlayer @Inject constructor(
                         sleepTimerStep = 0
                         player.pause()
                     }
+                    val pos = player.currentPosition.coerceAtLeast(0)
+                    val buf = player.bufferedPosition.coerceAtLeast(0)
+                    val dur = player.duration.takeIf { value -> value > 0 } ?: _state.value.durationMs
                     _state.update {
                         it.copy(
-                            positionMs = player.currentPosition.coerceAtLeast(0),
-                            bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0),
-                            durationMs = player.duration.takeIf { value -> value > 0 } ?: it.durationMs,
+                            positionMs = pos,
+                            bufferedPositionMs = buf,
+                            durationMs = dur,
                             sleepTimerRemainingMs = remaining?.coerceAtLeast(0),
                         )
                     }
                     persistPlaybackSession()
                 }
-                delay(if (player.isPlaying) 50L else 500L)
+                delay(if (player.isPlaying) 250L else 500L)
             }
         }
+
         applicationScope.launch {
             discoverRepository.feed.collect { feed ->
                 if (discoverQueueActive) appendMissingDiscoverTracks(feed.map(GeneratedTrack::toPlayableTrack))
@@ -548,29 +552,35 @@ class MusicPlayer @Inject constructor(
         )
     }
 
-    /** Resolves only the next few queue entries, keeping startup fast while
-     * making upcoming transitions use exact YouTube IDs and catalog art. */
     private fun enrichUpcomingQueue(currentIndex: Int) {
         queueEnrichmentJob?.cancel()
         queueEnrichmentJob = applicationScope.launch {
             val endExclusive = withContext(Dispatchers.Main.immediate) {
                 minOf(currentIndex + 4, player.mediaItemCount)
             }
-            for (index in (currentIndex + 1) until endExclusive) {
+            for (index in currentIndex until endExclusive) {
                 val original = withContext(Dispatchers.Main.immediate) {
                     if (index >= player.mediaItemCount) null else player.getMediaItemAt(index).toPlayableTrack()
                 } ?: continue
-                if (!original.videoId.isNullOrBlank()) continue
+                if (!original.videoId.isNullOrBlank() && !original.artworkUrl.isNullOrBlank()) continue
                 val expectedMediaId = original.videoId ?: "query:${original.artist.lowercase()}|${original.title.lowercase()}"
                 val enriched = runCatching { matchMetadata(original) }.getOrNull() ?: continue
                 withContext(Dispatchers.Main.immediate) {
                     if (index < player.mediaItemCount && player.getMediaItemAt(index).mediaId == expectedMediaId) {
                         player.replaceMediaItem(index, enriched.toMediaItem())
+                        if (index == player.currentMediaItemIndex) {
+                            _state.update { state ->
+                                if (state.current?.title == enriched.title && state.current?.artist == enriched.artist) {
+                                    state.copy(current = enriched)
+                                } else state
+                            }
+                        }
                     }
                 }
             }
         }
     }
+
 
     /**
      * Pre-resolves and streams the first 512KB of the upcoming track directly into
@@ -885,7 +895,7 @@ class MusicPlayer @Inject constructor(
                 ?: return@launch
             synchronized(playbackPersistenceLock) {
                 if (generation == persistenceGeneration) {
-                    playbackPreferences.edit().putString(PLAYBACK_SESSION_KEY, encoded).commit()
+                    playbackPreferences.edit().putString(PLAYBACK_SESSION_KEY, encoded).apply()
                 }
             }
         }
@@ -897,9 +907,10 @@ class MusicPlayer @Inject constructor(
         playbackPersistenceJob = null
         lastPersistedSignature = ""
         synchronized(playbackPersistenceLock) {
-            playbackPreferences.edit().remove(PLAYBACK_SESSION_KEY).commit()
+            playbackPreferences.edit().remove(PLAYBACK_SESSION_KEY).apply()
         }
     }
+
 
     @MainThread
     private fun refresh(player: Player) {

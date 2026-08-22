@@ -287,13 +287,13 @@ fun AlbumDetailScreen(
                                         viewModel.playAll()
                                     },
                                     enabled = data.tracks.isNotEmpty(),
-                                    shape = CircleShape,
+                                    shape = RoundedCornerShape(16.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.primary,
                                         contentColor = MaterialTheme.colorScheme.onPrimary,
                                     ),
                                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp, pressedElevation = 6.dp),
-                                    modifier = Modifier.weight(1.3f).height(50.dp),
+                                    modifier = Modifier.weight(1f).height(50.dp),
                                 ) {
                                     Icon(
                                         if (isAlbumPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -314,12 +314,16 @@ fun AlbumDetailScreen(
                                         viewModel.playShuffle()
                                     },
                                     enabled = data.tracks.isNotEmpty(),
-                                    shape = CircleShape,
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.weight(1f).height(50.dp),
                                 ) {
                                     Icon(Icons.Filled.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Shuffle", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "Shuffle",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleMedium,
+                                    )
                                 }
 
                                 FilledTonalIconButton(
@@ -327,7 +331,7 @@ fun AlbumDetailScreen(
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         viewModel.downloadAlbum()
                                     },
-                                    shape = CircleShape,
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.size(50.dp),
                                 ) {
                                     Icon(Icons.Filled.Download, contentDescription = "Download Album", tint = MaterialTheme.colorScheme.primary)
@@ -378,27 +382,36 @@ fun AlbumDetailScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                // Track number index / Playing Wave
+                                // Artwork Thumbnail with Wave overlay
                                 Box(
-                                    modifier = Modifier.width(32.dp),
-                                    contentAlignment = Alignment.CenterStart,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center,
                                 ) {
+                                    ArtworkImage(
+                                        name = track.title,
+                                        artist = track.artist.ifBlank { data.artist },
+                                        embeddedUrl = track.artworkUrl ?: data.artworkUrl,
+                                        fallbackIcon = Icons.Filled.Album,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
                                     if (isPlayingThis) {
-                                        PlayingWaveBars(modifier = Modifier.size(18.dp))
-                                    } else {
-                                        Text(
-                                            text = "${index + 1}",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color.Black.copy(alpha = 0.45f)),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            PlayingWaveBars(modifier = Modifier.size(18.dp))
+                                        }
                                     }
                                 }
 
-                                Spacer(Modifier.width(10.dp))
+                                Spacer(Modifier.width(14.dp))
 
                                 Column(Modifier.weight(1f)) {
                                     Text(
@@ -409,15 +422,18 @@ fun AlbumDetailScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
-                                    if (!track.artist.equals(data.artist, ignoreCase = true) && track.artist.isNotBlank()) {
-                                        Text(
-                                            text = track.artist,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = if (track.artist.isNotBlank() && !track.artist.equals(data.artist, ignoreCase = true)) {
+                                            "${track.artist} \u2022 Track ${index + 1}"
+                                        } else {
+                                            "Track ${index + 1}"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
 
                                 IconButton(
@@ -437,6 +453,7 @@ fun AlbumDetailScreen(
                             }
                         }
                     }
+
 
                     // 4. Description / Wiki Card
                     if (!data.description.isNullOrBlank()) {

@@ -12,6 +12,7 @@ package com.lastwave.app.data.network
  * Registered at last.fm/api/account/create under the app name "LastWave".
  */
 object LastFmAppCredentials {
-    const val API_KEY = "e2c8e7a67eaeb0fe5a71ee539a34641a"
-    const val API_SECRET = "94b5c6aa634e459defedbf8180625e8a"
+    const val API_KEY = "2e00eb783c677abeab81e99c99be74e1"
+    const val API_SECRET = "b7e562de696f17fdfde7c448f02b599f"
+
 }

@@ -301,13 +301,13 @@ fun ArtistDetailScreen(
                                         viewModel.playAll()
                                     },
                                     enabled = data.topSongs.isNotEmpty(),
-                                    shape = CircleShape,
+                                    shape = RoundedCornerShape(16.dp),
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.primary,
                                         contentColor = MaterialTheme.colorScheme.onPrimary,
                                     ),
                                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp, pressedElevation = 6.dp),
-                                    modifier = Modifier.weight(1.3f).height(50.dp),
+                                    modifier = Modifier.weight(1f).height(50.dp),
                                 ) {
                                     Icon(
                                         if (isArtistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -328,12 +328,16 @@ fun ArtistDetailScreen(
                                         viewModel.playShuffle()
                                     },
                                     enabled = data.topSongs.isNotEmpty(),
-                                    shape = CircleShape,
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.weight(1f).height(50.dp),
                                 ) {
                                     Icon(Icons.Filled.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
                                     Spacer(Modifier.width(6.dp))
-                                    Text("Shuffle", fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        "Shuffle",
+                                        fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.titleMedium,
+                                    )
                                 }
 
                                 FilledTonalIconButton(
@@ -341,12 +345,13 @@ fun ArtistDetailScreen(
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         viewModel.startArtistMix()
                                     },
-                                    shape = CircleShape,
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.size(50.dp),
                                 ) {
                                     Icon(Icons.Filled.Radio, contentDescription = "Artist Radio", tint = MaterialTheme.colorScheme.primary)
                                 }
                             }
+
                         }
                     }
 

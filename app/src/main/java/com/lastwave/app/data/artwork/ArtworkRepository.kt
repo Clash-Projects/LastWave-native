@@ -109,8 +109,8 @@ class ArtworkRepository @Inject constructor(
                 return
             }
 
-            // 3. Multi-Provider High-Speed Parallel Racing
-            val channel = kotlinx.coroutines.channels.Channel<Pair<String, String>>(4)
+            // 3. Multi-Provider High-Speed Parallel Racing (Deezer, iTunes, YouTube Music)
+            val channel = kotlinx.coroutines.channels.Channel<Pair<String, String>>(3)
             val jobs = mutableListOf<kotlinx.coroutines.Job>()
 
             // Provider A: Deezer (Ultra-fast 80ms public CDN, 1000x1000)
@@ -131,14 +131,8 @@ class ArtworkRepository @Inject constructor(
                 if (!url.isNullOrBlank()) channel.trySend(Pair("youtube", url))
             }
 
-            // Provider D: Last.fm (track.getInfo)
-            jobs += scope.launch(Dispatchers.IO) {
-                val url = safeFetch("Last.fm", name, artist) { lastFm.fetchArtworkUrl(name, artist) }
-                if (!url.isNullOrBlank()) channel.trySend(Pair("lastfm", url))
-            }
-
             val winner = try {
-                kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                kotlinx.coroutines.withTimeoutOrNull(3_000L) {
                     channel.receive()
                 }
             } catch (_: Exception) {
@@ -147,6 +141,7 @@ class ArtworkRepository @Inject constructor(
                 channel.close()
                 jobs.forEach { it.cancel() }
             }
+
 
             if (winner != null) {
                 save(key, winner.first, winner.second)
