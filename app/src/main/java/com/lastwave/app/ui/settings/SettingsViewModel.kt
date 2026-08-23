@@ -238,15 +238,18 @@ class SettingsViewModel @Inject constructor(
     fun handleCsvPicked(uri: android.net.Uri) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                _uiState.update { it.copy(toastMessage = "Matching and importing CSV songs...") }
-                val inputStream = context.contentResolver.openInputStream(uri)
-                    ?: error("Could not open selected CSV file")
-
                 // Extract filename
                 val cursor = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
                 val displayName = cursor?.use {
                     if (it.moveToFirst()) it.getString(0) else null
                 } ?: "Imported Playlist"
+
+                val isM3u = displayName.endsWith(".m3u", ignoreCase = true) || displayName.endsWith(".m3u8", ignoreCase = true)
+                val fileType = if (isM3u) "M3U" else "CSV"
+                _uiState.update { it.copy(toastMessage = "Matching and importing $fileType songs...") }
+
+                val inputStream = context.contentResolver.openInputStream(uri)
+                    ?: error("Could not open selected playlist file")
 
                 val (saved, result) = playlistImportManager.importCsvStream(inputStream, displayName)
                 _uiState.update {
@@ -254,7 +257,7 @@ class SettingsViewModel @Inject constructor(
                 }
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(toastMessage = "CSV Import failed: ${e.localizedMessage ?: e.message}")
+                    it.copy(toastMessage = "Import failed: ${e.localizedMessage ?: e.message}")
                 }
             }
         }

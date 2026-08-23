@@ -42,9 +42,10 @@ class PlaylistImportManager @Inject constructor(
         filename: String,
     ): Pair<SavedPlaylist, CsvImportResult> = withContext(Dispatchers.IO) {
         val result = csvPlaylistImporter.parseAndMatchCsv(inputStream, filename)
+        val fileType = if (filename.endsWith(".m3u", ignoreCase = true) || filename.endsWith(".m3u8", ignoreCase = true)) "M3U" else "CSV"
         val saved = playlistRepository.save(
             title = result.suggestedTitle,
-            subtitle = "CSV Import \u2022 ${result.tracks.size} tracks (${result.matchedCount} matched)",
+            subtitle = "$fileType Import \u2022 ${result.tracks.size} tracks (${result.matchedCount} matched)",
             mode = "custom",
             tracks = result.tracks,
         )

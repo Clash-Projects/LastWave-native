@@ -33,21 +33,18 @@ class CsvPlaylistImporter @Inject constructor(
 ) {
 
     /**
-     * Parses raw CSV text (Spotify, Soundiiz, TuneMyMusic, Apple Music, or
-     * generic) and performs strict, anti-hallucination track matching.
-     *
-     * Reliability notes (the "CSV import is broken" fixes):
-     * - BOM is stripped; headers are matched fuzzily ("Track Name", "\"Title\"",
-     *   "Artist Name(s)" all resolve now) instead of exact lowercase equality.
-     * - Headerless files fall back to positional columns.
-     * - Matching runs in parallel (bounded) so a 500-row export doesn't take
-     *   10+ minutes of sequential searches.
+     * Parses raw CSV or M3U/M3U8 playlist text (Spotify, Soundiiz, TuneMyMusic, Apple Music,
+     * VLC, or generic) and performs strict, anti-hallucination track matching.
      */
     suspend fun parseAndMatchCsv(
         inputStream: InputStream,
         filename: String = "Imported Playlist",
     ): CsvImportResult = withContext(Dispatchers.IO) {
-        val rawTracks = runCatching { parseCsv(inputStream) }.getOrDefault(emptyList())
+        val isM3u = filename.endsWith(".m3u", ignoreCase = true) || filename.endsWith(".m3u8", ignoreCase = true)
+        val rawTracks = runCatching {
+            if (isM3u) parseM3u(inputStream) else parseCsv(inputStream)
+        }.getOrDefault(emptyList())
+
         if (rawTracks.isEmpty()) {
             return@withContext CsvImportResult(
                 suggestedTitle = cleanPlaylistTitle(filename),
@@ -165,6 +162,87 @@ class CsvPlaylistImporter @Inject constructor(
             )
         }
 
+        return result
+    }
+
+    /**
+     * Robust M3U and M3U8 extended playlist parser.
+     * Extracts #EXTINF metadata (seconds, artist, title) or falls back to
+     * clean audio file path / URL parsing.
+     */
+    private fun parseM3u(inputStream: InputStream): List<CsvRawTrack> {
+        val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
+        val lines = reader.readLines().map { it.trimStart('\uFEFF').trim() }.filter { it.isNotBlank() }
+        val result = mutableListOf<CsvRawTrack>()
+        var lastExtInfTitle: String? = null
+        var lastExtInfArtist: String? = null
+
+        for (line in lines) {
+            if (line.startsWith("#EXTINF:", ignoreCase = true)) {
+                val info = line.substringAfter("#EXTINF:", "").trim()
+                val commaIndex = info.indexOf(',')
+                val display = if (commaIndex >= 0) info.substring(commaIndex + 1).trim() else info
+
+                // Check for artist="...", title="..." attributes
+                val attrArtist = Regex("""artist="([^"]+)"""", RegexOption.IGNORE_CASE).find(info)?.groupValues?.get(1)
+                val attrTitle = Regex("""title="([^"]+)"""", RegexOption.IGNORE_CASE).find(info)?.groupValues?.get(1)
+
+                if (!attrArtist.isNullOrBlank() && !attrTitle.isNullOrBlank()) {
+                    lastExtInfArtist = attrArtist.trim()
+                    lastExtInfTitle = attrTitle.trim()
+                } else if (display.contains(" - ")) {
+                    val parts = display.split(" - ", limit = 2)
+                    lastExtInfArtist = parts[0].trim()
+                    lastExtInfTitle = parts[1].trim()
+                } else if (display.contains(" – ")) {
+                    val parts = display.split(" – ", limit = 2)
+                    lastExtInfArtist = parts[0].trim()
+                    lastExtInfTitle = parts[1].trim()
+                } else {
+                    lastExtInfArtist = ""
+                    lastExtInfTitle = display.trim()
+                }
+            } else if (line.startsWith("#")) {
+                // Ignore other directives (#EXTM3U, #EXTVLCOPT, etc.)
+                continue
+            } else {
+                val title: String
+                val artist: String
+
+                if (!lastExtInfTitle.isNullOrBlank()) {
+                    title = lastExtInfTitle
+                    artist = lastExtInfArtist.orEmpty()
+                } else {
+                    val fileName = line.substringAfterLast('/').substringAfterLast('\\').substringBeforeLast('.')
+                    val cleaned = fileName.replace(Regex("""^\d+[\s\.\-_]+"""), "")
+                    if (cleaned.contains(" - ")) {
+                        val parts = cleaned.split(" - ", limit = 2)
+                        artist = parts[0].trim()
+                        title = parts[1].trim()
+                    } else if (cleaned.contains(" – ")) {
+                        val parts = cleaned.split(" – ", limit = 2)
+                        artist = parts[0].trim()
+                        title = parts[1].trim()
+                    } else {
+                        artist = ""
+                        title = cleaned.trim()
+                    }
+                }
+
+                if (title.isNotBlank()) {
+                    result.add(
+                        CsvRawTrack(
+                            title = cleanTrackTitle(title),
+                            artist = cleanArtistName(artist),
+                            album = null,
+                        ),
+                    )
+                }
+
+                lastExtInfTitle = null
+                lastExtInfArtist = null
+            }
+        }
         return result
     }
 

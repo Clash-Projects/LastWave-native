@@ -543,14 +543,14 @@ fun YouTubePlaylistImportScreen(
                                 }
 
                                 Text(
-                                    "Import from CSV File",
+                                    "Import from Playlist File",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     textAlign = TextAlign.Center,
                                 )
 
                                 Text(
-                                    "Import your playlists exported from Spotify, Apple Music, Soundiiz, or TuneMyMusic. LastWave preserves original names, artists, and artwork.",
+                                    "Import your playlists from M3U, M3U8, or CSV exports (Spotify, Apple Music, VLC, Soundiiz, or local storage). LastWave parses and matches original titles and artists.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center,
@@ -561,7 +561,7 @@ fun YouTubePlaylistImportScreen(
                                 Button(
                                     onClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "*/*"))
+                                        csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
                                     },
                                     enabled = !state.isCsvImporting,
                                     shape = CircleShape,
@@ -570,11 +570,11 @@ fun YouTubePlaylistImportScreen(
                                     if (state.isCsvImporting) {
                                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                                         Spacer(Modifier.width(8.dp))
-                                        Text(state.importProgress ?: "Importing CSV...")
+                                        Text(state.importProgress ?: "Importing Playlist...")
                                     } else {
                                         Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(20.dp))
                                         Spacer(Modifier.width(8.dp))
-                                        Text("Select CSV File from Storage", fontWeight = FontWeight.Bold)
+                                        Text("Select CSV or M3U File", fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }

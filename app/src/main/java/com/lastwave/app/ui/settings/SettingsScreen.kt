@@ -581,10 +581,10 @@ fun SettingsScreen(
                                 icon = Icons.Filled.FileDownload,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Import Songs from CSV",
-                                subtitle = "Spotify, Soundiiz, TuneMyMusic, or custom CSV",
+                                title = "Import Playlist from File",
+                                subtitle = "M3U, M3U8, or CSV exports (Spotify, Soundiiz, Apple Music)",
                                 onClick = {
-                                    csvPickerLauncher.launch(arrayOf("text/*", "application/*", "*/*"))
+                                    csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
                                 },
                                 position = position,
                             )

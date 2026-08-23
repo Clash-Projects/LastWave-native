@@ -277,12 +277,14 @@ class YouTubePlaylistImportViewModel @Inject constructor(
         filename: String,
         onSuccess: (SavedPlaylist) -> Unit,
     ) {
+        val isM3u = filename.endsWith(".m3u", ignoreCase = true) || filename.endsWith(".m3u8", ignoreCase = true)
+        val fileType = if (isM3u) "M3U" else "CSV"
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
                     isCsvImporting = true,
                     csvFilename = filename,
-                    importProgress = "Parsing & matching CSV tracks...",
+                    importProgress = "Parsing & matching $fileType tracks...",
                     errorMessage = null,
                 )
             }
@@ -301,7 +303,7 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                     it.copy(
                         isCsvImporting = false,
                         importProgress = null,
-                        errorMessage = "CSV import failed: ${e.localizedMessage ?: e.message}",
+                        errorMessage = "$fileType import failed: ${e.localizedMessage ?: e.message}",
                     )
                 }
             }
