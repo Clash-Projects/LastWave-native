@@ -15,6 +15,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.lastwave.app.data.discover.DiscoverRepository
@@ -210,8 +211,18 @@ class MusicPlayer @Inject constructor(
                 dataSpec.withUri(Uri.parse(stream.url))
             }
         }
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 15_000,
+                /* maxBufferMs = */ 50_000,
+                /* bufferForPlaybackMs = */ 500,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_000,
+            )
+            .setBackBuffer(10_000, true)
+            .build()
         ExoPlayer.Builder(appContext)
             .setMediaSourceFactory(DefaultMediaSourceFactory(appContext).setDataSourceFactory(resolving))
+            .setLoadControl(loadControl)
             .build().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
@@ -770,10 +781,10 @@ class MusicPlayer @Inject constructor(
 }
 
 private fun PlayableTrack.toMediaItem(): MediaItem {
-    val playbackUri = if (!videoId.isNullOrBlank()) {
-        Uri.Builder().scheme("lastwave").authority("youtube").appendPath(videoId).build()
-    } else if (playbackUrl?.isNotBlank() == true) {
+    val playbackUri = if (playbackUrl?.isNotBlank() == true) {
         Uri.parse(playbackUrl)
+    } else if (!videoId.isNullOrBlank()) {
+        Uri.Builder().scheme("lastwave").authority("youtube").appendPath(videoId).build()
     } else {
         Uri.Builder().scheme("lastwave").authority("search")
             .appendQueryParameter("title", title)

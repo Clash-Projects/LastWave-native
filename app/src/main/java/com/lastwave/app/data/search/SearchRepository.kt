@@ -10,6 +10,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
+import com.lastwave.app.data.music.YOUTUBE_WEB_USER_AGENT
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonArray
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -36,8 +43,31 @@ class SearchRepository @Inject constructor(
     private val api: LastFmApiService,
     private val sessionPreferences: SessionPreferences,
     private val innerTube: InnerTubeMusicApi,
+    private val http: OkHttpClient,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+
+    suspend fun getSuggestions(query: String): List<String> = withContext(Dispatchers.IO) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return@withContext emptyList()
+        val url = "https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${URLEncoder.encode(trimmed, "UTF-8")}"
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", YOUTUBE_WEB_USER_AGENT)
+            .build()
+        try {
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
+                val body = response.body?.string() ?: return@withContext emptyList()
+                val array = json.parseToJsonElement(body) as? JsonArray ?: return@withContext emptyList()
+                if (array.size < 2) return@withContext emptyList()
+                val suggestions = array[1] as? JsonArray ?: return@withContext emptyList()
+                suggestions.mapNotNull { (it as? JsonPrimitive)?.content }
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
 
     suspend fun search(tab: SearchTab, query: String): List<SearchResultItem> {
         if (query.isBlank()) return emptyList()

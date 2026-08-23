@@ -1,7 +1,9 @@
 package com.lastwave.app.ui.search
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lastwave.app.data.search.SearchHistoryRepository
 import com.lastwave.app.data.search.SearchRepository
 import com.lastwave.app.data.search.SearchResultItem
 import com.lastwave.app.data.search.SearchTab
@@ -17,8 +19,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-import androidx.compose.runtime.Immutable
-
 enum class SearchStatus { IDLE, LOADING, EMPTY, RESULTS }
 
 @Immutable
@@ -27,13 +27,19 @@ data class SearchUiState(
     val tab: SearchTab = SearchTab.TRACKS,
     val status: SearchStatus = SearchStatus.IDLE,
     val results: List<SearchResultItem> = emptyList(),
+    val suggestions: List<String> = emptyList(),
+    val recentSearches: List<String> = emptyList(),
+    val isShowingSuggestions: Boolean = false,
 )
 
-/** Port of search.js (§6): 350ms debounce, immediate on explicit search,
- *  stale-response guard, tab-switch re-search. */
+/**
+ * YouTube Music & Last.fm search with live auto-complete suggestions,
+ * persistent search history, debounced search, and multi-tab results.
+ */
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val repository: SearchRepository,
+    private val historyRepository: SearchHistoryRepository,
     private val musicPlayer: MusicPlayer,
 ) : ViewModel() {
 
@@ -41,35 +47,91 @@ class SearchViewModel @Inject constructor(
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
     private var debounceJob: Job? = null
+    private var suggestionsJob: Job? = null
     private var lastIssuedQuery: String = ""
 
+    init {
+        viewModelScope.launch {
+            historyRepository.history.collect { history ->
+                _uiState.update { it.copy(recentSearches = history) }
+            }
+        }
+    }
+
     fun setQuery(query: String) {
-        _uiState.update { it.copy(query = query) }
+        _uiState.update { it.copy(query = query, isShowingSuggestions = query.isNotBlank()) }
         debounceJob?.cancel()
+        suggestionsJob?.cancel()
+
         if (query.isBlank()) {
-            _uiState.update { it.copy(status = SearchStatus.IDLE, results = emptyList()) }
+            _uiState.update {
+                it.copy(
+                    status = SearchStatus.IDLE,
+                    results = emptyList(),
+                    suggestions = emptyList(),
+                    isShowingSuggestions = false,
+                )
+            }
             return
         }
+
+        // Fast suggestions debounce (120ms)
+        suggestionsJob = viewModelScope.launch {
+            delay(120)
+            val suggestions = repository.getSuggestions(query)
+            if (_uiState.value.query == query) {
+                _uiState.update { it.copy(suggestions = suggestions) }
+            }
+        }
+
+        // Full search results debounce (400ms)
         debounceJob = viewModelScope.launch {
-            delay(350)
-            runSearch(query)
+            delay(400)
+            runSearch(query, saveToHistory = false)
         }
     }
 
     fun setTab(tab: SearchTab) {
-        _uiState.update { it.copy(tab = tab) }
+        _uiState.update { it.copy(tab = tab, isShowingSuggestions = false) }
         val q = _uiState.value.query
         if (q.isNotBlank()) {
             debounceJob?.cancel()
-            viewModelScope.launch { runSearch(q) }
+            suggestionsJob?.cancel()
+            viewModelScope.launch { runSearch(q, saveToHistory = false) }
         }
     }
 
     fun searchNow() {
-        debounceJob?.cancel()
         val q = _uiState.value.query
         if (q.isBlank()) return
-        viewModelScope.launch { runSearch(q) }
+        executeSearch(q)
+    }
+
+    fun executeSearch(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return
+        debounceJob?.cancel()
+        suggestionsJob?.cancel()
+        historyRepository.add(trimmed)
+        _uiState.update {
+            it.copy(
+                query = trimmed,
+                isShowingSuggestions = false,
+            )
+        }
+        viewModelScope.launch { runSearch(trimmed, saveToHistory = true) }
+    }
+
+    fun removeRecentSearch(query: String) {
+        historyRepository.remove(query)
+    }
+
+    fun clearRecentSearches() {
+        historyRepository.clear()
+    }
+
+    fun dismissSuggestions() {
+        _uiState.update { it.copy(isShowingSuggestions = false) }
     }
 
     fun playResult(item: SearchResultItem) {
@@ -106,15 +168,23 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    private suspend fun runSearch(query: String) {
+    private suspend fun runSearch(query: String, saveToHistory: Boolean) {
         lastIssuedQuery = query
         _uiState.update { it.copy(status = SearchStatus.LOADING) }
+        if (saveToHistory) {
+            historyRepository.add(query)
+        }
         try {
             val results = repository.search(_uiState.value.tab, query)
             // Stale-response guard: discard if the user has typed something
             // new since this call was issued.
             if (lastIssuedQuery != query) return
-            _uiState.update { it.copy(status = if (results.isEmpty()) SearchStatus.EMPTY else SearchStatus.RESULTS, results = results) }
+            _uiState.update {
+                it.copy(
+                    status = if (results.isEmpty()) SearchStatus.EMPTY else SearchStatus.RESULTS,
+                    results = results,
+                )
+            }
         } catch (e: Exception) {
             if (lastIssuedQuery != query) return
             _uiState.update { it.copy(status = SearchStatus.EMPTY, results = emptyList()) }
@@ -123,6 +193,15 @@ class SearchViewModel @Inject constructor(
 
     fun clearQuery() {
         debounceJob?.cancel()
-        _uiState.update { it.copy(query = "", status = SearchStatus.IDLE, results = emptyList()) }
+        suggestionsJob?.cancel()
+        _uiState.update {
+            it.copy(
+                query = "",
+                status = SearchStatus.IDLE,
+                results = emptyList(),
+                suggestions = emptyList(),
+                isShowingSuggestions = false,
+            )
+        }
     }
 }

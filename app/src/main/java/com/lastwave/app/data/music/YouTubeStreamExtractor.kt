@@ -11,6 +11,7 @@ import org.schabi.newpipe.extractor.downloader.Request
 import org.schabi.newpipe.extractor.downloader.Response
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,7 +29,20 @@ class YouTubeStreamExtractor @Inject constructor(
     @Volatile
     private var initialized = false
 
+    private val streamCache = ConcurrentHashMap<String, Pair<Long, YouTubeAudioStream>>()
+
+    fun invalidateCache(videoId: String) {
+        streamCache.remove(videoId)
+    }
+
     suspend fun resolveAudioStream(videoId: String): YouTubeAudioStream = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        streamCache[videoId]?.let { (cachedAt, stream) ->
+            if (now - cachedAt < CACHE_EXPIRY_MS) {
+                return@withContext stream
+            }
+        }
+
         initialize()
         val info = try {
             StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$videoId")
@@ -38,13 +52,15 @@ class YouTubeStreamExtractor @Inject constructor(
         val stream = info.audioStreams.maxByOrNull { maxOf(it.averageBitrate, it.bitrate) }
             ?: throw IOException("YouTube returned no playable audio stream for $videoId")
         val reportedBitrate = maxOf(stream.averageBitrate, stream.bitrate)
-        YouTubeAudioStream(
+        val result = YouTubeAudioStream(
             url = stream.content,
             mimeType = stream.format?.mimeType,
             // NewPipe reports kbps while raw InnerTube formats report bps;
             // normalize both providers to bps for one truthful UI value.
             bitrate = if (reportedBitrate in 1..9_999) reportedBitrate * 1_000 else reportedBitrate,
         )
+        streamCache[videoId] = Pair(now, result)
+        result
     }
 
     private fun initialize() {
@@ -54,6 +70,10 @@ class YouTubeStreamExtractor @Inject constructor(
             NewPipe.init(downloader)
             initialized = true
         }
+    }
+
+    companion object {
+        private const val CACHE_EXPIRY_MS = 4 * 60 * 60 * 1000L // 4 hours
     }
 }
 

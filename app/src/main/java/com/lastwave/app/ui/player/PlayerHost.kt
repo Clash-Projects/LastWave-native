@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -913,7 +914,7 @@ private fun FullPlayer(
                                                 translationX = shownArtworkX
                                                 rotationZ = shownArtworkX / 80f
                                             }
-                                            .pointerInput(track.videoId, track.title, state.durationMs) {
+                                            .pointerInput(track.videoId, track.title) {
                                                 awaitEachGesture {
                                                     val down = awaitFirstDown(requireUnconsumed = false)
                                                     var isDrag = false
@@ -933,12 +934,21 @@ private fun FullPlayer(
                                                                 }
                                                                 artworkDragX = 0f
                                                             } else {
-                                                                // Tap on left or right half of artwork
-                                                                val side = if (change.position.x < size.width / 2) SeekDirection.REWIND else SeekDirection.FORWARD
+                                                                // Use initial tap-down coordinate to strictly anchor side
+                                                                val isLeft = initialX < size.width * 0.5f
+                                                                val side = if (isLeft) SeekDirection.REWIND else SeekDirection.FORWARD
                                                                 val now = SystemClock.elapsedRealtime()
-                                                                if (now - lastTapTimestamp < 380L && lastTapSide == side) {
-                                                                    // Incremental multi-tap seek (5s, 10s, 15s, 20s...)
-                                                                    val newSeconds = seekOverlaySeconds + 5
+
+                                                                if (lastTapSide != side) {
+                                                                    // Switched sides: immediately dismiss opposite overlay & start new side
+                                                                    seekResetJob?.cancel()
+                                                                    seekOverlayDirection = null
+                                                                    seekOverlaySeconds = 0
+                                                                    lastTapSide = side
+                                                                    lastTapTimestamp = now
+                                                                } else if (now - lastTapTimestamp < 450L) {
+                                                                    // Consecutive multi-tap on the same side
+                                                                    val newSeconds = if (seekOverlayDirection == side) seekOverlaySeconds + 5 else 5
                                                                     seekOverlaySeconds = newSeconds
                                                                     seekOverlayDirection = side
                                                                     lastTapTimestamp = now
@@ -948,13 +958,13 @@ private fun FullPlayer(
 
                                                                     seekResetJob?.cancel()
                                                                     seekResetJob = coroutineScope.launch {
-                                                                        delay(750L)
+                                                                        delay(700L)
                                                                         seekOverlayDirection = null
                                                                         seekOverlaySeconds = 0
                                                                         lastTapSide = null
                                                                     }
                                                                 } else {
-                                                                    // First tap
+                                                                    // First tap on this side
                                                                     lastTapTimestamp = now
                                                                     lastTapSide = side
                                                                     seekOverlaySeconds = 0
@@ -986,23 +996,21 @@ private fun FullPlayer(
                                         Box(Modifier.fillMaxSize()) {
                                             PlayerArtwork(track, Modifier.fillMaxSize(), 32.dp)
 
-                                            // Double / Multi-tap Seek Feedback Overlay (Left / Right)
+                                            // Dedicated Left Rewind Overlay (strictly anchored to left half)
                                             androidx.compose.animation.AnimatedVisibility(
-                                                visible = seekOverlayDirection != null,
+                                                visible = seekOverlayDirection == SeekDirection.REWIND,
                                                 enter = fadeIn(tween(100)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.88f),
-                                                exit = fadeOut(tween(220)),
-                                                modifier = Modifier.fillMaxSize(),
+                                                exit = fadeOut(tween(200)),
+                                                modifier = Modifier
+                                                    .align(Alignment.CenterStart)
+                                                    .fillMaxHeight()
+                                                    .fillMaxWidth(0.5f),
                                             ) {
-                                                val isForward = seekOverlayDirection == SeekDirection.FORWARD
                                                 Box(
                                                     modifier = Modifier
                                                         .fillMaxSize()
-                                                        .padding(if (isForward) PaddingValues(start = artworkSize * 0.44f) else PaddingValues(end = artworkSize * 0.44f))
-                                                        .clip(
-                                                            if (isForward) RoundedCornerShape(topEnd = 32.dp, bottomEnd = 32.dp, topStart = 120.dp, bottomStart = 120.dp)
-                                                            else RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp, topEnd = 120.dp, bottomEnd = 120.dp)
-                                                        )
-                                                        .background(Color.Black.copy(alpha = 0.55f)),
+                                                        .clip(RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp, topEnd = 120.dp, bottomEnd = 120.dp))
+                                                        .background(Color.Black.copy(alpha = 0.58f)),
                                                     contentAlignment = Alignment.Center,
                                                 ) {
                                                     Column(
@@ -1016,8 +1024,8 @@ private fun FullPlayer(
                                                         ) {
                                                             Box(contentAlignment = Alignment.Center) {
                                                                 Icon(
-                                                                    if (isForward) Icons.Filled.FastForward else Icons.Filled.FastRewind,
-                                                                    contentDescription = if (isForward) "Seek forward" else "Seek rewind",
+                                                                    Icons.Filled.FastRewind,
+                                                                    contentDescription = "Seek rewind",
                                                                     tint = Color.White,
                                                                     modifier = Modifier.size(28.dp),
                                                                 )
@@ -1025,7 +1033,53 @@ private fun FullPlayer(
                                                         }
                                                         Spacer(Modifier.height(6.dp))
                                                         Text(
-                                                            "${if (isForward) "+" else "-"}${seekOverlaySeconds}s",
+                                                            "-${seekOverlaySeconds}s",
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            color = Color.White,
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            // Dedicated Right Fast-Forward Overlay (strictly anchored to right half)
+                                            androidx.compose.animation.AnimatedVisibility(
+                                                visible = seekOverlayDirection == SeekDirection.FORWARD,
+                                                enter = fadeIn(tween(100)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.88f),
+                                                exit = fadeOut(tween(200)),
+                                                modifier = Modifier
+                                                    .align(Alignment.CenterEnd)
+                                                    .fillMaxHeight()
+                                                    .fillMaxWidth(0.5f),
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .clip(RoundedCornerShape(topEnd = 32.dp, bottomEnd = 32.dp, topStart = 120.dp, bottomStart = 120.dp))
+                                                        .background(Color.Black.copy(alpha = 0.58f)),
+                                                    contentAlignment = Alignment.Center,
+                                                ) {
+                                                    Column(
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        verticalArrangement = Arrangement.Center,
+                                                    ) {
+                                                        Surface(
+                                                            shape = CircleShape,
+                                                            color = Color.White.copy(alpha = 0.22f),
+                                                            modifier = Modifier.size(52.dp),
+                                                        ) {
+                                                            Box(contentAlignment = Alignment.Center) {
+                                                                Icon(
+                                                                    Icons.Filled.FastForward,
+                                                                    contentDescription = "Seek forward",
+                                                                    tint = Color.White,
+                                                                    modifier = Modifier.size(28.dp),
+                                                                )
+                                                            }
+                                                        }
+                                                        Spacer(Modifier.height(6.dp))
+                                                        Text(
+                                                            "+${seekOverlaySeconds}s",
                                                             style = MaterialTheme.typography.titleMedium,
                                                             fontWeight = FontWeight.ExtraBold,
                                                             color = Color.White,
