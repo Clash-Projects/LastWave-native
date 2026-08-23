@@ -285,8 +285,11 @@ private fun SyncedLyricsList(
     val listState = rememberLazyListState()
     var userScrolledTime by remember { mutableLongStateOf(0L) }
 
+    // Sync lead compensation (600ms): compensates for AudioTrack buffer latency,
+    // decoder output buffer, and animation interpolation so the active line highlights on the exact vocal onset.
     val activeIndex = remember(lines, currentPositionMs) {
-        lines.indexOfLast { it.timeMs <= currentPositionMs }
+        val adjustedPositionMs = currentPositionMs + 600L
+        lines.indexOfLast { it.timeMs <= adjustedPositionMs }
     }
 
     if (listState.isScrollInProgress) {

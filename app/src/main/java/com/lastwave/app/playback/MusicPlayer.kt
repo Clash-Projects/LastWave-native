@@ -395,7 +395,7 @@ class MusicPlayer @Inject constructor(
                         }
                     }
                 }
-                delay(if (player.isPlaying) 250L else 500L)
+                delay(if (player.isPlaying) 60L else 500L)
             }
         }
 
