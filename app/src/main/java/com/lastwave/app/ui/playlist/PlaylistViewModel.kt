@@ -80,7 +80,7 @@ class PlaylistViewModel @Inject constructor(
 
     fun toggleYtSync(playlistId: Long) {
         viewModelScope.launch {
-            val allIds = playlistRepository.allPlaylists.first().map { it.id }
+            val allIds = playlistRepository.getAll().map { it.id }
             val current = ytMusicPreferences.syncedPlaylistIds.first() ?: allIds.toSet()
             val isSynced = playlistId in current
             ytMusicPreferences.togglePlaylistSync(allIds, playlistId, !isSynced)
