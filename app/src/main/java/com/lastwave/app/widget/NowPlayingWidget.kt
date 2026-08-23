@@ -241,19 +241,30 @@ private fun PlayerWidget(state: WidgetUiState) {
     Row(
         modifier = playerSurface(GlanceModifier)
             .clickable(actionRunCallback<OpenLastWaveAction>())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MiniArtwork(state.art, 68, state.isPlaying, state.animationFrame)
-        Spacer(GlanceModifier.width(14.dp))
+        MiniArtwork(state.art, 58, state.isPlaying, state.animationFrame)
+        Spacer(GlanceModifier.width(12.dp))
         Column(
             modifier = GlanceModifier.defaultWeight(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TrackTitle(state.title, size = 16)
-            Spacer(GlanceModifier.height(3.dp))
-            TrackArtist(state.artist, size = 13)
-            Spacer(GlanceModifier.height(8.dp))
+            TrackTitle(state.title, size = 15)
+            Spacer(GlanceModifier.height(2.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TrackArtist(state.artist, size = 12)
+                Spacer(GlanceModifier.width(6.dp))
+                Text(
+                    text = if (state.isPlaying) "• Playing" else "• Paused",
+                    style = TextStyle(
+                        color = if (state.isPlaying) GlanceTheme.colors.primary else GlanceTheme.colors.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    ),
+                )
+            }
+            Spacer(GlanceModifier.height(6.dp))
             PlaybackControls(state.isPlaying)
         }
     }
@@ -263,20 +274,20 @@ private fun PlayerWidget(state: WidgetUiState) {
 private fun playerSurface(modifier: GlanceModifier): GlanceModifier = modifier
     .fillMaxSize()
     .background(GlanceTheme.colors.surface)
-    .cornerRadius(28.dp)
+    .cornerRadius(24.dp)
     .appWidgetBackground()
 
 @Composable
 private fun MiniArtwork(art: Bitmap?, size: Int, isPlaying: Boolean, animationFrame: Int) {
     Box(
-        modifier = GlanceModifier.size(size.dp).background(GlanceTheme.colors.surfaceVariant).cornerRadius(18.dp),
+        modifier = GlanceModifier.size(size.dp).background(GlanceTheme.colors.surfaceVariant).cornerRadius(16.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (art != null) {
             Image(
                 provider = ImageProvider(art),
                 contentDescription = "Album artwork",
-                modifier = GlanceModifier.fillMaxSize().cornerRadius(16.dp),
+                modifier = GlanceModifier.fillMaxSize().cornerRadius(14.dp),
                 contentScale = ContentScale.Crop,
             )
         } else {
@@ -285,6 +296,53 @@ private fun MiniArtwork(art: Bitmap?, size: Int, isPlaying: Boolean, animationFr
                 contentDescription = null,
                 modifier = GlanceModifier.size((size * 0.6f).dp),
             )
+        }
+
+        // Live Equalizer Waves Overlay on Artwork
+        if (isPlaying) {
+            val frame = animationFrame % 3
+            val bar1Height = if (frame == 0) 10.dp else if (frame == 1) 5.dp else 12.dp
+            val bar2Height = if (frame == 0) 5.dp else if (frame == 1) 12.dp else 7.dp
+            val bar3Height = if (frame == 0) 12.dp else if (frame == 1) 8.dp else 11.dp
+
+            Box(
+                modifier = GlanceModifier
+                    .fillMaxSize()
+                    .padding(4.dp),
+                contentAlignment = Alignment.BottomEnd,
+            ) {
+                Row(
+                    modifier = GlanceModifier
+                        .background(GlanceTheme.colors.surface)
+                        .cornerRadius(6.dp)
+                        .padding(horizontal = 4.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    Box(
+                        modifier = GlanceModifier
+                            .width(2.5.dp)
+                            .height(bar1Height)
+                            .cornerRadius(1.dp)
+                            .background(GlanceTheme.colors.primary),
+                    ) {}
+                    Spacer(GlanceModifier.width(2.dp))
+                    Box(
+                        modifier = GlanceModifier
+                            .width(2.5.dp)
+                            .height(bar2Height)
+                            .cornerRadius(1.dp)
+                            .background(GlanceTheme.colors.primary),
+                    ) {}
+                    Spacer(GlanceModifier.width(2.dp))
+                    Box(
+                        modifier = GlanceModifier
+                            .width(2.5.dp)
+                            .height(bar3Height)
+                            .cornerRadius(1.dp)
+                            .background(GlanceTheme.colors.primary),
+                    ) {}
+                }
+            }
         }
     }
 }
@@ -322,10 +380,10 @@ private fun PlaybackControls(isPlaying: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Row(
             modifier = GlanceModifier
-                .height(34.dp)
+                .height(30.dp)
                 .background(GlanceTheme.colors.primaryContainer)
-                .cornerRadius(17.dp)
-                .padding(horizontal = 14.dp)
+                .cornerRadius(15.dp)
+                .padding(horizontal = 12.dp)
                 .clickable(actionRunCallback<TogglePlayPauseAction>()),
             verticalAlignment = Alignment.CenterVertically,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -333,15 +391,15 @@ private fun PlaybackControls(isPlaying: Boolean) {
             Image(
                 provider = ImageProvider(icon),
                 contentDescription = label,
-                modifier = GlanceModifier.size(16.dp),
+                modifier = GlanceModifier.size(14.dp),
                 colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimaryContainer),
             )
-            Spacer(GlanceModifier.width(6.dp))
+            Spacer(GlanceModifier.width(5.dp))
             Text(
                 text = label,
                 style = TextStyle(
                     color = GlanceTheme.colors.onPrimaryContainer,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
@@ -349,16 +407,16 @@ private fun PlaybackControls(isPlaying: Boolean) {
         Spacer(GlanceModifier.width(8.dp))
         Box(
             modifier = GlanceModifier
-                .size(34.dp)
+                .size(30.dp)
                 .background(GlanceTheme.colors.primaryContainer)
-                .cornerRadius(17.dp)
+                .cornerRadius(15.dp)
                 .clickable(actionRunCallback<SkipNextAction>()),
             contentAlignment = Alignment.Center,
         ) {
             Image(
                 provider = ImageProvider(R.drawable.ic_widget_skip_next),
                 contentDescription = "Next",
-                modifier = GlanceModifier.size(16.dp),
+                modifier = GlanceModifier.size(14.dp),
                 colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimaryContainer),
             )
         }
