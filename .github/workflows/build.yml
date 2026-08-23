@@ -45,11 +45,18 @@ jobs:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           BUILD_TOOLS_VERSION: "34.0.0"
 
+      - name: Prepare Single Final APK
+        run: |
+          mkdir -p final_apk
+          if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
+            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v3.0.0-release.apk
+          else
+            cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v3.0.0-release.apk
+          fi
+
       - name: Upload Single Release APK
         uses: actions/upload-artifact@v4
         with:
           name: LastWave-Release-APK
-          path: |
-            ${{ steps.sign_app.outputs.signedReleaseFile }}
-            app/build/outputs/apk/release/*.apk
+          path: final_apk/LastWave-v3.0.0-release.apk
           if-no-files-found: error
