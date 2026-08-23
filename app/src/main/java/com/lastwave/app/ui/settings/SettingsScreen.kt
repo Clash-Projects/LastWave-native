@@ -56,7 +56,7 @@ import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.QueueMusic
-import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -362,6 +362,27 @@ fun SettingsScreen(
             }
 
             item {
+                Column {
+                    SectionLabel("Accent")
+                    Spacer(Modifier.height(10.dp))
+                    Card(
+                        shape = CardOuterShape,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                    ) {
+                        Column(Modifier.padding(20.dp)) {
+                            AccentPresetGrid(
+                                currentMode = theme?.mode ?: AccentMode.MANUAL,
+                                selectedHex = theme?.accentColorHex,
+                                onPickPreset = { hex -> viewModel.setManualAccent(Color(android.graphics.Color.parseColor(hex))) },
+                                onPickMono = { viewModel.setAccentMode(AccentMode.MONOCHROME) },
+                                onPickCustom = viewModel::openColorWheel,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Audio & Streaming")
                     val qualitySubtitle = when (misc.qobuzQuality) {
@@ -425,7 +446,7 @@ fun SettingsScreen(
                                 position = position,
                             )
                             1 -> SettingsActionCard(
-                                icon = Icons.Filled.FileUpload,
+                                icon = Icons.Filled.FileDownload,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = "Import Songs from CSV",
@@ -481,27 +502,6 @@ fun SettingsScreen(
                                 percent = scrobbler.scrobblePercent,
                                 onPercentChange = viewModel::setScrobblePercent,
                                 position = position,
-                            )
-                        }
-                    }
-                }
-            }
-
-            item {
-                Column {
-                    SectionLabel("Accent")
-                    Spacer(Modifier.height(10.dp))
-                    Card(
-                        shape = CardOuterShape,
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                    ) {
-                        Column(Modifier.padding(20.dp)) {
-                            AccentPresetGrid(
-                                currentMode = theme?.mode ?: AccentMode.MANUAL,
-                                selectedHex = theme?.accentColorHex,
-                                onPickPreset = { hex -> viewModel.setManualAccent(Color(android.graphics.Color.parseColor(hex))) },
-                                onPickMono = { viewModel.setAccentMode(AccentMode.MONOCHROME) },
-                                onPickCustom = viewModel::openColorWheel,
                             )
                         }
                     }

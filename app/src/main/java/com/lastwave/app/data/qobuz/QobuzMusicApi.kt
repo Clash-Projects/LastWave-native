@@ -9,6 +9,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -98,6 +99,8 @@ class QobuzMusicApi @Inject constructor(
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
+    private val streamCache = ConcurrentHashMap<String, Pair<Long, QobuzAudioStream>>()
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -132,6 +135,14 @@ class QobuzMusicApi @Inject constructor(
     ): QobuzAudioStream? = withContext(Dispatchers.IO) {
         if (title.isBlank() || artist.isBlank()) return@withContext null
 
+        val cacheKey = "${artist.trim().lowercase(Locale.ROOT)}|${title.trim().lowercase(Locale.ROOT)}|$preferredQuality"
+        val now = System.currentTimeMillis()
+        streamCache[cacheKey]?.let { (cachedAt, stream) ->
+            if (now - cachedAt < 4 * 60 * 60 * 1000L) {
+                return@withContext stream
+            }
+        }
+
         try {
             // 1. Search Qobuz catalog via backend
             val candidate = findBestVerifiedMatch(title, artist, expectedDurationSeconds) ?: return@withContext null
@@ -163,7 +174,7 @@ class QobuzMusicApi @Inject constructor(
                     else -> null
                 }
 
-                QobuzAudioStream(
+                val stream = QobuzAudioStream(
                     url = streamUrl,
                     mimeType = data.mimeType.ifBlank { "audio/flac" },
                     bitDepth = data.bitDepth.takeIf { it > 0 } ?: 16,
@@ -172,6 +183,8 @@ class QobuzMusicApi @Inject constructor(
                     bitrateKbps = bitrateKbps,
                     trackId = candidate.id,
                 )
+                streamCache[cacheKey] = Pair(now, stream)
+                stream
             }
         } catch (e: Exception) {
             android.util.Log.d("QobuzMusicApi", "Qobuz resolution failed gracefully: ${e.message}")
@@ -184,62 +197,67 @@ class QobuzMusicApi @Inject constructor(
         artist: String,
         expectedDurationSeconds: Int?,
     ): QobuzTrackItem? {
-        val query = "$artist $title".trim()
-        val urlBuilder = "$BACKEND_BASE_URL/api/search".toHttpUrlOrNull()?.newBuilder() ?: return null
-        urlBuilder.addQueryParameter("q", query)
-        urlBuilder.addQueryParameter("type", "track")
-        urlBuilder.addQueryParameter("limit", "10")
+        val queries = listOf(
+            "$artist $title".trim(),
+            title.trim(),
+        )
 
-        val request = Request.Builder()
-            .url(urlBuilder.build())
-            .addHeader("X-API-Key", BACKEND_API_KEY)
-            .get()
-            .build()
+        for (query in queries) {
+            val urlBuilder = "$BACKEND_BASE_URL/api/search".toHttpUrlOrNull()?.newBuilder() ?: continue
+            urlBuilder.addQueryParameter("q", query)
+            urlBuilder.addQueryParameter("type", "track")
+            urlBuilder.addQueryParameter("limit", "15")
 
-        val items = try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val body = response.body?.string() ?: return null
-                val searchRes = json.decodeFromString<QobuzSearchResponse>(body)
-                searchRes.results?.tracks?.items.orEmpty()
-            }
-        } catch (e: Exception) {
-            return null
-        }
+            val request = Request.Builder()
+                .url(urlBuilder.build())
+                .addHeader("X-API-Key", BACKEND_API_KEY)
+                .get()
+                .build()
 
-        if (items.isEmpty()) return null
-
-        val rawTargetTitle = title.lowercase(Locale.ROOT)
-        val normTargetTitle = normalizeString(title)
-        val normTargetArtist = normalizeString(artist)
-
-        for (item in items) {
-            val rawCandidateTitle = "${item.title} ${item.version.orEmpty()}".lowercase(Locale.ROOT)
-            val itemTitle = normalizeString(item.title)
-            val itemArtist = normalizeString(item.performer?.name ?: item.album?.artist?.name.orEmpty())
-
-            // Anti-mismatch check: prevent live, acoustic, karaoke, cover, remix, instrumental if not requested
-            val hasUnrequestedVariant = EXCLUDED_VARIANTS.any { variant ->
-                rawCandidateTitle.contains(variant) && !rawTargetTitle.contains(variant)
-            }
-            if (hasUnrequestedVariant) continue
-
-            // Strict title verification
-            val titleMatches = isTitleMatch(normTargetTitle, itemTitle)
-            if (!titleMatches) continue
-
-            // Strict artist verification
-            val artistMatches = isArtistMatch(normTargetArtist, itemArtist, item.performers)
-            if (!artistMatches) continue
-
-            // Optional duration verification if expected duration is known
-            if (expectedDurationSeconds != null && expectedDurationSeconds > 0 && item.duration > 0) {
-                val diff = kotlin.math.abs(item.duration - expectedDurationSeconds)
-                // Allow max 8 seconds difference for radio edits / intro silence
-                if (diff > 8) continue
+            val items = try {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use emptyList()
+                    val body = response.body?.string() ?: return@use emptyList()
+                    val searchRes = json.decodeFromString<QobuzSearchResponse>(body)
+                    searchRes.results?.tracks?.items.orEmpty()
+                }
+            } catch (e: Exception) {
+                emptyList()
             }
 
-            return item
+            if (items.isEmpty()) continue
+
+            val rawTargetTitle = title.lowercase(Locale.ROOT)
+            val normTargetTitle = normalizeString(title)
+            val normTargetArtist = normalizeString(artist)
+
+            for (item in items) {
+                val rawCandidateTitle = "${item.title} ${item.version.orEmpty()}".lowercase(Locale.ROOT)
+                val itemTitle = normalizeString(item.title)
+                val itemArtist = normalizeString(item.performer?.name ?: item.album?.artist?.name.orEmpty())
+
+                // Anti-mismatch check: prevent live, acoustic, karaoke, cover, remix, instrumental if not requested
+                val hasUnrequestedVariant = EXCLUDED_VARIANTS.any { variant ->
+                    rawCandidateTitle.contains(variant) && !rawTargetTitle.contains(variant)
+                }
+                if (hasUnrequestedVariant) continue
+
+                // Strict title verification
+                val titleMatches = isTitleMatch(normTargetTitle, itemTitle)
+                if (!titleMatches) continue
+
+                // Strict artist verification
+                val artistMatches = isArtistMatch(normTargetArtist, itemArtist, item.performers)
+                if (!artistMatches) continue
+
+                // Optional duration verification if expected duration is known
+                if (expectedDurationSeconds != null && expectedDurationSeconds > 0 && item.duration > 0) {
+                    val diff = kotlin.math.abs(item.duration - expectedDurationSeconds)
+                    if (diff > 12) continue
+                }
+
+                return item
+            }
         }
 
         return null
@@ -247,9 +265,9 @@ class QobuzMusicApi @Inject constructor(
 
     private fun normalizeString(raw: String): String {
         return raw.lowercase(Locale.ROOT)
-            .replace(Regex("""\((feat\.|ft\.|featuring|remastered|remaster|deluxe|version|edit|bonus track|official|audio|video|explicit)[^)]*\)"""), "")
-            .replace(Regex("""\[(feat\.|ft\.|featuring|remastered|remaster|deluxe|version|edit|bonus track|official|audio|video|explicit)[^\]]*]"""), "")
-            .replace(Regex("""[-–—/].*"""), "") // Strip suffixes like "- Remastered 2011"
+            .replace(Regex("""\([^)]*\)"""), " ")
+            .replace(Regex("""\[[^\]]*]"""), " ")
+            .replace(Regex("""[-–—/].*"""), " ")
             .replace(Regex("""[^a-z0-9\s]"""), " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
@@ -258,26 +276,26 @@ class QobuzMusicApi @Inject constructor(
     private fun isTitleMatch(target: String, candidate: String): Boolean {
         if (target.isBlank() || candidate.isBlank()) return false
         if (target == candidate) return true
+        if (candidate.startsWith(target) || target.startsWith(candidate)) return true
 
-        // Token overlap check (must have strict word match)
         val targetWords = target.split(" ").filter { it.isNotBlank() }
         val candWords = candidate.split(" ").filter { it.isNotBlank() }
         if (targetWords.isEmpty() || candWords.isEmpty()) return false
 
         val common = targetWords.count { candWords.contains(it) }
         val targetRatio = common.toFloat() / targetWords.size
-        val candRatio = common.toFloat() / candWords.size
 
-        return targetRatio >= 0.85f && candRatio >= 0.85f
+        return targetRatio >= 0.75f
     }
 
     private fun isArtistMatch(targetArtist: String, candArtist: String, performersText: String?): Boolean {
         if (targetArtist.isBlank()) return false
         if (candArtist.isNotBlank()) {
             if (targetArtist == candArtist) return true
-            val targetTokens = targetArtist.split(" ").filter { it.length > 2 }
-            val candTokens = candArtist.split(" ").filter { it.length > 2 }
-            if (targetTokens.isNotEmpty() && candTokens.isNotEmpty() && targetTokens.all { candTokens.contains(it) }) {
+            if (candArtist.contains(targetArtist) || targetArtist.contains(candArtist)) return true
+            val targetTokens = targetArtist.split(" ").filter { it.length > 1 }
+            val candTokens = candArtist.split(" ").filter { it.length > 1 }
+            if (targetTokens.isNotEmpty() && candTokens.isNotEmpty() && targetTokens.any { candTokens.contains(it) }) {
                 return true
             }
         }

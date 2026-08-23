@@ -112,7 +112,26 @@ fun PlaylistDetailScreen(
     val haptic = LocalHapticFeedback.current
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     val playbackState by musicPlayer.state.collectAsState()
-    val playlist = state.playlists.firstOrNull { it.id == playlistId }
+    LaunchedEffect(playlistId) {
+        viewModel.loadDetail(playlistId)
+    }
+
+    val playlist = state.detailPlaylist?.takeIf { it.id == playlistId }
+        ?: state.playlists.firstOrNull { it.id == playlistId }
+
+    if (playlist == null) {
+        if (state.isLoading || state.isDetailLoading) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                com.lastwave.app.ui.common.ExpressiveLoadingIndicator(message = "Loading playlist...")
+            }
+            return
+        }
+        // Loading finished and playlist not found
+        LaunchedEffect(Unit) { onBack() }
+        return
+    }
+
+    val isThisPlaylistPlaying = playbackState.isPlaying && playbackState.sourceLabel == playlist.title
 
     var coverEditorOpen by remember { mutableStateOf(false) }
     var coverPickerPending by remember { mutableStateOf(false) }
@@ -135,13 +154,6 @@ fun PlaylistDetailScreen(
             listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 280
         }
     }
-
-    if (playlist == null) {
-        LaunchedEffect(Unit) { onBack() }
-        return
-    }
-
-    val isThisPlaylistPlaying = playbackState.isPlaying && playbackState.sourceLabel == playlist.title
 
     Box(
         modifier = Modifier

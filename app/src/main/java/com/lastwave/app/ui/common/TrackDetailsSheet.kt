@@ -67,16 +67,27 @@ import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.download.TrackDownloadManager
 import com.lastwave.app.data.local.db.DownloadedTrackDao
 import com.lastwave.app.data.local.db.DownloadedTrackEntity
+import com.lastwave.app.data.local.SessionPreferences
+import com.lastwave.app.data.model.RecentTracksEnvelope
 import com.lastwave.app.data.music.InnerTubeMusicApi
+import com.lastwave.app.data.network.LastFmApiService
 import com.lastwave.app.data.qobuz.QobuzMusicApi
-import com.lastwave.app.ui.theme.ArtworkShape
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import java.text.NumberFormat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 data class TrackSpecs(
@@ -92,6 +103,12 @@ data class TrackSpecs(
     val durationText: String = "--:--",
     val downloadedEntity: DownloadedTrackEntity? = null,
     val isDownloading: Boolean = false,
+    val userPlayCount: Long = 0L,
+    val globalPlayCount: Long = 0L,
+    val listenersCount: Long = 0L,
+    val lastPlayedText: String? = null,
+    val isLoved: Boolean = false,
+    val isScrobbleStatsLoaded: Boolean = false,
 )
 
 @HiltViewModel
@@ -100,8 +117,11 @@ class TrackDetailsViewModel @Inject constructor(
     private val innerTube: InnerTubeMusicApi,
     private val downloadedTrackDao: DownloadedTrackDao,
     private val downloadManager: TrackDownloadManager,
+    private val lastFmApi: LastFmApiService,
+    private val sessionPreferences: SessionPreferences,
 ) : ViewModel() {
 
+    private val json = Json { ignoreUnknownKeys = true }
     private val _specs = MutableStateFlow<TrackSpecs?>(null)
     val specs: StateFlow<TrackSpecs?> = _specs.asStateFlow()
 
@@ -119,8 +139,83 @@ class TrackDetailsViewModel @Inject constructor(
                 isDownloading = isDownloading,
             )
 
-            // Resolve real audio resolution specs in background
+            // Resolve real audio resolution specs + Last.fm Scrobble stats in background
             withContext(Dispatchers.IO) {
+                // 1. Fetch Last.fm Scrobble Stats & History
+                val session = runCatching { sessionPreferences.session.first() }.getOrNull()
+                if (session != null && session.apiKey.isNotBlank()) {
+                    var userPlays = 0L
+                    var globalPlays = 0L
+                    var listeners = 0L
+                    var loved = false
+
+                    runCatching {
+                        val params = mutableMapOf(
+                            "method" to "track.getInfo",
+                            "track" to title,
+                            "artist" to artist,
+                            "autocorrect" to "1",
+                            "api_key" to session.apiKey,
+                            "format" to "json",
+                        )
+                        if (session.username.isNotBlank()) {
+                            params["username"] = session.username
+                        }
+                        val response = lastFmApi.get(params)
+                        if (response.isSuccessful) {
+                            val body = response.body()?.string().orEmpty()
+                            val trackObj = json.parseToJsonElement(body).jsonObject["track"]?.jsonObject
+                            userPlays = trackObj?.get("userplaycount")?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                            globalPlays = trackObj?.get("playcount")?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                            listeners = trackObj?.get("listeners")?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+                            loved = trackObj?.get("userloved")?.jsonPrimitive?.contentOrNull == "1"
+                        }
+                    }
+
+                    // 2. Fetch Last Played timestamp from recent history
+                    val lastPlayed = runCatching {
+                        val recentResp = lastFmApi.get(
+                            mapOf(
+                                "method" to "user.getrecenttracks",
+                                "user" to session.username,
+                                "limit" to "50",
+                                "api_key" to session.apiKey,
+                                "format" to "json",
+                            ),
+                        )
+                        if (recentResp.isSuccessful) {
+                            val body = recentResp.body()?.string().orEmpty()
+                            val parsed = json.decodeFromString<RecentTracksEnvelope>(body)
+                            val match = parsed.recenttracks?.track?.tracks?.firstOrNull {
+                                it.name.equals(title, ignoreCase = true) && it.artist.displayName.equals(artist, ignoreCase = true)
+                            }
+                            if (match?.isNowPlaying == true) {
+                                "Playing right now"
+                            } else {
+                                match?.date?.uts?.toLongOrNull()?.let { uts ->
+                                    formatRelativeTime(uts * 1000L)
+                                }
+                            }
+                        } else null
+                    }.getOrNull()
+
+                    val lastPlayedDisplay = when {
+                        lastPlayed != null -> lastPlayed
+                        userPlays > 0 -> "Recorded in scrobble history"
+                        else -> "No plays recorded yet"
+                    }
+
+                    _specs.value = _specs.value?.copy(
+                        userPlayCount = userPlays,
+                        globalPlayCount = globalPlays,
+                        listenersCount = listeners,
+                        isLoved = loved,
+                        lastPlayedText = lastPlayedDisplay,
+                        isScrobbleStatsLoaded = true,
+                    )
+                }
+
+                // 3. Audio stream resolution
                 val qobuzStream = runCatching {
                     qobuzMusicApi.resolveStream(title, artist, preferredQuality = QobuzMusicApi.QUALITY_MAX_HI_RES)
                 }.getOrNull()
@@ -167,6 +262,23 @@ class TrackDetailsViewModel @Inject constructor(
                     )
                 }
             }
+        }
+    }
+
+    private fun formatRelativeTime(millis: Long): String {
+        val diff = System.currentTimeMillis() - millis
+        val minutes = diff / (1000 * 60)
+        val hours = minutes / 60
+        val days = hours / 24
+
+        return when {
+            diff < 0 -> "Just now"
+            minutes < 1 -> "Just now"
+            minutes < 60 -> "$minutes min${if (minutes > 1) "s" else ""} ago"
+            hours < 24 -> "$hours hr${if (hours > 1) "s" else ""} ago"
+            days == 1L -> "Yesterday at " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(millis))
+            days < 7 -> "$days days ago"
+            else -> SimpleDateFormat("MMM d, yyyy \u2022 h:mm a", Locale.getDefault()).format(Date(millis))
         }
     }
 
@@ -355,6 +467,45 @@ fun TrackDetailsSheet(
 
             Spacer(Modifier.height(14.dp))
 
+            // Scrobbler & Play History Card
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Scrobbler & Listening History", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    }
+
+                    val numberFormatter = NumberFormat.getNumberInstance(Locale.getDefault())
+                    val scrobbleScoreText = if (currentSpecs.userPlayCount > 0) {
+                        "${numberFormatter.format(currentSpecs.userPlayCount)} scrobbles"
+                    } else if (currentSpecs.isScrobbleStatsLoaded) {
+                        "0 scrobbles (Never played)"
+                    } else {
+                        "Loading scrobble score..."
+                    }
+
+                    DetailRow(label = "Your Scrobble Score", value = scrobbleScoreText)
+                    DetailRow(label = "Last Played", value = currentSpecs.lastPlayedText ?: "Checking history...")
+
+                    if (currentSpecs.globalPlayCount > 0) {
+                        DetailRow(label = "Total Global Scrobbles", value = "${numberFormatter.format(currentSpecs.globalPlayCount)} plays")
+                    }
+                    if (currentSpecs.listenersCount > 0) {
+                        DetailRow(label = "Total Listeners", value = "${numberFormatter.format(currentSpecs.listenersCount)} listeners")
+                    }
+                    if (currentSpecs.isLoved) {
+                        DetailRow(label = "Favorite Status", value = "Loved Track \u2665")
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(14.dp))
+
             // Offline & File Storage Info Card
             Card(
                 shape = RoundedCornerShape(20.dp),
@@ -365,7 +516,7 @@ fun TrackDetailsSheet(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Storage & Scrobbler", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("Offline Storage", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
 
                     DetailRow(
@@ -382,7 +533,6 @@ fun TrackDetailsSheet(
                             value = currentSpecs.downloadedEntity.filePath,
                         )
                     }
-                    DetailRow(label = "Scrobble Target", value = "Last.fm profile")
                 }
             }
         }

@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import androidx.annotation.MainThread
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -13,8 +14,15 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.datasource.cache.Cache
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheWriter
+import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
+import androidx.media3.datasource.cache.SimpleCache
+import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -34,7 +42,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -90,6 +100,8 @@ data class MusicPlayerState(
     val bitrateKbps: Int? = null,
     val audioCodec: String? = null,
     val isQobuz: Boolean = false,
+    val bitDepth: Int? = null,
+    val samplingRateKHz: Double? = null,
     val sleepTimerRemainingMs: Long? = null,
     val error: String? = null,
 )
@@ -123,6 +135,7 @@ class MusicPlayer @Inject constructor(
     private var ticker: Job? = null
     private var playRequest: Job? = null
     private var queueEnrichmentJob: Job? = null
+    private var preloadJob: Job? = null
     private var discoverQueueLoadJob: Job? = null
     private var discoverQueueActive = false
     private var unavailableSkipJob: Job? = null
@@ -133,19 +146,49 @@ class MusicPlayer @Inject constructor(
 
     private var errorRetryCount = 0
 
+    private val mediaCache: Cache by lazy {
+        val cacheDir = java.io.File(appContext.cacheDir, "media_stream_cache")
+        val evictor = LeastRecentlyUsedCacheEvictor(512L * 1024 * 1024) // 512 MB LRU stream cache
+        val dbProvider = StandaloneDatabaseProvider(appContext)
+        SimpleCache(cacheDir, evictor, dbProvider)
+    }
+
+    private val cacheDataSourceFactory: CacheDataSource.Factory by lazy {
+        val upstream = DefaultHttpDataSource.Factory()
+            .setUserAgent(YOUTUBE_WEB_USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(20_000)
+            .setReadTimeoutMs(20_000)
+        CacheDataSource.Factory()
+            .setCache(mediaCache)
+            .setUpstreamDataSourceFactory(upstream)
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    }
+
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = refresh(player)
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             errorRetryCount = 0
             if (mediaItem != null) {
-                enrichUpcomingQueue(player.currentMediaItemIndex)
-                extendDiscoverQueueIfNeeded(player.currentMediaItemIndex)
+                val currentIndex = player.currentMediaItemIndex
+                enrichUpcomingQueue(currentIndex)
+                extendDiscoverQueueIfNeeded(currentIndex)
+                val currentQueue = _state.value.queue
+                val nextIndex = currentIndex + 1
+                if (nextIndex in currentQueue.indices) {
+                    preloadNextTrack(currentQueue[nextIndex])
+                }
             }
         }
         override fun onPlayerError(error: PlaybackException) {
             val currentTrack = _state.value.current
             val currentPos = player.currentPosition.coerceAtLeast(0)
             val videoId = currentTrack?.videoId
+
+            // Invalidate stale cache on 403 or network failure
+            if (!videoId.isNullOrBlank()) {
+                innerTube.invalidateCache(videoId)
+            }
 
             if (currentTrack != null && errorRetryCount < 2) {
                 errorRetryCount++
@@ -187,12 +230,7 @@ class MusicPlayer @Inject constructor(
     }
 
     private val player: ExoPlayer = run {
-        val upstream = DefaultHttpDataSource.Factory()
-            .setUserAgent(YOUTUBE_WEB_USER_AGENT)
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(20_000)
-            .setReadTimeoutMs(20_000)
-        val resolving = ResolvingDataSource.Factory(upstream) { dataSpec ->
+        val resolving = ResolvingDataSource.Factory(cacheDataSourceFactory) { dataSpec ->
             val requested = dataSpec.uri
             if (requested.scheme != "lastwave") {
                 dataSpec
@@ -224,12 +262,13 @@ class MusicPlayer @Inject constructor(
         }
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 15_000,
-                /* maxBufferMs = */ 50_000,
-                /* bufferForPlaybackMs = */ 500,
+                /* minBufferMs = */ 30_000,
+                /* maxBufferMs = */ 60_000,
+                /* bufferForPlaybackMs = */ 250, // Instant ultra-reactive playback trigger
                 /* bufferForPlaybackAfterRebufferMs = */ 1_000,
             )
-            .setBackBuffer(10_000, true)
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setBackBuffer(15_000, true)
             .build()
         ExoPlayer.Builder(appContext)
             .setMediaSourceFactory(DefaultMediaSourceFactory(appContext).setDataSourceFactory(resolving))
@@ -275,7 +314,7 @@ class MusicPlayer @Inject constructor(
         }
         applicationScope.launch {
             discoverRepository.feed.collect { feed ->
-                if (discoverQueueActive) appendMissingDiscoverTracks(feed)
+                if (discoverQueueActive) appendMissingDiscoverTracks(feed.map(GeneratedTrack::toPlayableTrack))
             }
         }
     }
@@ -284,46 +323,20 @@ class MusicPlayer @Inject constructor(
         disableDiscoverQueue()
         playRequest?.cancel()
         unavailableSkipJob?.cancel()
-        playRequest = applicationScope.launch {
-            withContext(Dispatchers.Main.immediate) {
-                ensureForegroundService()
-                player.stop()
-                player.clearMediaItems()
-                _state.value = MusicPlayerState(
-                    current = track,
-                    queue = listOf(track),
-                    currentIndex = 0,
-                    sourceLabel = sourceLabel,
-                    isBuffering = true,
-                )
-                persistPlaybackSession()
-            }
-
-            try {
-                val matched = matchMetadata(track)
-                withContext(Dispatchers.Main.immediate) {
-                    _state.update { it.copy(current = matched, queue = listOf(matched)) }
-                }
-                val stream = resolveTrackAudioStream(matched, matched.videoId)
-                withContext(Dispatchers.Main.immediate) { publishResolvedQuality(stream) }
-                val prepared = matched.copy(playbackUrl = stream.url, playbackMimeType = stream.mimeType)
-                withContext(Dispatchers.Main.immediate) {
-                    player.setMediaItem(prepared.toMediaItem())
-                    player.prepare()
-                    player.play()
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                withContext(Dispatchers.Main.immediate) {
-                    _state.update {
-                        it.copy(
-                            isBuffering = false,
-                            error = error.message ?: "Unable to play this track",
-                        )
-                    }
-                }
-            }
+        onMain {
+            ensureForegroundService()
+            _state.value = MusicPlayerState(
+                current = track,
+                queue = listOf(track),
+                currentIndex = 0,
+                sourceLabel = sourceLabel,
+                isBuffering = true,
+                isPlaying = true,
+            )
+            persistPlaybackSession()
+            player.setMediaItem(track.toMediaItem())
+            player.prepare()
+            player.play()
         }
     }
 
@@ -348,49 +361,31 @@ class MusicPlayer @Inject constructor(
         playRequest?.cancel()
         queueEnrichmentJob?.cancel()
         unavailableSkipJob?.cancel()
-        playRequest = applicationScope.launch {
-            withContext(Dispatchers.Main.immediate) {
-                ensureForegroundService()
-                player.stop()
-                player.clearMediaItems()
-                _state.value = MusicPlayerState(
-                    current = tracks[selectedIndex],
-                    queue = tracks,
-                    currentIndex = selectedIndex,
-                    sourceLabel = sourceLabel,
-                    isEndlessQueue = endlessDiscover,
-                    isBuffering = true,
-                )
-                persistPlaybackSession()
-            }
 
-            try {
-                val matched = matchMetadata(tracks[selectedIndex])
-                withContext(Dispatchers.Main.immediate) {
-                    val enrichedQueue = tracks.toMutableList().apply { this[selectedIndex] = matched }
-                    _state.update { it.copy(current = matched, queue = enrichedQueue) }
-                }
-                val stream = resolveTrackAudioStream(matched, matched.videoId)
-                withContext(Dispatchers.Main.immediate) { publishResolvedQuality(stream) }
-                val prepared = matched.copy(playbackUrl = stream.url, playbackMimeType = stream.mimeType)
-                val queue = tracks.toMutableList().apply { this[selectedIndex] = prepared }
-                withContext(Dispatchers.Main.immediate) {
-                    player.setMediaItems(queue.map(PlayableTrack::toMediaItem), selectedIndex, 0L)
-                    player.prepare()
-                    player.play()
-                }
-                enrichUpcomingQueue(selectedIndex)
-                if (endlessDiscover) {
-                    appendMissingDiscoverTracks(discoverRepository.getCachedFeed())
-                }
-                extendDiscoverQueueIfNeeded(selectedIndex)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Exception) {
-                withContext(Dispatchers.Main.immediate) {
-                    _state.update { it.copy(isBuffering = false, error = error.message ?: "Unable to play this playlist") }
-                    scheduleUnavailableQueueSkip(tracks, selectedIndex, endlessDiscover)
-                }
+        onMain {
+            ensureForegroundService()
+            val selectedTrack = tracks[selectedIndex]
+            _state.value = MusicPlayerState(
+                current = selectedTrack,
+                queue = tracks,
+                currentIndex = selectedIndex,
+                sourceLabel = sourceLabel,
+                isEndlessQueue = endlessDiscover,
+                isBuffering = true,
+                isPlaying = true,
+            )
+            persistPlaybackSession()
+            player.setMediaItems(tracks.map(PlayableTrack::toMediaItem), selectedIndex, 0L)
+            player.prepare()
+            player.play()
+
+            enrichUpcomingQueue(selectedIndex)
+            if (endlessDiscover) {
+                appendMissingDiscoverTracks(discoverRepository.getCachedFeed().map(GeneratedTrack::toPlayableTrack))
+            }
+            extendDiscoverQueueIfNeeded(selectedIndex)
+            if (selectedIndex + 1 in tracks.indices) {
+                preloadNextTrack(tracks[selectedIndex + 1])
             }
         }
     }
@@ -411,16 +406,47 @@ class MusicPlayer @Inject constructor(
             withContext(Dispatchers.Main.immediate) { player.addMediaItem(enriched.toMediaItem()) }
         }
     }
+
     fun resume() = onMain {
         ensureForegroundService()
+        if (player.mediaItemCount == 0 && _state.value.current != null) {
+            val q = _state.value.queue.ifEmpty { listOf(_state.value.current!!) }
+            val idx = _state.value.currentIndex.coerceIn(q.indices)
+            player.setMediaItems(q.map(PlayableTrack::toMediaItem), idx, _state.value.positionMs)
+            player.prepare()
+            player.play()
+            return@onMain
+        }
         if (player.playbackState == Player.STATE_IDLE) player.prepare()
+        if (player.playbackState == Player.STATE_ENDED) {
+            player.seekTo(0)
+            player.prepare()
+        }
         player.play()
     }
+
     fun pause() = onMain { player.pause() }
+
     fun togglePlayPause() = onMain {
-        if (player.isPlaying) player.pause() else {
+        if (player.isPlaying) {
+            player.pause()
+        } else {
             ensureForegroundService()
-            if (player.playbackState == Player.STATE_IDLE) player.prepare()
+            if (player.mediaItemCount == 0 && _state.value.current != null) {
+                val q = _state.value.queue.ifEmpty { listOf(_state.value.current!!) }
+                val idx = _state.value.currentIndex.coerceIn(q.indices)
+                player.setMediaItems(q.map(PlayableTrack::toMediaItem), idx, _state.value.positionMs)
+                player.prepare()
+                player.play()
+                return@onMain
+            }
+            if (player.playbackState == Player.STATE_IDLE) {
+                player.prepare()
+            }
+            if (player.playbackState == Player.STATE_ENDED) {
+                player.seekTo(0)
+                player.prepare()
+            }
             player.play()
         }
     }
@@ -528,13 +554,43 @@ class MusicPlayer @Inject constructor(
                     if (index >= player.mediaItemCount) null else player.getMediaItemAt(index).toPlayableTrack()
                 } ?: continue
                 if (!original.videoId.isNullOrBlank()) continue
-                val expectedMediaId = "query:${original.artist.lowercase()}|${original.title.lowercase()}"
+                val expectedMediaId = original.videoId ?: "query:${original.artist.lowercase()}|${original.title.lowercase()}"
                 val enriched = runCatching { matchMetadata(original) }.getOrNull() ?: continue
                 withContext(Dispatchers.Main.immediate) {
                     if (index < player.mediaItemCount && player.getMediaItemAt(index).mediaId == expectedMediaId) {
                         player.replaceMediaItem(index, enriched.toMediaItem())
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Pre-resolves and streams the first 512KB of the upcoming track directly into
+     * the local disk cache while the current song is playing, guaranteeing instant 0ms track transitions.
+     */
+    private fun preloadNextTrack(nextTrack: PlayableTrack?) {
+        if (nextTrack == null) return
+        preloadJob?.cancel()
+        preloadJob = applicationScope.launch(Dispatchers.IO) {
+            val resolved = runCatching {
+                resolveTrackAudioStream(nextTrack, nextTrack.videoId)
+            }.getOrNull() ?: return@launch
+
+            val dataSpec = DataSpec.Builder()
+                .setUri(Uri.parse(resolved.url))
+                .setPosition(0)
+                .setLength(512 * 1024L) // 512 KB audio chunk pre-buffer
+                .build()
+
+            runCatching {
+                val cacheWriter = CacheWriter(
+                    cacheDataSourceFactory.createDataSource(),
+                    dataSpec,
+                    null,
+                    null,
+                )
+                cacheWriter.cache()
             }
         }
     }
@@ -556,25 +612,22 @@ class MusicPlayer @Inject constructor(
                 }.onFailure { error ->
                     android.util.Log.d("MusicPlayer", "Discover queue refill failed", error)
                 }.getOrDefault(emptyList())
-                appendMissingDiscoverTracks(batch)
+                appendMissingDiscoverTracks(batch.map(GeneratedTrack::toPlayableTrack))
             } finally {
                 discoverQueueLoadJob = null
             }
         }
     }
 
-    private suspend fun appendMissingDiscoverTracks(tracks: List<GeneratedTrack>) {
+    private fun appendMissingDiscoverTracks(tracks: List<PlayableTrack>) {
         if (tracks.isEmpty()) return
-        withContext(Dispatchers.Main.immediate) {
-            if (!discoverQueueActive) return@withContext
-            val knownKeys = (0 until player.mediaItemCount)
-                .mapTo(mutableSetOf()) { player.getMediaItemAt(it).toPlayableTrack().queueKey() }
-            val additions = tracks
-                .map(GeneratedTrack::toPlayableTrack)
-                .filter { knownKeys.add(it.queueKey()) }
-            if (additions.isNotEmpty()) {
-                player.addMediaItems(additions.map(PlayableTrack::toMediaItem))
-                enrichUpcomingQueue(player.currentMediaItemIndex)
+        onMain {
+            val known = (0 until player.mediaItemCount).map {
+                player.getMediaItemAt(it).toPlayableTrack().queueKey()
+            }.toSet()
+            val fresh = tracks.filterNot { it.queueKey() in known }
+            if (fresh.isNotEmpty()) {
+                player.addMediaItems(fresh.map(PlayableTrack::toMediaItem))
             }
         }
     }
@@ -583,7 +636,6 @@ class MusicPlayer @Inject constructor(
         discoverQueueActive = false
         discoverQueueLoadJob?.cancel()
         discoverQueueLoadJob = null
-        _state.update { it.copy(isEndlessQueue = false) }
     }
 
     /** A generated Last.fm track can have no playable YouTube Music match.
@@ -642,6 +694,8 @@ class MusicPlayer @Inject constructor(
         val bitrateKbps: Int?,
         val audioCodec: String?,
         val isQobuz: Boolean = false,
+        val bitDepth: Int? = null,
+        val samplingRateKHz: Double? = null,
     )
 
     private suspend fun resolveTrackAudioStream(
@@ -650,13 +704,18 @@ class MusicPlayer @Inject constructor(
     ): ResolvedStream = withContext(Dispatchers.IO) {
         val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
         if (misc.preferQobuzStreaming) {
-            val qobuzStream = runCatching {
-                qobuzMusicApi.resolveStream(
-                    title = track.title,
-                    artist = track.artist,
-                    preferredQuality = misc.qobuzQuality,
-                )
-            }.getOrNull()
+            // Timeout Qobuz resolution so a slow CDN doesn't block playback.
+            // Falls through to YouTube Music if Qobuz takes longer than 5 seconds
+            // or returns no match.
+            val qobuzStream = withTimeoutOrNull(5_000L) {
+                runCatching {
+                    qobuzMusicApi.resolveStream(
+                        title = track.title,
+                        artist = track.artist,
+                        preferredQuality = misc.qobuzQuality,
+                    )
+                }.getOrNull()
+            }
 
             if (qobuzStream != null) {
                 val codec = when {
@@ -671,6 +730,8 @@ class MusicPlayer @Inject constructor(
                     bitrateKbps = qobuzStream.bitrateKbps,
                     audioCodec = codec,
                     isQobuz = true,
+                    bitDepth = qobuzStream.bitDepth.takeIf { it > 0 },
+                    samplingRateKHz = qobuzStream.samplingRate.takeIf { it > 0 },
                 )
             }
         }
@@ -682,8 +743,8 @@ class MusicPlayer @Inject constructor(
         val trueBitrate = ytStream.bitrate.takeIf { it > 0 }?.let { (it + 500) / 1_000 }
         val rawCodec = ytStream.mimeType?.substringAfter("audio/")?.substringBefore(';')?.uppercase()?.ifBlank { "WEBM" } ?: "WEBM"
         val codec = when {
-            rawCodec.contains("OPUS") || rawCodec == "WEBM" -> "WEBM"
-            rawCodec.contains("M4A") || rawCodec.contains("MP4") || rawCodec.contains("AAC") -> "M4A"
+            rawCodec.contains("OPUS") || rawCodec == "WEBM" -> "OPUS"
+            rawCodec.contains("M4A") || rawCodec.contains("MP4") || rawCodec.contains("AAC") -> "AAC"
             else -> rawCodec
         }
         ResolvedStream(
@@ -701,6 +762,8 @@ class MusicPlayer @Inject constructor(
                 bitrateKbps = resolved.bitrateKbps,
                 audioCodec = resolved.audioCodec,
                 isQobuz = resolved.isQobuz,
+                bitDepth = resolved.bitDepth,
+                samplingRateKHz = resolved.samplingRateKHz,
             )
         }
     }
@@ -836,7 +899,10 @@ class MusicPlayer @Inject constructor(
         val previous = _state.value
         val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toPlayableTrack() }
         val current = player.currentMediaItem?.toPlayableTrack()
-        val sameTrack = current?.videoId != null && current.videoId == previous.current?.videoId
+        val sameTrack = current?.let { it.title == previous.current?.title && it.artist == previous.current?.artist } == true ||
+            (current?.videoId != null && current.videoId == previous.current?.videoId)
+        val isBuffering = player.playbackState == Player.STATE_BUFFERING ||
+            (player.playWhenReady && player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0)
         _state.value = MusicPlayerState(
             current = current,
             queue = queue,
@@ -844,7 +910,7 @@ class MusicPlayer @Inject constructor(
             sourceLabel = previous.sourceLabel,
             isEndlessQueue = previous.isEndlessQueue && discoverQueueActive,
             isPlaying = player.isPlaying,
-            isBuffering = player.playbackState == Player.STATE_BUFFERING,
+            isBuffering = isBuffering,
             positionMs = player.currentPosition.coerceAtLeast(0),
             bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0),
             durationMs = player.duration.takeIf { it > 0 } ?: 0,
@@ -854,8 +920,10 @@ class MusicPlayer @Inject constructor(
             bitrateKbps = previous.bitrateKbps.takeIf { sameTrack },
             audioCodec = previous.audioCodec.takeIf { sameTrack },
             isQobuz = previous.isQobuz && sameTrack,
+            bitDepth = previous.bitDepth.takeIf { sameTrack },
+            samplingRateKHz = previous.samplingRateKHz.takeIf { sameTrack },
             sleepTimerRemainingMs = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())?.coerceAtLeast(0),
-            error = previous.error,
+            error = if (player.isPlaying) null else previous.error,
         )
         persistPlaybackSession()
     }

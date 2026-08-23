@@ -17,8 +17,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
+enum class ImportTab(val title: String) {
+    SEARCH("YouTube Music"),
+    LINK("Direct Link"),
+    CSV("CSV File"),
+}
+
 data class YouTubeImportUiState(
+    val selectedTab: ImportTab = ImportTab.SEARCH,
     val query: String = "",
+    val directLink: String = "",
     val isSearching: Boolean = false,
     val searchResults: List<YouTubePlaylistSummary> = emptyList(),
     val previewPlaylist: YouTubePlaylistResult? = null,
@@ -28,6 +36,8 @@ data class YouTubeImportUiState(
     val importProgress: String? = null,
     val errorMessage: String? = null,
     val importedCount: Int = 0,
+    val csvFilename: String? = null,
+    val isCsvImporting: Boolean = false,
 )
 
 @HiltViewModel
@@ -44,8 +54,16 @@ class YouTubePlaylistImportViewModel @Inject constructor(
         search("Top Hits 2024")
     }
 
+    fun selectTab(tab: ImportTab) {
+        _uiState.update { it.copy(selectedTab = tab, errorMessage = null) }
+    }
+
     fun onQueryChange(query: String) {
         _uiState.update { it.copy(query = query, errorMessage = null) }
+    }
+
+    fun onDirectLinkChange(link: String) {
+        _uiState.update { it.copy(directLink = link, errorMessage = null) }
     }
 
     fun search(query: String = _uiState.value.query) {
@@ -79,6 +97,13 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    fun resolveDirectLink(link: String = _uiState.value.directLink) {
+        if (link.isBlank()) return
+        val clean = link.trim()
+        val extractedId = innerTube.extractPlaylistId(clean)
+        loadPreview(extractedId)
     }
 
     fun loadPreview(playlistIdOrUrl: String) {
@@ -141,7 +166,6 @@ class YouTubePlaylistImportViewModel @Inject constructor(
             val savedList = mutableListOf<SavedPlaylist>()
 
             try {
-                // If preview is active and is the only one selected
                 val preview = _uiState.value.previewPlaylist
                 if (preview != null && selectedIds.contains(preview.id) && selectedIds.size == 1) {
                     val saved = importManager.importYouTubePlaylist(preview)
@@ -173,6 +197,42 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                         isImporting = false,
                         importProgress = null,
                         errorMessage = "Import failed: ${e.localizedMessage ?: e.message}",
+                    )
+                }
+            }
+        }
+    }
+
+    fun importCsv(
+        inputStream: java.io.InputStream,
+        filename: String,
+        onSuccess: (SavedPlaylist) -> Unit,
+    ) {
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isCsvImporting = true,
+                    csvFilename = filename,
+                    importProgress = "Parsing & matching CSV tracks...",
+                    errorMessage = null,
+                )
+            }
+            try {
+                val (savedPlaylist, result) = importManager.importCsvStream(inputStream, filename)
+                _uiState.update {
+                    it.copy(
+                        isCsvImporting = false,
+                        importProgress = null,
+                        importedCount = 1,
+                    )
+                }
+                onSuccess(savedPlaylist)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isCsvImporting = false,
+                        importProgress = null,
+                        errorMessage = "CSV import failed: ${e.localizedMessage ?: e.message}",
                     )
                 }
             }

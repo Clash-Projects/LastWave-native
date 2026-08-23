@@ -18,6 +18,8 @@ import com.lastwave.app.data.local.db.DownloadedTrackEntity
 import com.lastwave.app.data.lyrics.LrclibLyricsApi
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.qobuz.QobuzMusicApi
+import com.lastwave.app.data.local.MiscSettings
+import com.lastwave.app.data.local.SettingsPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -26,15 +28,19 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -56,8 +62,9 @@ class TrackDownloadManager @Inject constructor(
     private val qobuzMusicApi: QobuzMusicApi,
     private val innerTube: InnerTubeMusicApi,
     private val lrclibLyricsApi: LrclibLyricsApi,
-    private val okHttpClient: OkHttpClient,
+    okHttpClient: OkHttpClient,
     private val downloadedTrackDao: DownloadedTrackDao,
+    private val settingsPreferences: SettingsPreferences,
     private val applicationScope: CoroutineScope,
 ) {
     companion object {
@@ -65,7 +72,21 @@ class TrackDownloadManager @Inject constructor(
         const val ACTION_CANCEL_DOWNLOAD = "com.lastwave.app.ACTION_CANCEL_DOWNLOAD"
         const val EXTRA_DOWNLOAD_KEY = "download_key"
         private const val PUBLIC_DIR_NAME = "LastWave"
+        private const val DOWNLOAD_BUFFER_SIZE = 512 * 1024 // 512 KB
+        private const val MAX_DOWNLOAD_RETRIES = 1
     }
+
+    // Dedicated HTTP client with extended timeouts and high-throughput connection pooling
+    private val downloadClient = okHttpClient.newBuilder()
+        .dispatcher(Dispatcher().apply {
+            maxRequests = 32
+            maxRequestsPerHost = 16
+        })
+        .connectionPool(ConnectionPool(10, 5, TimeUnit.MINUTES))
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(2, TimeUnit.MINUTES)
+        .callTimeout(10, TimeUnit.MINUTES)
+        .build()
 
     private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     private val activeJobs = ConcurrentHashMap<String, Job>()
@@ -136,7 +157,8 @@ class TrackDownloadManager @Inject constructor(
             var destinationFile: File? = null
 
             try {
-                // 1. Resolve in MAX quality possible (Qobuz 24/192 -> fallback YouTube)
+                // 1. Resolve source — respect user's Qobuz preference for downloads too
+                val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
                 var resolvedUrl: String? = null
                 var mimeType = "audio/flac"
                 var extension = "flac"
@@ -144,27 +166,33 @@ class TrackDownloadManager @Inject constructor(
                 var isQobuz = false
                 var durationMs = 0L
 
-                val qobuzStream = runCatching {
-                    qobuzMusicApi.resolveStream(
-                        title = title,
-                        artist = artist,
-                        preferredQuality = QobuzMusicApi.QUALITY_MAX_HI_RES,
-                    )
-                }.getOrNull()
-
-                if (qobuzStream != null) {
-                    resolvedUrl = qobuzStream.url
-                    mimeType = qobuzStream.mimeType
-                    extension = if (qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320) "mp3" else "flac"
-                    formatBadge = when {
-                        qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
-                        qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS FLAC"
-                        qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "320k MP3"
-                        else -> "FLAC"
+                if (misc.preferQobuzStreaming) {
+                    val qobuzStream = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                        runCatching {
+                            qobuzMusicApi.resolveStream(
+                                title = title,
+                                artist = artist,
+                                preferredQuality = QobuzMusicApi.QUALITY_MAX_HI_RES,
+                            )
+                        }.getOrNull()
                     }
-                    isQobuz = true
-                    durationMs = 0L
-                } else {
+
+                    if (qobuzStream != null) {
+                        resolvedUrl = qobuzStream.url
+                        mimeType = qobuzStream.mimeType
+                        extension = if (qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320) "mp3" else "flac"
+                        formatBadge = when {
+                            qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
+                            qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS FLAC"
+                            qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "320k MP3"
+                            else -> "FLAC"
+                        }
+                        isQobuz = true
+                        durationMs = 0L
+                    }
+                }
+
+                if (resolvedUrl == null) {
                     // Fallback to YouTube Music
                     val bestMatch = innerTube.findBestMatch(title, artist)
                     val videoId = bestMatch.videoId ?: error("No audio source found for $title")
@@ -186,7 +214,7 @@ class TrackDownloadManager @Inject constructor(
                 val safeFilename = sanitizeFilename("$artist - $title") + ".$extension"
 
                 // 2. Open output stream in public storage (Music/LastWave)
-                val (outputStream, uri, file) = openPublicOutputStream(safeFilename, mimeType, title, artist, album)
+                val (initialStream, uri, file) = openPublicOutputStream(safeFilename, mimeType, title, artist, album)
                 destinationUri = uri
                 destinationFile = file
                 if (uri != null) activeUris[key] = uri
@@ -194,45 +222,115 @@ class TrackDownloadManager @Inject constructor(
 
                 showDownloadNotification(notifId, key, title, artist, 0, false, formatBadge)
 
-                // 3. Download bytes with progress reporting
-                val request = Request.Builder().url(resolvedUrl).build()
-                val response = okHttpClient.newCall(request).execute()
-                if (!response.isSuccessful) throw IOException("HTTP ${response.code} downloading track")
-
-                val body = response.body ?: throw IOException("Empty response body")
-                val totalLength = body.contentLength()
-                val source = body.byteStream()
-
+                // 3. Download bytes with progress, retry on truncation
                 var bytesReadTotal = 0L
-                val buffer = ByteArray(32 * 1024)
-                var bytesRead: Int
-                var lastProgress = 0
+                var totalLength = -1L
+                var downloadAttempt = 0
+                var downloadSuccess = false
+                var currentOutputStream: java.io.OutputStream? = initialStream
 
-                outputStream.use { fos ->
-                    while (source.read(buffer).also { bytesRead = it } != -1) {
-                        fos.write(buffer, 0, bytesRead)
-                        bytesReadTotal += bytesRead
+                while (downloadAttempt <= MAX_DOWNLOAD_RETRIES && !downloadSuccess) {
+                    val requestBuilder = Request.Builder().url(resolvedUrl!!)
+                    if (!isQobuz) {
+                        requestBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
+                        requestBuilder.header("Origin", "https://music.youtube.com")
+                        requestBuilder.header("Referer", "https://music.youtube.com/")
+                    }
+                    val request = requestBuilder.build()
+                    val response = downloadClient.newCall(request).execute()
 
-                        if (totalLength > 0) {
-                            val progress = ((bytesReadTotal * 100) / totalLength).toInt().coerceIn(0, 100)
-                            if (progress != lastProgress) {
-                                lastProgress = progress
-                                updateProgress(
-                                    DownloadProgress(
-                                        key = key,
-                                        title = title,
-                                        artist = artist,
-                                        progressPercent = progress,
-                                        bytesDownloaded = bytesReadTotal,
-                                        totalBytes = totalLength,
-                                        formatBadge = formatBadge,
-                                    ),
-                                )
-                                showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
-                            }
+                    if (!response.isSuccessful) throw IOException("HTTP ${response.code} downloading track")
+
+                    // Validate response Content-Type is audio
+                    val contentType = response.header("Content-Type").orEmpty()
+                    if (contentType.isNotBlank() && !contentType.contains("audio") && !contentType.contains("octet-stream")) {
+                        response.close()
+                        throw IOException("Invalid content type: $contentType (expected audio)")
+                    }
+
+                    val body = response.body ?: throw IOException("Empty response body")
+                    totalLength = body.contentLength()
+                    val source = body.byteStream()
+
+                    bytesReadTotal = 0L
+                    val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+                    var bytesRead: Int
+                    var lastProgress = 0
+                    val isChunked = totalLength <= 0
+
+                    if (isChunked) {
+                        // Chunked transfer — show indeterminate progress
+                        updateProgress(
+                            DownloadProgress(
+                                key = key, title = title, artist = artist,
+                                progressPercent = 0, formatBadge = formatBadge,
+                            ),
+                        )
+                        showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
+                    }
+
+                    val out = currentOutputStream ?: run {
+                        if (uri != null) {
+                            context.contentResolver.openOutputStream(uri, "wt")
+                                ?: context.contentResolver.openOutputStream(uri)
+                                ?: throw IOException("Could not re-open stream for $uri")
+                        } else if (file != null) {
+                            FileOutputStream(file)
+                        } else {
+                            throw IOException("No output target available")
                         }
                     }
-                    fos.flush()
+
+                    out.use { fos ->
+                        while (source.read(buffer).also { bytesRead = it } != -1) {
+                            fos.write(buffer, 0, bytesRead)
+                            bytesReadTotal += bytesRead
+
+                            if (!isChunked && totalLength > 0) {
+                                val progress = ((bytesReadTotal * 100) / totalLength).toInt().coerceIn(0, 100)
+                                if (progress != lastProgress) {
+                                    lastProgress = progress
+                                    updateProgress(
+                                        DownloadProgress(
+                                            key = key, title = title, artist = artist,
+                                            progressPercent = progress,
+                                            bytesDownloaded = bytesReadTotal,
+                                            totalBytes = totalLength,
+                                            formatBadge = formatBadge,
+                                        ),
+                                    )
+                                    showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
+                                }
+                            } else if (isChunked) {
+                                // Update byte count for chunked transfers
+                                val mbDown = String.format("%.1f MB", bytesReadTotal / (1024.0 * 1024.0))
+                                updateProgress(
+                                    DownloadProgress(
+                                        key = key, title = title, artist = artist,
+                                        progressPercent = 0,
+                                        bytesDownloaded = bytesReadTotal,
+                                        totalBytes = -1L,
+                                        formatBadge = "$formatBadge • $mbDown",
+                                    ),
+                                )
+                            }
+                        }
+                        fos.flush()
+                    }
+                    currentOutputStream = null
+
+                    // Verify Content-Length match (when known)
+                    if (totalLength > 0 && bytesReadTotal != totalLength) {
+                        downloadAttempt++
+                        if (downloadAttempt > MAX_DOWNLOAD_RETRIES) {
+                            throw IOException(
+                                "Download truncated: received $bytesReadTotal of $totalLength bytes"
+                            )
+                        }
+                        continue
+                    }
+
+                    downloadSuccess = true
                 }
 
                 // 4. Mark public MediaStore file as finished (IS_PENDING = 0)

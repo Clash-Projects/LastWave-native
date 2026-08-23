@@ -1,5 +1,8 @@
 package com.lastwave.app.ui.player
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -98,6 +101,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -374,6 +378,7 @@ private fun MiniPlayer(
     edgeToEdge: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val track = state.current ?: return
     var dragX by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var dragY by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
@@ -470,6 +475,11 @@ private fun MiniPlayer(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    openArtistPage(context, track.artist)
+                                },
                         )
                     }
                     Surface(
@@ -1111,12 +1121,20 @@ private fun FullPlayer(
                                             overflow = TextOverflow.Ellipsis,
                                         )
                                         Spacer(Modifier.height(3.dp))
+                                        val context = LocalContext.current
                                         Text(
                                             track.artist,
                                             style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    openArtistPage(context, track.artist)
+                                                }
+                                                .padding(vertical = 2.dp),
                                         )
                                     }
 
@@ -1470,14 +1488,33 @@ internal fun formatTime(ms: Long): String {
 }
 
 private fun qualityLabel(state: MusicPlayerState): String = when {
-    state.audioCodec != null && (state.audioCodec == "HI-RES FLAC" || state.audioCodec == "LOSSLESS" || state.audioCodec == "MP3 320k") -> state.audioCodec
-    state.bitrateKbps != null && state.audioCodec != null -> "${state.audioCodec} ${state.bitrateKbps}k"
+    // Qobuz with known bit depth / sampling rate → show precise format
+    state.isQobuz && state.bitDepth != null && state.samplingRateKHz != null -> {
+        val rate = if (state.samplingRateKHz % 1.0 == 0.0) state.samplingRateKHz.toInt().toString()
+        else state.samplingRateKHz.toString()
+        "FLAC ${state.bitDepth}/$rate"
+    }
+    state.isQobuz && state.audioCodec == "MP3 320k" -> "MP3 320k"
+    state.isQobuz -> state.audioCodec ?: "LOSSLESS"
+    // YouTube with known codec + bitrate → e.g. "OPUS 160k" or "AAC 256k"
+    state.audioCodec != null && state.bitrateKbps != null -> "${state.audioCodec} ${state.bitrateKbps}k"
     state.audioCodec != null -> state.audioCodec
     state.bitrateKbps != null -> "${state.bitrateKbps} kbps"
-    else -> "LOSSLESS"
+    else -> "AUDIO"
 }
 
-private fun PlayableTrack.toGeneratedTrack() = GeneratedTrack(
+private fun openArtistPage(context: Context, artist: String) {
+    if (artist.isBlank()) return
+    try {
+        val encoded = Uri.encode(artist.trim())
+        val url = "https://www.last.fm/music/$encoded"
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    } catch (_: Exception) {
+    }
+}
+
+private fun PlayableTrack.toGeneratedTrack() = com.lastwave.app.data.generate.GeneratedTrack(
     name = title,
     artist = artist,
     artworkUrl = artworkUrl,

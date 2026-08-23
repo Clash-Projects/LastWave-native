@@ -22,6 +22,10 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.initialize(this)
+        applicationScope.launch(Dispatchers.IO) {
+            com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.preWarm()
+        }
         // A widget is a separate RemoteViews surface, so it needs an explicit
         // refresh whenever LastWave's live theme changes.
         applicationScope.launch(Dispatchers.IO) {

@@ -1,5 +1,9 @@
 package com.lastwave.app.ui.settings
 
+import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -36,7 +40,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
@@ -49,14 +56,21 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -72,6 +86,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -100,11 +115,27 @@ fun YouTubePlaylistImportScreen(
     viewModel: YouTubePlaylistImportViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptic = LocalHapticFeedback.current
 
     val quickPills = listOf("Top Hits 2024", "Pop Classics", "Lofi Chill", "Hip Hop Gold", "Workout Energy", "Deep Focus")
+
+    // CSV Document Picker Launcher
+    val csvPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            val filename = queryFileName(context, uri) ?: "Imported Playlist.csv"
+            val stream = context.contentResolver.openInputStream(uri)
+            if (stream != null) {
+                viewModel.importCsv(stream, filename) { saved ->
+                    onImportSuccess(listOf(saved))
+                }
+            }
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -113,11 +144,11 @@ fun YouTubePlaylistImportScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         ) {
             ExpressiveHeader(
-                title = "YouTube Playlists",
-                subtitle = "Select playlists to import into LastWave",
+                title = "Import Playlists",
+                subtitle = "YouTube Music, Links & CSV Files",
                 onBack = onBack,
                 actions = {
-                    if (state.searchResults.isNotEmpty()) {
+                    if (state.selectedTab == ImportTab.SEARCH && state.searchResults.isNotEmpty()) {
                         TextButton(onClick = {
                             val allSelected = state.selectedPlaylistIds.size == state.searchResults.size
                             viewModel.selectAll(!allSelected)
@@ -128,85 +159,339 @@ fun YouTubePlaylistImportScreen(
                 },
             )
 
+            // Segmented Tab Selector with Vector Icons
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 2.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    ImportTab.entries.forEach { tab ->
+                        val selected = state.selectedTab == tab
+                        val icon = when (tab) {
+                            ImportTab.SEARCH -> Icons.Filled.QueueMusic
+                            ImportTab.LINK -> Icons.Filled.Link
+                            ImportTab.CSV -> Icons.Filled.Description
+                        }
+                        Surface(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.selectTab(tab)
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (selected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
+                            contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f).height(40.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(17.dp),
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    tab.title,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             LazyColumn(
                 contentPadding = PaddingValues(
                     start = 16.dp,
                     end = 16.dp,
-                    top = 8.dp,
+                    top = 10.dp,
                     bottom = 90.dp + LocalMiniPlayerScrollClearance.current + FloatingNavDefaults.contentBottomPadding(),
                 ),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                // Search & Paste Input Box
-                item {
-                    OutlinedTextField(
-                        value = state.query,
-                        onValueChange = viewModel::onQueryChange,
-                        placeholder = { Text("Search or paste YouTube playlist link...") },
-                        leadingIcon = {
-                            Icon(Icons.Filled.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        },
-                        trailingIcon = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (state.query.isNotBlank()) {
-                                    IconButton(onClick = { viewModel.onQueryChange("") }) {
-                                        Icon(Icons.Filled.Clear, contentDescription = "Clear")
-                                    }
-                                } else {
-                                    IconButton(onClick = {
-                                        val text = clipboard.getText()?.text.orEmpty()
-                                        if (text.isNotBlank()) {
-                                            viewModel.onQueryChange(text)
-                                            viewModel.search(text)
+                // TAB 1: YouTube Music Search
+                if (state.selectedTab == ImportTab.SEARCH) {
+                    // Search & Paste Input Box
+                    item {
+                        OutlinedTextField(
+                            value = state.query,
+                            onValueChange = viewModel::onQueryChange,
+                            placeholder = { Text("Search YouTube Music playlists...") },
+                            leadingIcon = {
+                                Icon(Icons.Filled.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            },
+                            trailingIcon = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (state.query.isNotBlank()) {
+                                        IconButton(onClick = { viewModel.onQueryChange("") }) {
+                                            Icon(Icons.Filled.Clear, contentDescription = "Clear")
                                         }
-                                    }) {
-                                        Icon(Icons.Filled.ContentPaste, contentDescription = "Paste link", tint = MaterialTheme.colorScheme.primary)
+                                    } else {
+                                        IconButton(onClick = {
+                                            val text = clipboard.getText()?.text.orEmpty()
+                                            if (text.isNotBlank()) {
+                                                viewModel.onQueryChange(text)
+                                                viewModel.search(text)
+                                            }
+                                        }) {
+                                            Icon(Icons.Filled.ContentPaste, contentDescription = "Paste", tint = MaterialTheme.colorScheme.primary)
+                                        }
                                     }
                                 }
-                            }
-                        },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = {
-                            keyboard?.hide()
-                            viewModel.search()
-                        }),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        ),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
+                            },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                keyboard?.hide()
+                                viewModel.search()
+                            }),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
 
-                // Quick Pills
-                item {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        contentPadding = PaddingValues(horizontal = 2.dp),
-                    ) {
-                        items(quickPills) { pill ->
-                            FilterChip(
-                                selected = state.query.equals(pill, ignoreCase = true),
-                                onClick = {
-                                    viewModel.onQueryChange(pill)
-                                    viewModel.search(pill)
-                                },
-                                label = { Text(pill, style = MaterialTheme.typography.labelMedium) },
-                                shape = CircleShape,
+                    // Quick Pills
+                    item {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            contentPadding = PaddingValues(horizontal = 2.dp),
+                        ) {
+                            items(quickPills) { pill ->
+                                FilterChip(
+                                    selected = state.query.equals(pill, ignoreCase = true),
+                                    onClick = {
+                                        viewModel.onQueryChange(pill)
+                                        viewModel.search(pill)
+                                    },
+                                    label = { Text(pill, style = MaterialTheme.typography.labelMedium) },
+                                    shape = CircleShape,
+                                )
+                            }
+                        }
+                    }
+
+                    // Loading State
+                    if (state.isSearching) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                    Text("Searching YouTube Music playlists...", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                    } else if (state.searchResults.isNotEmpty()) {
+                        item {
+                            Text(
+                                "Found ${state.searchResults.size} Playlists",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 4.dp, top = 4.dp),
                             )
+                        }
+
+                        itemsIndexed(
+                            items = state.searchResults,
+                            key = { _, item -> item.id },
+                        ) { index, playlist ->
+                            val isSelected = playlist.id in state.selectedPlaylistIds
+
+                            Box(Modifier.animateItem()) {
+                                YouTubePlaylistCard(
+                                    playlist = playlist,
+                                    isSelected = isSelected,
+                                    position = groupPositionFor(index, state.searchResults.size),
+                                    onToggleSelect = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        viewModel.togglePlaylistSelection(playlist.id)
+                                    },
+                                    onPreview = {
+                                        viewModel.loadPreview(playlist.id)
+                                    },
+                                )
+                            }
                         }
                     }
                 }
 
-                // Error Message
+                // TAB 2: Direct Link Importer
+                if (state.selectedTab == ImportTab.LINK) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(22.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(18.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                Text(
+                                    "Paste Playlist Link",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    "Paste any YouTube, YouTube Music, or Spotify playlist URL. LastWave will resolve all tracks and save the full playlist.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+
+                                OutlinedTextField(
+                                    value = state.directLink,
+                                    onValueChange = viewModel::onDirectLinkChange,
+                                    placeholder = { Text("https://music.youtube.com/playlist?list=...") },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    },
+                                    trailingIcon = {
+                                        if (state.directLink.isNotBlank()) {
+                                            IconButton(onClick = { viewModel.onDirectLinkChange("") }) {
+                                                Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                                            }
+                                        } else {
+                                            IconButton(onClick = {
+                                                val text = clipboard.getText()?.text.orEmpty()
+                                                if (text.isNotBlank()) {
+                                                    viewModel.onDirectLinkChange(text)
+                                                    viewModel.resolveDirectLink(text)
+                                                }
+                                            }) {
+                                                Icon(Icons.Filled.ContentPaste, contentDescription = "Paste", tint = MaterialTheme.colorScheme.primary)
+                                            }
+                                        }
+                                    },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+
+                                Button(
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        keyboard?.hide()
+                                        viewModel.resolveDirectLink()
+                                    },
+                                    enabled = state.directLink.isNotBlank() && !state.isPreviewLoading,
+                                    shape = CircleShape,
+                                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                                ) {
+                                    if (state.isPreviewLoading) {
+                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Resolving Playlist...")
+                                    } else {
+                                        Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Preview & Import Link", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // TAB 3: CSV File Importer
+                if (state.selectedTab == ImportTab.CSV) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(22.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(20.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(64.dp),
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Filled.Description,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(32.dp),
+                                        )
+                                    }
+                                }
+
+                                Text(
+                                    "Import from CSV File",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                )
+
+                                Text(
+                                    "Import your playlists exported from Spotify, Apple Music, Soundiiz, or TuneMyMusic. LastWave preserves original names, artists, and artwork.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                )
+
+                                Spacer(Modifier.height(4.dp))
+
+                                Button(
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "*/*"))
+                                    },
+                                    enabled = !state.isCsvImporting,
+                                    shape = CircleShape,
+                                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                                ) {
+                                    if (state.isCsvImporting) {
+                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(state.importProgress ?: "Importing CSV...")
+                                    } else {
+                                        Icon(Icons.Filled.FileDownload, contentDescription = null, modifier = Modifier.size(20.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Select CSV File from Storage", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Error Message Card
                 state.errorMessage?.let { error ->
                     item {
                         Card(
                             shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
@@ -218,64 +503,12 @@ fun YouTubePlaylistImportScreen(
                         }
                     }
                 }
-
-                // Loading State
-                if (state.isSearching) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp),
-                            ) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                                Text("Searching YouTube Music playlists...", style = MaterialTheme.typography.bodyMedium)
-                            }
-                        }
-                    }
-                } else if (state.searchResults.isNotEmpty()) {
-                    item {
-                        Text(
-                            "Found ${state.searchResults.size} Playlists",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 4.dp, top = 4.dp),
-                        )
-                    }
-
-                    itemsIndexed(
-                        items = state.searchResults,
-                        key = { _, item -> item.id },
-                    ) { index, playlist ->
-                        val isSelected = playlist.id in state.selectedPlaylistIds
-
-                        Box(Modifier.animateItem()) {
-                            YouTubePlaylistCard(
-                                playlist = playlist,
-                                isSelected = isSelected,
-                                position = groupPositionFor(index, state.searchResults.size),
-                                onToggleSelect = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    viewModel.togglePlaylistSelection(playlist.id)
-                                },
-                                onPreview = {
-                                    viewModel.loadPreview(playlist.id)
-                                },
-                            )
-                        }
-                    }
-                }
             }
         }
 
-        // Floating Bottom Import CTA
+        // Floating Bottom Import CTA (For multi-select on search tab)
         AnimatedVisibility(
-            visible = state.selectedPlaylistIds.isNotEmpty(),
+            visible = state.selectedTab == ImportTab.SEARCH && state.selectedPlaylistIds.isNotEmpty(),
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
@@ -520,4 +753,18 @@ private fun PlaylistPreviewModal(
             }
         }
     }
+}
+
+private fun queryFileName(context: Context, uri: Uri): String? {
+    var name: String? = null
+    val returnCursor = context.contentResolver.query(uri, null, null, null, null)
+    if (returnCursor != null) {
+        val nameIndex = returnCursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+        returnCursor.moveToFirst()
+        if (nameIndex != -1) {
+            name = returnCursor.getString(nameIndex)
+        }
+        returnCursor.close()
+    }
+    return name
 }

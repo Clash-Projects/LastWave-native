@@ -42,6 +42,8 @@ data class PlaylistUiState(
     val generatingMessage: String = "",
     val createDialogVisible: Boolean = false,
     val renamePlaylistId: Long? = null,
+    val detailPlaylist: SavedPlaylist? = null,
+    val isDetailLoading: Boolean = false,
 )
 
 /**
@@ -119,6 +121,26 @@ class PlaylistViewModel @Inject constructor(
                 all.firstOrNull { it.id == justGeneratedId }?.let { pl ->
                     artworkRepository.enrichBatch(pl.tracks.take(6).map { it.name to it.artist })
                 }
+            }
+        }
+    }
+
+    /** Loads a specific playlist by ID directly from Room for the detail screen. */
+    fun loadDetail(playlistId: Long) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDetailLoading = true) }
+            val pl = playlistRepository.getById(playlistId)
+            _uiState.update {
+                it.copy(
+                    isDetailLoading = false,
+                    detailPlaylist = pl,
+                    playlists = if (pl != null && it.playlists.none { existing -> existing.id == pl.id }) {
+                        it.playlists + pl
+                    } else it.playlists,
+                )
+            }
+            if (pl != null) {
+                artworkRepository.enrichBatch(pl.tracks.take(10).map { t -> t.name to t.artist })
             }
         }
     }
