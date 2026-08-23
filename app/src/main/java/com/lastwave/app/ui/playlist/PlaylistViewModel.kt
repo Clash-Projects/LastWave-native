@@ -75,14 +75,15 @@ class PlaylistViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(PlaylistUiState())
     val uiState: StateFlow<PlaylistUiState> = _uiState.asStateFlow()
 
-    val syncedPlaylistIds: StateFlow<Set<Long>> = ytMusicPreferences.syncedPlaylistIds
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val syncedPlaylistIds: StateFlow<Set<Long>?> = ytMusicPreferences.syncedPlaylistIds
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun toggleYtSync(playlistId: Long) {
         viewModelScope.launch {
-            val current = ytMusicPreferences.syncedPlaylistIds.first()
-            val isSynced = if (current.isEmpty()) true else playlistId in current
-            ytMusicPreferences.togglePlaylistSync(playlistId, !isSynced)
+            val allIds = playlistRepository.allPlaylists.first().map { it.id }
+            val current = ytMusicPreferences.syncedPlaylistIds.first() ?: allIds.toSet()
+            val isSynced = playlistId in current
+            ytMusicPreferences.togglePlaylistSync(allIds, playlistId, !isSynced)
             if (ytMusicPreferences.syncEnabled.first()) {
                 runCatching { ytMusicSyncManager.syncNow("selection_change") }
             }

@@ -617,29 +617,18 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Library & Playlist Imports")
-                    SettingsGroup(rowCount = 2) { index, position ->
-                        when (index) {
-                            0 -> SettingsActionCard(
-                                icon = Icons.Filled.QueueMusic,
-                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Import YouTube Music Playlists",
-                                subtitle = "Search, browse, or paste playlist links & IDs",
-                                onClick = onOpenYouTubeImport,
-                                position = position,
-                            )
-                            1 -> SettingsActionCard(
-                                icon = Icons.Filled.FileDownload,
-                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Import Playlist from File",
-                                subtitle = "M3U, M3U8, or CSV exports (Spotify, Soundiiz, Apple Music)",
-                                onClick = {
-                                    csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
-                                },
-                                position = position,
-                            )
-                        }
+                    SettingsGroup(rowCount = 1) { _, position ->
+                        SettingsActionCard(
+                            icon = Icons.Filled.FileDownload,
+                            iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                            iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            title = "Import Playlist from File",
+                            subtitle = "M3U, M3U8, or CSV exports (Spotify, Soundiiz, Apple Music)",
+                            onClick = {
+                                csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
+                            },
+                            position = position,
+                        )
                     }
                 }
             }

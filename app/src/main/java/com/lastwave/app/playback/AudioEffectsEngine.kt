@@ -119,7 +119,7 @@ class AudioEffectsEngine @Inject constructor(
             var dp = dynamicsProcessor
             if (dp == null) {
                 val config = DynamicsProcessing.Config.Builder(
-                    DynamicsProcessing.CONFIG_DEFAULT,
+                    DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
                     /* channelCount = */ 2,
                     /* enablePreEq = */ true,
                     /* preEqBandCount = */ EQ_BAND_FREQS_HZ.size,

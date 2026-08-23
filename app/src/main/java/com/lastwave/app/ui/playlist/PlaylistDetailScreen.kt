@@ -768,7 +768,7 @@ fun PlaylistDetailScreen(
                                 overflowMenuOpen = false
                             },
                         )
-                        val isSyncedToYt = syncedPlaylistIds.isEmpty() || playlistId in syncedPlaylistIds
+                        val isSyncedToYt = syncedPlaylistIds == null || playlistId in (syncedPlaylistIds ?: emptySet())
                         DropdownMenuItem(
                             text = { Text(if (isSyncedToYt) "Syncing to YouTube Music" else "Sync to YouTube Music") },
                             leadingIcon = {
