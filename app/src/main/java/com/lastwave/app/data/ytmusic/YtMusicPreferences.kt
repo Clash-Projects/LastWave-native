@@ -136,23 +136,27 @@ class YtMusicPreferences @Inject constructor(
         }
     }
 
-    val syncedPlaylistIds: Flow<Set<Long>> = dataStore.data.map { prefs ->
+    val syncedPlaylistIds: Flow<Set<Long>?> = dataStore.data.map { prefs ->
         prefs[SYNCED_PLAYLIST_IDS_KEY]?.let { raw ->
             runCatching { json.decodeFromString<Set<Long>>(raw) }.getOrNull()
-        } ?: emptySet()
-    }
-
-    suspend fun setSyncedPlaylistIds(ids: Set<Long>) {
-        dataStore.edit { prefs ->
-            prefs[SYNCED_PLAYLIST_IDS_KEY] = json.encodeToString(ids)
         }
     }
 
-    suspend fun togglePlaylistSync(playlistId: Long, enabled: Boolean) {
+    suspend fun setSyncedPlaylistIds(ids: Set<Long>?) {
+        dataStore.edit { prefs ->
+            if (ids != null) {
+                prefs[SYNCED_PLAYLIST_IDS_KEY] = json.encodeToString(ids)
+            } else {
+                prefs.remove(SYNCED_PLAYLIST_IDS_KEY)
+            }
+        }
+    }
+
+    suspend fun togglePlaylistSync(allPlaylistIds: List<Long>, playlistId: Long, enabled: Boolean) {
         dataStore.edit { prefs ->
             val current = prefs[SYNCED_PLAYLIST_IDS_KEY]?.let { raw ->
                 runCatching { json.decodeFromString<Set<Long>>(raw) }.getOrNull()
-            } ?: emptySet()
+            } ?: allPlaylistIds.toSet()
             val updated = if (enabled) current + playlistId else current - playlistId
             prefs[SYNCED_PLAYLIST_IDS_KEY] = json.encodeToString(updated)
         }

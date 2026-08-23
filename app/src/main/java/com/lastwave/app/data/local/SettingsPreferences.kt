@@ -50,11 +50,10 @@ data class MiscSettings(
     /** Preferred quality preset for Qobuz streaming (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k).
      *  If a track does not support the requested quality, the worker automatically selects the highest available. */
     val qobuzQuality: Int = 27,
-    /** Experimental "Music Enhancer" — a mastering-style effect chain (bass
-     *  warmth + stereo width + a subtle loudness lift) that makes tracks feel
-     *  fuller and more present without reshaping their tonal balance.
-     *  Separate from the equalizer; see playback/AudioEffectsEngine. */
-    val musicEnhancerEnabled: Boolean = false,
+    /** Audiophile Studio Clarity — studio-grade clarity curve (vocal presence +
+     *  air sparkle + anti-clipping limiter) that delivers pristine sound out of the box.
+     *  Defaults to true on fresh install. */
+    val musicEnhancerEnabled: Boolean = true,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
 )
@@ -82,7 +81,7 @@ class SettingsPreferences @Inject constructor(
             pinnedFriends = p[Keys.PINNED_FRIENDS] ?: emptySet(),
             preferQobuzStreaming = p[Keys.PREFER_QOBUZ_STREAMING] ?: true,
             qobuzQuality = p[Keys.QOBUZ_QUALITY] ?: 27,
-            musicEnhancerEnabled = p[Keys.MUSIC_ENHANCER] ?: false,
+            musicEnhancerEnabled = p[Keys.MUSIC_ENHANCER] ?: true,
             lyricsAnimation = LyricsAnimation.fromId(p[Keys.LYRICS_ANIMATION]),
         )
     }

@@ -81,6 +81,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -172,37 +174,72 @@ class TrackDetailsViewModel @Inject constructor(
                         }
                     }
 
-                    // 2. Fetch Last Played timestamp from recent history
+                    // 2. Fetch Last Played timestamp specifically for this track
                     val lastPlayed = runCatching {
-                        val recentResp = lastFmApi.get(
+                        val trackScrobblesResp = lastFmApi.get(
                             mapOf(
-                                "method" to "user.getrecenttracks",
+                                "method" to "user.gettrackscrobbles",
                                 "user" to session.username,
-                                "limit" to "50",
+                                "artist" to artist,
+                                "track" to title,
+                                "limit" to "1",
                                 "api_key" to session.apiKey,
                                 "format" to "json",
                             ),
                         )
-                        if (recentResp.isSuccessful) {
-                            val body = recentResp.body()?.string().orEmpty()
-                            val parsed = json.decodeFromString<RecentTracksEnvelope>(body)
-                            val match = parsed.recenttracks?.track?.tracks?.firstOrNull {
-                                it.name.equals(title, ignoreCase = true) && it.artist.displayName.equals(artist, ignoreCase = true)
+                        if (trackScrobblesResp.isSuccessful) {
+                            val body = trackScrobblesResp.body()?.string().orEmpty()
+                            val root = json.parseToJsonElement(body).jsonObject["trackscrobbles"]?.jsonObject
+                            val trackElem = root?.get("track")
+                            val trackObj = when (trackElem) {
+                                is JsonArray -> trackElem.firstOrNull()?.jsonObject
+                                is JsonObject -> trackElem
+                                else -> null
                             }
-                            if (match?.isNowPlaying == true) {
-                                "Playing right now"
+                            val isNowPlaying = trackObj?.get("@attr")?.jsonObject?.get("nowplaying")?.jsonPrimitive?.contentOrNull == "true"
+                            if (isNowPlaying) {
+                                "Playing now"
                             } else {
-                                match?.date?.uts?.toLongOrNull()?.let { uts ->
-                                    formatRelativeTime(uts * 1000L)
-                                }
+                                val uts = trackObj?.get("date")?.jsonObject?.get("uts")?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+                                uts?.let { formatRelativeTime(it * 1000L) }
                             }
                         } else null
                     }.getOrNull()
 
+                    // Fallback to recent tracks if gettrackscrobbles had no match
+                    val recentFallback = if (lastPlayed == null) {
+                        runCatching {
+                            val recentResp = lastFmApi.get(
+                                mapOf(
+                                    "method" to "user.getrecenttracks",
+                                    "user" to session.username,
+                                    "limit" to "50",
+                                    "api_key" to session.apiKey,
+                                    "format" to "json",
+                                ),
+                            )
+                            if (recentResp.isSuccessful) {
+                                val body = recentResp.body()?.string().orEmpty()
+                                val parsed = json.decodeFromString<RecentTracksEnvelope>(body)
+                                val match = parsed.recenttracks?.track?.tracks?.firstOrNull {
+                                    it.name.equals(title, ignoreCase = true) && it.artist.displayName.equals(artist, ignoreCase = true)
+                                }
+                                if (match?.isNowPlaying == true) {
+                                    "Playing now"
+                                } else {
+                                    match?.date?.uts?.toLongOrNull()?.let { uts ->
+                                        formatRelativeTime(uts * 1000L)
+                                    }
+                                }
+                            } else null
+                        }.getOrNull()
+                    } else null
+
                     val lastPlayedDisplay = when {
                         lastPlayed != null -> lastPlayed
-                        userPlays > 0 -> "Recorded in scrobble history"
-                        else -> "No plays recorded yet"
+                        recentFallback != null -> recentFallback
+                        userPlays > 0 -> "In library"
+                        else -> "Never"
                     }
 
                     _specs.value = _specs.value?.copy(
@@ -267,18 +304,22 @@ class TrackDetailsViewModel @Inject constructor(
 
     private fun formatRelativeTime(millis: Long): String {
         val diff = System.currentTimeMillis() - millis
-        val minutes = diff / (1000 * 60)
+        if (diff < 0) return "Just now"
+        val seconds = diff / 1000
+        val minutes = seconds / 60
         val hours = minutes / 60
         val days = hours / 24
 
         return when {
-            diff < 0 -> "Just now"
-            minutes < 1 -> "Just now"
-            minutes < 60 -> "$minutes min${if (minutes > 1) "s" else ""} ago"
-            hours < 24 -> "$hours hr${if (hours > 1) "s" else ""} ago"
-            days == 1L -> "Yesterday at " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(millis))
+            minutes < 2 -> "Just now"
+            minutes < 60 -> "$minutes min ago"
+            hours == 1L -> "1 hour ago"
+            hours < 24 -> "$hours hrs ago"
+            days == 1L -> "Yesterday"
             days < 7 -> "$days days ago"
-            else -> SimpleDateFormat("MMM d, yyyy \u2022 h:mm a", Locale.getDefault()).format(Date(millis))
+            days < 30 -> "${days / 7}w ago"
+            days < 365 -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(millis))
+            else -> SimpleDateFormat("MMM yyyy", Locale.getDefault()).format(Date(millis))
         }
     }
 

@@ -22,9 +22,13 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import android.media.audiofx.AudioEffect
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioCapabilities
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.lastwave.app.data.discover.DiscoverRepository
 import com.lastwave.app.data.generate.GeneratedTrack
@@ -175,6 +179,17 @@ class MusicPlayer @Inject constructor(
             // The Experimental equalizer / music-enhancer effects must follow
             // the session id wherever the platform audio server rebinds it.
             audioEffects.attach(audioSessionId)
+            // Broadcast audio session open intent for system equalizer / spatial audio / DSP (Pixel Audio / Wavelet / Viper)
+            if (audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+                runCatching {
+                    val intent = Intent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION).apply {
+                        putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId)
+                        putExtra(AudioEffect.EXTRA_PACKAGE_NAME, appContext.packageName)
+                        putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
+                    }
+                    appContext.sendBroadcast(intent)
+                }
+            }
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             errorRetryCount = 0
@@ -285,7 +300,24 @@ class MusicPlayer @Inject constructor(
             .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(15_000, true)
             .build()
-        ExoPlayer.Builder(appContext)
+        val renderersFactory = object : DefaultRenderersFactory(appContext) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): androidx.media3.exoplayer.audio.AudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(true)
+                    .setEnableAudioTrackPlaybackParams(true)
+                    .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
+                    .build()
+            }
+        }.apply {
+            setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            setEnableAudioTrackPlaybackParams(true)
+        }
+
+        ExoPlayer.Builder(appContext, renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(appContext).setDataSourceFactory(resolving))
             .setLoadControl(loadControl)
             .build().apply {
@@ -293,6 +325,7 @@ class MusicPlayer @Inject constructor(
                     AudioAttributes.Builder()
                         .setUsage(C.USAGE_MEDIA)
                         .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                        .setAllowedCapturePolicy(C.ALLOW_CAPTURE_BY_ALL)
                         .build(),
                     true,
                 )

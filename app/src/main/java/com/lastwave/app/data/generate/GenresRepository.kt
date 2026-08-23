@@ -120,11 +120,75 @@ class GenresRepository @Inject constructor(
         return tags.map { (name, count) -> GenreStat(name, count, (count.toFloat() / top.toFloat())) }
     }
 
-    /** Port of §5.3's Genre Detail track list: paginated tag.gettoptracks. */
+    /**
+     * Personalized Genre Detail track list ("Your Tracks"): blends the user's
+     * own scrobbles and top tracks matching this genre with top tracks from
+     * their favorite artists in this genre, complemented by genre top tracks.
+     */
     suspend fun fetchGenreTracks(genre: String, page: Int): List<GeneratedTrack> {
-        val d = call(mapOf("method" to "tag.gettoptracks", "tag" to genre, "limit" to "30", "page" to page.toString()))
-        val tracks = GenerateJson.normalise(d["tracks"]?.jsonObject?.get("track"))
-        return generateRepository.filterPlayable(tracks)
+        val profile = try { tasteProfileProvider.get() } catch (_: Exception) { null }
+        val targetTag = genre.lowercase().trim()
+        val pool = mutableListOf<GeneratedTrack>()
+
+        val userTopArtists = profile?.topArtistNames?.toList() ?: emptyList()
+
+        if (page == 1 && profile != null) {
+            // 1. User's own scrobbled tracks from their top / recent history
+            val userTracks = (profile.topTracksRaw + profile.recentTracksRaw).distinctBy { it.key }
+
+            // Find top artists in user's profile that match this genre
+            val genreMatchedArtists = mutableSetOf<String>()
+            for (artistName in userTopArtists.take(12)) {
+                try {
+                    val td = call(mapOf("method" to "artist.gettoptags", "artist" to artistName))
+                    val tags = GenerateJson.namesOf(td["toptags"]?.jsonObject?.get("tag")).map { it.lowercase() }
+                    if (tags.any { it.contains(targetTag) || targetTag.contains(it) }) {
+                        genreMatchedArtists += artistName.lowercase()
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // Include user's tracks for those artists
+            for (track in userTracks) {
+                if (track.artist.lowercase() in genreMatchedArtists) {
+                    pool += track
+                }
+            }
+
+            // Fetch top tracks for user's favorite artists in this genre
+            for (artist in genreMatchedArtists.take(4)) {
+                try {
+                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to artist, "limit" to "10"))
+                    pool += GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
+                } catch (_: Exception) {}
+            }
+        }
+
+        // 2. Fetch tag's top tracks for the requested page
+        try {
+            val d = call(mapOf("method" to "tag.gettoptracks", "tag" to genre, "limit" to "40", "page" to page.toString()))
+            pool += GenerateJson.normalise(d["tracks"]?.jsonObject?.get("track"))
+        } catch (_: Exception) {}
+
+        if (pool.isEmpty()) return emptyList()
+
+        val deduped = generateRepository.deduplicate(pool)
+        val userTopArtistSet = profile?.topArtistNames ?: emptySet()
+        val userRecentArtistSet = profile?.recentArtists ?: emptySet()
+        val userHeardKeys = (profile?.topTrackKeys ?: emptySet()) + (profile?.recentTrackKeys ?: emptySet())
+
+        // Score based on user's Last.fm taste
+        val scored = deduped.map { track ->
+            val aKey = track.artist.lowercase()
+            var score = 0
+            if (track.key in userHeardKeys) score += 10 // User's own scrobbled track
+            if (aKey in userTopArtistSet) score += 6   // User's top artist
+            if (aKey in userRecentArtistSet) score += 4// User's recent artist
+            track to score
+        }
+
+        val sorted = scored.sortedByDescending { it.second }.map { it.first }
+        return generateRepository.filterPlayable(sorted).take(30)
     }
 
     /** Port of §5.5 Discover More: tag.gettoptracks (fresh random page) +

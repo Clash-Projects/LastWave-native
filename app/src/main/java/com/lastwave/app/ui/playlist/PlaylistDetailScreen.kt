@@ -4,7 +4,21 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -212,6 +226,13 @@ fun PlaylistDetailScreen(
     }
 
     val listState = rememberLazyListState()
+    val scrollOffset by remember {
+        derivedStateOf {
+            if (listState.firstVisibleItemIndex == 0) {
+                listState.firstVisibleItemScrollOffset.toFloat()
+            } else 600f
+        }
+    }
     val showScrolledHeader by remember {
         derivedStateOf {
             listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 240
@@ -223,11 +244,18 @@ fun PlaylistDetailScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
     ) {
-        // 1. Full-Bleed Cover Art Background at Top (Spotify-styled)
+        // 1. Full-Bleed Cover Art Background at Top with smooth parallax physics
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(440.dp),
+                .height(440.dp)
+                .graphicsLayer {
+                    translationY = -scrollOffset * 0.45f
+                    alpha = (1f - (scrollOffset / 520f)).coerceIn(0.1f, 1f)
+                    val zoom = 1f + (-scrollOffset.coerceAtMost(0f) / 600f)
+                    scaleX = zoom
+                    scaleY = zoom
+                },
         ) {
             PlaylistCover(
                 playlist = playlist,
@@ -324,8 +352,15 @@ fun PlaylistDetailScreen(
                         ) {
                             Icon(Icons.Filled.Shuffle, contentDescription = "Shuffle", modifier = Modifier.size(22.dp))
                         }
+                        // Prominent Center Play / Playing Pill Button with Spring Physics
+                        val playInteractionSource = remember { MutableInteractionSource() }
+                        val isPlayPressed by playInteractionSource.collectIsPressedAsState()
+                        val playScale by animateFloatAsState(
+                            targetValue = if (isPlayPressed) 0.92f else 1f,
+                            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                            label = "heroPlayScale",
+                        )
 
-                        // Prominent Center Play / Playing Pill Button
                         Button(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -344,13 +379,20 @@ fun PlaylistDetailScreen(
                                     )
                                 }
                             },
+                            interactionSource = playInteractionSource,
                             shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
                             ),
                             elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp, pressedElevation = 8.dp),
-                            modifier = Modifier.height(50.dp).padding(horizontal = 4.dp),
+                            modifier = Modifier
+                                .height(50.dp)
+                                .padding(horizontal = 4.dp)
+                                .graphicsLayer {
+                                    scaleX = playScale
+                                    scaleY = playScale
+                                },
                         ) {
                             Icon(
                                 if (isThisPlaylistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -395,15 +437,13 @@ fun PlaylistDetailScreen(
                                     Text(
                                         text = currentSort.label,
                                         style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
+                                        fontWeight = FontWeight.SemiBold,
                                     )
-                                    if (currentSort != PlaylistTrackSort.CUSTOM) {
-                                        Icon(
-                                            imageVector = if (sortAscending) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(13.dp),
-                                        )
-                                    }
+                                    Icon(
+                                        imageVector = if (sortAscending) Icons.Filled.ArrowUpward else Icons.Filled.ArrowDownward,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
                                 }
                             }
 
@@ -550,10 +590,21 @@ fun PlaylistDetailScreen(
         }
 
         // 2. Floating Top Bar with Frosted Glass styling & Smooth Scrolled Header
+        val topBarBg by animateColorAsState(
+            targetValue = if (showScrolledHeader) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.98f) else Color.Transparent,
+            animationSpec = tween(260),
+            label = "topBarBg",
+        )
+        val topBarElevation by animateDpAsState(
+            targetValue = if (showScrolledHeader) 6.dp else 0.dp,
+            animationSpec = tween(260),
+            label = "topBarElevation",
+        )
+
         Surface(
-            color = if (showScrolledHeader) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.98f) else Color.Transparent,
-            tonalElevation = if (showScrolledHeader) 4.dp else 0.dp,
-            shadowElevation = if (showScrolledHeader) 6.dp else 0.dp,
+            color = topBarBg,
+            tonalElevation = topBarElevation,
+            shadowElevation = topBarElevation,
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.TopCenter),
@@ -908,16 +959,36 @@ private fun NativeTrackRow(
     onClick: () -> Unit,
     onMenu: () -> Unit,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val rowScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.98f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "rowPress",
+    )
+    val rowBackground by animateColorAsState(
+        targetValue = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
+        animationSpec = tween(350),
+        label = "rowBg",
+    )
+
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(14.dp),
-        color = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else Color.Transparent,
-        modifier = Modifier.fillMaxWidth(),
+        color = rowBackground,
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = rowScale
+                scaleY = rowScale
+            },
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
                     onClick = onClick,
                     onLongClick = onMenu,
                 )
@@ -978,26 +1049,78 @@ private fun NativeTrackRow(
 
             // Now Playing badge if active
             if (isPlaying) {
+                val infiniteTransition = rememberInfiniteTransition(label = "nowPlayingAnim")
+                val b1 by infiniteTransition.animateFloat(
+                    initialValue = 0.25f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(tween(440, easing = LinearEasing), RepeatMode.Reverse),
+                    label = "b1",
+                )
+                val b2 by infiniteTransition.animateFloat(
+                    initialValue = 0.95f,
+                    targetValue = 0.3f,
+                    animationSpec = infiniteRepeatable(tween(580, easing = LinearEasing), RepeatMode.Reverse),
+                    label = "b2",
+                )
+                val b3 by infiniteTransition.animateFloat(
+                    initialValue = 0.4f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(tween(480, easing = LinearEasing), RepeatMode.Reverse),
+                    label = "b3",
+                )
+                val pulseScale by infiniteTransition.animateFloat(
+                    initialValue = 0.985f,
+                    targetValue = 1.015f,
+                    animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                    label = "pulseScale",
+                )
+
                 Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                    modifier = Modifier.graphicsLayer {
+                        scaleX = pulseScale
+                        scaleY = pulseScale
+                    },
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.onPrimaryContainer),
-                        )
+                        // Live breathing equalizer bars
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.Bottom,
+                            modifier = Modifier.height(10.dp),
+                        ) {
+                            Box(
+                                Modifier
+                                    .width(2.dp)
+                                    .height((3f + b1 * 7f).dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary),
+                            )
+                            Box(
+                                Modifier
+                                    .width(2.dp)
+                                    .height((3f + b2 * 7f).dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary),
+                            )
+                            Box(
+                                Modifier
+                                    .width(2.dp)
+                                    .height((3f + b3 * 7f).dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary),
+                            )
+                        }
                         Spacer(Modifier.width(6.dp))
                         Text(
                             "Now Playing",
                             style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
                         )
                     }
                 }

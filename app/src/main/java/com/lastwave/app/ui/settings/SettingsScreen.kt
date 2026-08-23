@@ -120,6 +120,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.input.pointer.pointerInput
 import com.lastwave.app.ui.theme.LocalLiquidGlass
@@ -345,8 +352,12 @@ fun SettingsScreen(
                                 position = position,
                             )
                             2 -> if (ytConnected) {
-                                val syncCountText = if (syncedPlaylistIds.isEmpty()) "All (${allPlaylists.size}) playlists syncing"
-                                else "${syncedPlaylistIds.size} of ${allPlaylists.size} playlists selected"
+                                val selectedCount = syncedPlaylistIds?.size ?: allPlaylists.size
+                                val syncCountText = if (syncedPlaylistIds == null || selectedCount == allPlaylists.size) {
+                                    "All (${allPlaylists.size}) playlists syncing"
+                                } else {
+                                    "$selectedCount of ${allPlaylists.size} playlists selected"
+                                }
                                 SettingsActionCard(
                                     icon = Icons.Filled.FormatListBulleted,
                                     iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
@@ -550,11 +561,11 @@ fun SettingsScreen(
                                 icon = Icons.Filled.AutoAwesome,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Music Enhancer",
+                                title = "Studio Master Clarity",
                                 subtitle = if (misc.musicEnhancerEnabled) {
-                                    "Fuller bass, wider stage, lifted vocals"
+                                    "Crisp vocals, open soundstage, anti-clipping limiter"
                                 } else {
-                                    "Subtle warmth & presence boost for any track"
+                                    "Bit-perfect flat direct pass-through"
                                 },
                                 checked = misc.musicEnhancerEnabled,
                                 onCheckedChange = viewModel::setMusicEnhancer,
@@ -1730,10 +1741,161 @@ private fun ColorWheelSheet(onDismiss: () -> Unit, onApply: (Color) -> Unit) {
 
 private val EQ_MAX_DB = 12f
 
+private fun eqBandCategory(hz: Int): String = when {
+    hz <= 40 -> "SUB"
+    hz <= 100 -> "BASS"
+    hz <= 250 -> "LOW-MID"
+    hz <= 1000 -> "MID"
+    hz <= 2500 -> "HIGH-MID"
+    hz <= 6300 -> "PRES"
+    else -> "AIR"
+}
+
+@Composable
+private fun EqualizerCurveGraph(
+    gains: FloatArray,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    val outlineVariant = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+    val gridColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(130.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLowest)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+            val paddingX = 14.dp.toPx()
+            val availableW = w - paddingX * 2f
+            val baselineY = h / 2f
+            val maxDbPx = (h - 22.dp.toPx()) / 2f
+
+            val topY = baselineY - maxDbPx
+            val bottomY = baselineY + maxDbPx
+
+            // Baseline (0 dB)
+            drawLine(
+                color = if (enabled) outlineVariant else outlineVariant.copy(alpha = 0.15f),
+                start = Offset(paddingX, baselineY),
+                end = Offset(w - paddingX, baselineY),
+                strokeWidth = 1.5.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f),
+            )
+            // +12 dB line
+            drawLine(
+                color = gridColor,
+                start = Offset(paddingX, topY),
+                end = Offset(w - paddingX, topY),
+                strokeWidth = 1.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 6f), 0f),
+            )
+            // -12 dB line
+            drawLine(
+                color = gridColor,
+                start = Offset(paddingX, bottomY),
+                end = Offset(w - paddingX, bottomY),
+                strokeWidth = 1.dp.toPx(),
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 6f), 0f),
+            )
+
+            if (gains.isEmpty()) return@Canvas
+
+            val count = gains.size
+            val stepX = availableW / (count - 1).coerceAtLeast(1)
+            val points = List(count) { i ->
+                val x = paddingX + i * stepX
+                val gain = if (enabled) gains[i].coerceIn(-EQ_MAX_DB, EQ_MAX_DB) else 0f
+                val y = baselineY - (gain / EQ_MAX_DB) * maxDbPx
+                Offset(x, y)
+            }
+
+            val path = Path()
+            val fillPath = Path()
+
+            path.moveTo(points.first().x, points.first().y)
+            fillPath.moveTo(points.first().x, baselineY)
+            fillPath.lineTo(points.first().x, points.first().y)
+
+            for (i in 0 until points.size - 1) {
+                val p0 = points[i]
+                val p1 = points[i + 1]
+                val controlX1 = p0.x + (p1.x - p0.x) / 2f
+                val controlY1 = p0.y
+                val controlX2 = p0.x + (p1.x - p0.x) / 2f
+                val controlY2 = p1.y
+                path.cubicTo(controlX1, controlY1, controlX2, controlY2, p1.x, p1.y)
+                fillPath.cubicTo(controlX1, controlY1, controlX2, controlY2, p1.x, p1.y)
+            }
+
+            fillPath.lineTo(points.last().x, baselineY)
+            fillPath.close()
+
+            if (enabled) {
+                drawPath(
+                    path = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            primaryColor.copy(alpha = 0.35f),
+                            primaryColor.copy(alpha = 0.05f),
+                            Color.Transparent,
+                        ),
+                        startY = topY,
+                        endY = bottomY,
+                    ),
+                )
+            }
+
+            drawPath(
+                path = path,
+                color = if (enabled) primaryColor else onSurfaceVariant.copy(alpha = 0.4f),
+                style = Stroke(
+                    width = 3.dp.toPx(),
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                ),
+            )
+
+            for (p in points) {
+                val hasBoostOrCut = Math.abs(p.y - baselineY) > 2f && enabled
+                drawCircle(
+                    color = if (hasBoostOrCut) primaryColor else if (enabled) primaryColor.copy(alpha = 0.7f) else onSurfaceVariant.copy(alpha = 0.3f),
+                    radius = if (hasBoostOrCut) 4.5.dp.toPx() else 3.dp.toPx(),
+                    center = p,
+                )
+                if (hasBoostOrCut) {
+                    drawCircle(
+                        color = Color.White,
+                        radius = 2.dp.toPx(),
+                        center = p,
+                    )
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier.fillMaxHeight().align(Alignment.CenterEnd).padding(end = 2.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+            horizontalAlignment = Alignment.End,
+        ) {
+            Text("+12dB", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            Text("0dB", fontSize = 9.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+            Text("-12dB", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+        }
+    }
+}
+
 /**
  * 100% natural, native Material 3 Equalizer:
  * - Edge-to-edge layout with status bar and navigation bar insets protection
- * - Native Material 3 switch card and filter chips
+ * - Live dynamic Bézier Spline frequency response visualizer
  * - Hardware acoustic fader board with real-time numeric dB readouts and 0 dB center detent haptics
  * - Standard ISO center frequencies
  */
@@ -1855,6 +2017,12 @@ private fun EqualizerSheet(
                 }
             }
 
+            // Real-Time Frequency Response Visualizer
+            EqualizerCurveGraph(
+                gains = gains,
+                enabled = eq.enabled,
+            )
+
             // Presets Horizontal Flow
             SectionLabel("Presets")
             FlowRow(
@@ -1905,15 +2073,15 @@ private fun EqualizerSheet(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "+12 dB (Max Boost)",
+                            "+12 dB (Boost)",
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary,
                         )
                         Text(
-                            "-12 dB (Max Cut)",
+                            "-12 dB (Cut)",
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -1960,11 +2128,11 @@ private fun EqualizerSheet(
 }
 
 /**
- * 100% natural native equalizer fader bar:
- * - Vertical track with central 0 dB baseline and active level fill
- * - Tactile rounded thumb knob with elevation and primary color
- * - Real-time continuous numeric dB readout on top
- * - Standard frequency label underneath
+ * Goated native hardware equalizer fader bar:
+ * - Vertical capsule track with central 0 dB baseline notch and active level gradient beam
+ * - Tactile hardware capsule thumb knob with double grip ridges
+ * - Real-time continuous numeric dB badge on top with container coloring
+ * - Standard frequency label + band category tag underneath
  */
 @Composable
 private fun EqNativeSlider(
@@ -1983,23 +2151,43 @@ private fun EqNativeSlider(
         modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Numeric Gain on top
-        Text(
-            text = if (gainDb > 0f) "+${"%.1f".format(gainDb)}" else "${"%.1f".format(gainDb)}",
-            fontSize = 11.sp,
-            fontWeight = if (gainDb != 0f) FontWeight.Bold else FontWeight.Medium,
-            color = if (gainDb != 0f && enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-        )
+        // Numeric Gain on top in a small pill container
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = when {
+                !enabled -> MaterialTheme.colorScheme.surfaceContainer
+                gainDb > 0f -> MaterialTheme.colorScheme.primaryContainer
+                gainDb < 0f -> MaterialTheme.colorScheme.tertiaryContainer
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest
+            },
+        ) {
+            Text(
+                text = if (gainDb > 0f) "+${"%.1f".format(gainDb)}" else "${"%.1f".format(gainDb)}",
+                fontSize = 11.sp,
+                fontWeight = if (gainDb != 0f) FontWeight.Bold else FontWeight.Medium,
+                color = when {
+                    !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                    gainDb > 0f -> MaterialTheme.colorScheme.onPrimaryContainer
+                    gainDb < 0f -> MaterialTheme.colorScheme.onTertiaryContainer
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                maxLines = 1,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
 
         Spacer(Modifier.height(6.dp))
 
         // Vertical Track Box
+        val trackHeight = 152.dp
+        val thumbHeight = 24.dp
+        val thumbWidth = 38.dp
+
         Box(
             modifier = Modifier
-                .width(36.dp)
-                .height(148.dp)
-                .clip(RoundedCornerShape(18.dp))
+                .width(44.dp)
+                .height(trackHeight)
+                .clip(RoundedCornerShape(22.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .pointerInput(enabled) {
                     if (!enabled) return@pointerInput
@@ -2036,7 +2224,7 @@ private fun EqNativeSlider(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(2.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
             )
 
             // Active Level Fill (from baseline to thumb)
@@ -2047,42 +2235,71 @@ private fun EqNativeSlider(
             if (heightFraction > 0.01f && enabled) {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(0.6f)
+                        .fillMaxWidth(0.55f)
                         .fillMaxHeight(heightFraction)
                         .align(Alignment.TopCenter)
                         .graphicsLayer {
                             translationY = size.height * topFraction
                         }
                         .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.primary),
+                        .background(
+                            if (gainDb > 0f) {
+                                Brush.verticalGradient(
+                                    listOf(
+                                        MaterialTheme.colorScheme.primary,
+                                        MaterialTheme.colorScheme.primaryContainer,
+                                    ),
+                                )
+                            } else {
+                                Brush.verticalGradient(
+                                    listOf(
+                                        MaterialTheme.colorScheme.tertiaryContainer,
+                                        MaterialTheme.colorScheme.tertiary,
+                                    ),
+                                )
+                            },
+                        ),
                 )
             }
 
-            // Tactile Circular Thumb Knob
-            val thumbSize = 28.dp
+            // Tactile Hardware Capsule Thumb Knob
             Box(
                 modifier = Modifier
-                    .size(thumbSize)
+                    .size(width = thumbWidth, height = thumbHeight)
                     .align(Alignment.TopCenter)
                     .graphicsLayer {
-                        val maxTravel = (148.dp - thumbSize).toPx()
+                        val maxTravel = (trackHeight - thumbHeight).toPx()
                         translationY = maxTravel * (1f - normalized)
                     }
-                    .shadow(if (isDragging) 6.dp else 2.dp, CircleShape)
-                    .clip(CircleShape)
+                    .shadow(if (isDragging) 8.dp else 3.dp, RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(
-                        if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh
+                        if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                        ),
-                )
+                // Double grip ridges
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 14.dp, height = 2.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(
+                                if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            ),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(width = 14.dp, height = 2.dp)
+                            .clip(RoundedCornerShape(1.dp))
+                            .background(
+                                if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            ),
+                    )
+                }
             }
         }
 
@@ -2091,9 +2308,16 @@ private fun EqNativeSlider(
         // Frequency Label
         Text(
             text = eqBandLabel(hz),
-            fontSize = 11.sp,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (gainDb != 0f && enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+        )
+        Text(
+            text = eqBandCategory(hz),
+            fontSize = 9.sp,
             fontWeight = FontWeight.SemiBold,
-            color = if (gainDb != 0f && enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
             maxLines = 1,
         )
     }
@@ -2106,14 +2330,14 @@ private fun EqNativeSlider(
 @Composable
 private fun SyncPlaylistsSheet(
     playlists: List<com.lastwave.app.data.playlist.SavedPlaylist>,
-    syncedIds: Set<Long>,
+    syncedIds: Set<Long>?,
     onToggleSync: (Long, Boolean) -> Unit,
     onSelectAll: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    val allSelected = playlists.isNotEmpty() && (syncedIds.isEmpty() || syncedIds.size == playlists.size)
+    val allSelected = playlists.isNotEmpty() && (syncedIds == null || (playlists.all { it.id in syncedIds } && syncedIds.isNotEmpty()))
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -2184,7 +2408,7 @@ private fun SyncPlaylistsSheet(
                 ) {
                     items(playlists.size, key = { playlists[it].id }) { idx ->
                         val playlist = playlists[idx]
-                        val isChecked = syncedIds.isEmpty() || playlist.id in syncedIds
+                        val isChecked = syncedIds == null || playlist.id in syncedIds
                         Surface(
                             onClick = {
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)

@@ -128,7 +128,6 @@ fun GenresScreen(
             genre = genre,
             state = state,
             onDismiss = viewModel::closeDetail,
-            onSortChange = viewModel::setDetailSort,
             onLoadMore = { viewModel.loadDetailPage() },
             onStartMix = { viewModel.startMix(genre) },
             onDiscoverMore = { viewModel.discoverMore(genre) },
@@ -192,7 +191,6 @@ private fun GenreDetailSheet(
     genre: String,
     state: GenresUiState,
     onDismiss: () -> Unit,
-    onSortChange: (GenreDetailSort) -> Unit,
     onLoadMore: () -> Unit,
     onStartMix: () -> Unit,
     onDiscoverMore: () -> Unit,
@@ -214,12 +212,9 @@ private fun GenreDetailSheet(
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column {
-                    Text(genre.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleLarge)
-                    Text("Your Tracks", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                SortPill(state.detailSort, onSortChange)
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                Text(genre.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Your Tracks", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -261,15 +256,6 @@ private fun GenreDetailSheet(
             onDismiss = { menuTrack = null },
             onExploreGenre = onExploreGenre,
         )
-    }
-}
-
-@Composable
-private fun SortPill(current: GenreDetailSort, onChange: (GenreDetailSort) -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        FilterChip(selected = current == GenreDetailSort.POPULAR, onClick = { onChange(GenreDetailSort.POPULAR) }, label = { Text("Popular") })
-        FilterChip(selected = current == GenreDetailSort.NEWEST, onClick = { onChange(GenreDetailSort.NEWEST) }, label = { Text("Newest") })
-        FilterChip(selected = current == GenreDetailSort.AZ, onClick = { onChange(GenreDetailSort.AZ) }, label = { Text("A-Z") })
     }
 }
 

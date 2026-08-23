@@ -223,7 +223,7 @@ fun YouTubePlaylistImportScreen(
                     start = 16.dp,
                     end = 16.dp,
                     top = 10.dp,
-                    bottom = 90.dp + LocalMiniPlayerScrollClearance.current + FloatingNavDefaults.contentBottomPadding(),
+                    bottom = 80.dp + LocalMiniPlayerScrollClearance.current,
                 ),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxSize(),
@@ -611,7 +611,7 @@ fun YouTubePlaylistImportScreen(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
-                .padding(bottom = 16.dp + LocalMiniPlayerScrollClearance.current + FloatingNavDefaults.contentBottomPadding())
+                .padding(bottom = 16.dp + LocalMiniPlayerScrollClearance.current)
                 .padding(horizontal = 20.dp),
         ) {
             Button(

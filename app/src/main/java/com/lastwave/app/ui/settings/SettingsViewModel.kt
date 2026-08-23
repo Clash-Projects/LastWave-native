@@ -80,8 +80,8 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val ytLastSyncAt: StateFlow<Long> = ytMusicPreferences.lastSyncAt
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
-    val syncedPlaylistIds: StateFlow<Set<Long>> = ytMusicPreferences.syncedPlaylistIds
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val syncedPlaylistIds: StateFlow<Set<Long>?> = ytMusicPreferences.syncedPlaylistIds
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val allPlaylists: StateFlow<List<com.lastwave.app.data.playlist.SavedPlaylist>> = playlistRepository.playlists
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -397,7 +397,8 @@ class SettingsViewModel @Inject constructor(
 
     fun togglePlaylistSync(playlistId: Long, enabled: Boolean) {
         viewModelScope.launch {
-            ytMusicPreferences.togglePlaylistSync(playlistId, enabled)
+            val allIds = allPlaylists.value.map { it.id }
+            ytMusicPreferences.togglePlaylistSync(allIds, playlistId, enabled)
             if (ytSyncEnabled.value) {
                 runCatching { ytMusicSyncManager.syncNow("selection_change") }
             }

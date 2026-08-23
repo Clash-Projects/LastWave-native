@@ -3,12 +3,18 @@ package com.lastwave.app.ui.playlist
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -502,16 +508,36 @@ private fun PlaylistCard(
     val isThisPlaylistPlaying = isPlaying && playbackSource == playlist.title
     var menuExpanded by remember { mutableStateOf(false) }
 
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val cardScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.975f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "cardPress",
+    )
+    val cardBackground by animateColorAsState(
+        targetValue = if (isThisPlaylistPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+        animationSpec = tween(350),
+        label = "cardBg",
+    )
+
     Card(
         shape = com.lastwave.app.ui.common.groupShape(position),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(containerColor = cardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = cardScale
+                scaleY = cardScale
+            },
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .combinedClickable(
+                    interactionSource = interactionSource,
+                    indication = null,
                     onClick = {
                         haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                         onClick()
@@ -565,12 +591,26 @@ private fun PlaylistCard(
 
             // Quick play button
             if (playlist.tracks.isNotEmpty()) {
+                val playInteractionSource = remember { MutableInteractionSource() }
+                val isPlayPressed by playInteractionSource.collectIsPressedAsState()
+                val playScale by animateFloatAsState(
+                    targetValue = if (isPlayPressed) 0.88f else 1f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                    label = "playScale",
+                )
+
                 Surface(
                     onClick = onPlay,
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primaryContainer,
                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(38.dp),
+                    interactionSource = playInteractionSource,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .graphicsLayer {
+                            scaleX = playScale
+                            scaleY = playScale
+                        },
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(

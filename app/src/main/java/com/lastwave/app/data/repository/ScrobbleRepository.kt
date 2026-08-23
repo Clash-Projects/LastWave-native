@@ -12,6 +12,9 @@ import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -46,6 +49,9 @@ class ScrobbleRepository @Inject constructor(
     private val callMutex = Mutex()
     private var lastWriteAtElapsed = 0L
     @Volatile private var lastNowPlayingKey: String? = null
+
+    private val _scrobbleEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val scrobbleEvents: SharedFlow<Unit> = _scrobbleEvents.asSharedFlow()
 
     private data class PendingScrobble(
         val artist: String,
@@ -100,7 +106,9 @@ class ScrobbleRepository @Inject constructor(
             },
         )
 
-        if (result is Result.Failed && result.retryable) {
+        if (result is Result.Success) {
+            _scrobbleEvents.tryEmit(Unit)
+        } else if (result is Result.Failed && result.retryable) {
             // Queue for automatic retry on the next write; bound the queue so a
             // long offline period can't grow it without limit.
             offlineQueue.add(PendingScrobble(artist, track, album, timestampSec))
@@ -127,6 +135,7 @@ class ScrobbleRepository @Inject constructor(
             )
             if (res is Result.Success) {
                 offlineQueue.poll()
+                _scrobbleEvents.tryEmit(Unit)
             } else {
                 break
             }

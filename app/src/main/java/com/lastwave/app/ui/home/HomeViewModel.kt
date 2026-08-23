@@ -167,6 +167,7 @@ class HomeViewModel @Inject constructor(
     private val themeRepository: ThemeRepository,
     private val viewingProfileState: com.lastwave.app.data.repository.ViewingProfileState,
     private val settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
+    private val scrobbleRepository: com.lastwave.app.data.repository.ScrobbleRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -179,6 +180,13 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             settingsPreferences.settings.collect { misc ->
                 _uiState.update { it.copy(pinnedFriends = misc.pinnedFriends) }
+            }
+        }
+        viewModelScope.launch {
+            scrobbleRepository.scrobbleEvents.collect {
+                // Instantly update recent tracks list and scrobble count when a track scrobbles
+                delay(1200L)
+                refreshSilently()
             }
         }
     }
@@ -438,37 +446,75 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    fun refreshSilently() {
+        val target = _uiState.value.viewingUsername
+        if (target.isBlank() || target.equals("Guest User", ignoreCase = true)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val recent = homeRepository.fetchRecentTracks(username = target, forceRefresh = true)
+                recent.onSuccess { page ->
+                    val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
+                    notifyNowPlayingArtwork(nowPlaying)
+                    _uiState.update { state ->
+                        state.copy(
+                            nowPlaying = nowPlaying,
+                            allTracks = merged,
+                            page = page.page,
+                            totalPages = page.totalPages,
+                        )
+                    }
+                }
+                homeRepository.fetchStats(username = target, forceRefresh = true).onSuccess { freshStats ->
+                    _uiState.update { it.copy(stats = freshStats) }
+                }
+            }
+        }
+    }
+
     /** Runs the now-playing + recent-tracks + listen-timer loops concurrently.
      *  Call from a lifecycle-aware LaunchedEffect(repeatOnLifecycle(STARTED))
      *  so polling stops the moment the screen backgrounds. Polls whichever
      *  account is currently being viewed (yours, or a friend's). */
     suspend fun pollWhileActive() = coroutineScope {
+        // Immediately fetch newest tracks and stats on opening/returning to Home screen
+        refreshSilently()
+
         launch {
             while (true) {
                 delay(NOW_PLAYING_POLL_MS)
                 val target = _uiState.value.viewingUsername
                 if (target.isNotBlank() && !target.equals("Guest User", ignoreCase = true)) {
-                    val result = runCatching { homeRepository.fetchRecentTracks(limit = 2, username = target) }.getOrNull()
+                    val result = runCatching { homeRepository.fetchRecentTracks(limit = 2, username = target, forceRefresh = true) }.getOrNull()
                     result?.onSuccess { page ->
                         val (nowPlaying, _) = mergeRecentWithTop(page.nowPlaying, emptyList(), cachedTopTracks)
+                        val previousNp = _uiState.value.nowPlaying
+                        val trackEnded = previousNp != null && nowPlaying == null
+                        val trackChanged = (previousNp?.name != nowPlaying?.name || previousNp?.artist != nowPlaying?.artist)
+
                         notifyNowPlayingArtwork(nowPlaying)
                         _uiState.update { state ->
-                            val trackChanged = nowPlaying?.name != state.nowPlaying?.name || nowPlaying?.artist != state.nowPlaying?.artist
-                            state.copy(nowPlaying = nowPlaying, listenElapsedSeconds = if (trackChanged) 0 else state.listenElapsedSeconds)
+                            state.copy(
+                                nowPlaying = nowPlaying,
+                                listenElapsedSeconds = if (trackChanged) 0 else state.listenElapsedSeconds,
+                            )
+                        }
+                        // When a track finishes or changes, auto-refresh recent tracks list immediately
+                        if (trackEnded || (trackChanged && previousNp != null)) {
+                            refreshSilently()
                         }
                     }?.onFailure {
-                        // On error or rate limit, back off for 20 seconds before retrying
-                        delay(20_000L)
+                        // On error or rate limit, back off for 15 seconds before retrying
+                        delay(15_000L)
                     }
                 }
             }
         }
         launch {
             while (true) {
-                delay(RECENT_TRACKS_POLL_MS)
+                delay(15_000L)
                 val target = _uiState.value.viewingUsername
                 if (target.isNotBlank() && !target.equals("Guest User", ignoreCase = true)) {
-                    val result = runCatching { homeRepository.fetchRecentTracks(username = target) }.getOrNull()
+                    val result = runCatching { homeRepository.fetchRecentTracks(username = target, forceRefresh = true) }.getOrNull()
                     result?.onSuccess { page ->
                         val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
                         notifyNowPlayingArtwork(nowPlaying)
@@ -480,8 +526,8 @@ class HomeViewModel @Inject constructor(
                             state.copy(nowPlaying = nowPlaying, allTracks = combined, totalPages = page.totalPages)
                         }
                     }?.onFailure {
-                        // On error or rate limit, back off for 30 seconds before retrying
-                        delay(30_000L)
+                        // On error or rate limit, back off for 20 seconds before retrying
+                        delay(20_000L)
                     }
                 }
             }
@@ -495,7 +541,6 @@ class HomeViewModel @Inject constructor(
             }
         }
     }
-
 
     fun dismissError() = _uiState.update { it.copy(error = null) }
 }

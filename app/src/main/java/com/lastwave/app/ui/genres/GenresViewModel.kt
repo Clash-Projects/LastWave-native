@@ -112,11 +112,11 @@ class GenresViewModel @Inject constructor(
         }
     }
 
-    /** §5.3's "Start Mix" — reuses Generator's exact tag fetch path. */
+    /** §5.3's "Start Mix" — personalized mix based on user's Last.fm taste profile in this genre. */
     fun startMix(genre: String) {
         viewModelScope.launch {
             try {
-                val tracks = generateRepository.fetchTagTracks(genre, 25)
+                val tracks = genresRepository.explorePersonalizedGenre(genre)
                 val finalTracks = generateRepository.precheck(tracks).take(25)
                 generateRepository.markAsSeen(finalTracks)
                 val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())

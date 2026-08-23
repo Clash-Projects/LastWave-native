@@ -213,7 +213,7 @@ private fun EmptyWidget(hasNotificationAccess: Boolean) {
             .background(GlanceTheme.colors.surface)
             .cornerRadius(24.dp)
             .appWidgetBackground()
-            .padding(12.dp)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
             .then(
                 if (needsAccess) GlanceModifier.clickable(actionRunCallback<OpenMusicAccessAction>())
                 else GlanceModifier.clickable(actionRunCallback<OpenLastWaveAction>()),
@@ -250,17 +250,17 @@ private fun PlayerWidget(state: WidgetUiState) {
     Row(
         modifier = playerSurface(GlanceModifier)
             .clickable(actionRunCallback<OpenLastWaveAction>())
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MiniArtwork(state.art, 54, state.isPlaying, state.animationFrame)
-        Spacer(GlanceModifier.width(10.dp))
+        MiniArtwork(state.art, 50, state.isPlaying, state.animationFrame)
+        Spacer(GlanceModifier.width(12.dp))
         Column(
             modifier = GlanceModifier.defaultWeight(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TrackTitle(state.title, size = 15)
-            Spacer(GlanceModifier.height(2.dp))
+            Spacer(GlanceModifier.height(1.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TrackArtist(state.artist, size = 12)
                 Spacer(GlanceModifier.width(6.dp))
@@ -273,7 +273,7 @@ private fun PlayerWidget(state: WidgetUiState) {
                     ),
                 )
             }
-            Spacer(GlanceModifier.height(6.dp))
+            Spacer(GlanceModifier.height(4.dp))
             PlaybackControls(state.isPlaying)
         }
     }

@@ -119,7 +119,7 @@ class YtMusicSyncManager @Inject constructor(
         try {
             val allPlaylists = playlistRepository.getAll()
             val syncedIds = preferences.syncedPlaylistIds.first()
-            val playlists = if (syncedIds.isNotEmpty()) allPlaylists.filter { it.id in syncedIds } else allPlaylists
+            val playlists = if (syncedIds != null) allPlaylists.filter { it.id in syncedIds } else allPlaylists
 
             if (playlists.isEmpty()) {
                 _state.value = YtSyncState.Completed(System.currentTimeMillis(), 0, 0, 0)

@@ -34,22 +34,21 @@ object EqualizerPresets {
     const val CUSTOM_NAME = "Custom"
 
     val FLAT = EqPreset("Default", List(EQ_BAND_FREQS_HZ.size) { 0f })
+    val STUDIO_MASTER = EqPreset("Studio Master", listOf(1.0f, 1.0f, 0.5f, 0.0f, -0.5f, -0.5f, 0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.2f, 2.0f, 2.5f, 2.5f))
 
     val ALL: List<EqPreset> = listOf(
         FLAT,
-        EqPreset("Bass Boost", listOf(7f, 6.5f, 5.5f, 4.5f, 3f, 1.5f, 0f, -0.5f, -0.5f, -0.5f, -0.5f, -0.5f, 0f, 0f, 0f)),
-        EqPreset("Treble Boost", listOf(0f, 0f, 0f, -0.5f, -0.5f, -0.5f, 0f, 0.5f, 1.5f, 2.5f, 3.5f, 4.5f, 5.5f, 6.5f, 7f)),
-        EqPreset("Vocal", listOf(-2f, -1.5f, -1f, 0f, 1.5f, 2.5f, 3.5f, 4.5f, 5f, 4.5f, 3.5f, 2.5f, 2f, 1.5f, 1f)),
-        EqPreset("Rock", listOf(5.5f, 5f, 4f, 2.5f, 0f, -1f, -1.5f, -1f, 0f, 1.5f, 3f, 4f, 4.5f, 5f, 5f)),
-        EqPreset("Pop", listOf(-1.5f, -1f, -0.5f, 1f, 2.5f, 3.5f, 3f, 2f, 1f, 0.5f, 0f, 0.5f, 1.5f, 2.5f, 3f)),
-        EqPreset("Jazz", listOf(4f, 3.5f, 2.5f, 1.5f, 0f, -1f, -0.5f, 0.5f, 1.5f, 2f, 2.5f, 2.5f, 3f, 3.5f, 3.5f)),
-        EqPreset("Classical", listOf(4.5f, 4f, 3.5f, 2.5f, 1f, 0f, 0f, 0f, 0f, 0.5f, 1f, 1.5f, 2.5f, 3.5f, 4f)),
-        EqPreset("Dance", listOf(7f, 6.5f, 5.5f, 4f, 2f, 0.5f, 1f, 1.5f, 2f, 2.5f, 2.5f, 2f, 2f, 2.5f, 3f)),
-        EqPreset("Electronic", listOf(6.5f, 6f, 5f, 3f, 0.5f, -1f, 0f, 1.5f, 3f, 4f, 4f, 3.5f, 4f, 5f, 5.5f)),
-        EqPreset("Hip-Hop", listOf(8f, 7.5f, 6.5f, 5f, 3f, 0.5f, -1f, -1.5f, -0.5f, 0.5f, 1.5f, 2f, 2.5f, 3f, 3f)),
-        EqPreset("Acoustic", listOf(4.5f, 4f, 3.5f, 2.5f, 1f, 1.5f, 2f, 2.5f, 2.5f, 2f, 1.5f, 1f, 0.5f, 0.5f, 0f)),
-        EqPreset("R&B", listOf(7f, 6.5f, 5.5f, 3.5f, 1.5f, -1f, -2f, -1f, 0.5f, 2f, 2.5f, 3f, 3.5f, 4f, 4f)),
-        EqPreset("Loudness", listOf(7f, 6f, 4.5f, 3.5f, 1.5f, -0.5f, 0f, 1f, 2f, 2.5f, 3f, 3.5f, 4.5f, 5.5f, 6f)),
+        STUDIO_MASTER,
+        EqPreset("Acoustic", listOf(3.0f, 2.5f, 2.0f, 1.5f, 0.5f, 1.0f, 1.5f, 2.0f, 2.0f, 1.5f, 1.0f, 1.0f, 1.0f, 1.5f, 1.5f)),
+        EqPreset("Vocal Clarity", listOf(-1.5f, -1.0f, -0.5f, 0f, 0.5f, 1.0f, 2.0f, 3.0f, 3.5f, 3.0f, 2.5f, 2.0f, 1.5f, 1.5f, 1.0f)),
+        EqPreset("Classical", listOf(3.0f, 2.5f, 2.0f, 1.5f, 0.5f, 0f, 0f, 0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f, 3.0f, 3.0f)),
+        EqPreset("Jazz", listOf(2.5f, 2.0f, 1.5f, 1.0f, 0f, -0.5f, 0f, 0.5f, 1.0f, 1.5f, 2.0f, 2.0f, 2.5f, 2.5f, 2.5f)),
+        EqPreset("Rock", listOf(4.0f, 3.5f, 3.0f, 1.5f, 0f, -1.0f, -1.0f, -0.5f, 0.5f, 1.5f, 2.5f, 3.0f, 3.5f, 4.0f, 4.0f)),
+        EqPreset("Pop", listOf(-1.0f, -0.5f, 0.0f, 1.0f, 1.5f, 2.0f, 2.0f, 1.5f, 1.0f, 0.5f, 0.5f, 1.0f, 1.5f, 2.0f, 2.5f)),
+        EqPreset("Treble Air", listOf(0f, 0f, 0f, -0.5f, -0.5f, -0.5f, 0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 3.5f, 4.5f, 5.0f)),
+        EqPreset("Deep Bass Clean", listOf(5.0f, 4.5f, 3.5f, 2.5f, 1.0f, 0f, -0.5f, -0.5f, 0f, 0f, 0f, 0f, 0.5f, 0.5f, 0.5f)),
+        EqPreset("Electronic", listOf(4.5f, 4.0f, 3.0f, 2.0f, 0.5f, -0.5f, 0f, 1.0f, 2.0f, 2.5f, 2.5f, 2.5f, 3.0f, 3.5f, 4.0f)),
+        EqPreset("R&B", listOf(5.0f, 4.5f, 3.5f, 2.0f, 1.0f, -0.5f, -1.0f, -0.5f, 0.5f, 1.5f, 2.0f, 2.5f, 3.0f, 3.0f, 3.0f)),
     )
 
     fun byName(name: String): EqPreset? = ALL.firstOrNull { it.name.equals(name, ignoreCase = true) }

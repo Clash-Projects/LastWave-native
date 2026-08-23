@@ -77,6 +77,7 @@ import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.GroupPosition
 import com.lastwave.app.ui.common.groupPositionFor
 import com.lastwave.app.ui.common.groupShape
+import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.player.LocalMusicPlayer
 import com.lastwave.app.ui.player.PlayingWaveBars
@@ -218,7 +219,7 @@ fun DownloadsScreen(
                         start = 14.dp,
                         end = 14.dp,
                         top = 10.dp,
-                        bottom = 32.dp + LocalMiniPlayerScrollClearance.current + FloatingNavDefaults.contentBottomPadding(),
+                        bottom = 32.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                     ),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
