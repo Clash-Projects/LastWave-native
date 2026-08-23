@@ -65,6 +65,7 @@ class TrackDownloadManager @Inject constructor(
     private val innerTube: InnerTubeMusicApi,
     private val artworkRepository: ArtworkRepository,
     private val lrclibLyricsApi: LrclibLyricsApi,
+    private val audioTagWriter: AudioTagWriter,
     okHttpClient: OkHttpClient,
     private val downloadedTrackDao: DownloadedTrackDao,
     private val settingsPreferences: SettingsPreferences,
@@ -158,8 +159,10 @@ class TrackDownloadManager @Inject constructor(
 
             var destinationUri: Uri? = null
             var destinationFile: File? = null
+            var tempDownloadFile: File? = null
 
             try {
+
                 // Resolve missing metadata & cover art proactively
                 var resolvedArtworkUrl = artworkUrl?.takeIf { it.isNotBlank() }
                 var resolvedAlbum = album?.takeIf { it.isNotBlank() }
@@ -243,127 +246,133 @@ class TrackDownloadManager @Inject constructor(
 
                 val safeFilename = sanitizeFilename("$artist - $title") + ".$extension"
 
-                // 2. Open output stream in public storage (Music/LastWave)
-                val (initialStream, uri, file) = openPublicOutputStream(safeFilename, mimeType, title, artist, resolvedAlbum)
-                destinationUri = uri
-                destinationFile = file
-                if (uri != null) activeUris[key] = uri
-                if (file != null) activeFiles[key] = file
+                // 2. Download raw stream to local temp cache file
+                val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
+                tempDownloadFile = rawFile
 
-                showDownloadNotification(notifId, key, title, artist, 0, false, formatBadge)
+                    var bytesReadTotal = 0L
+                    var totalLength = -1L
+                    var downloadAttempt = 0
+                    var downloadSuccess = false
 
-                // 3. Download bytes with progress, retry on truncation
-                var bytesReadTotal = 0L
-                var totalLength = -1L
-                var downloadAttempt = 0
-                var downloadSuccess = false
-                var currentOutputStream: java.io.OutputStream? = initialStream
+                    while (downloadAttempt <= MAX_DOWNLOAD_RETRIES && !downloadSuccess) {
+                        val requestBuilder = Request.Builder().url(resolvedUrl!!)
+                        requestBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
+                        requestBuilder.header("Accept", "*/*")
+                        val request = requestBuilder.build()
+                        val response = downloadClient.newCall(request).execute()
 
-                while (downloadAttempt <= MAX_DOWNLOAD_RETRIES && !downloadSuccess) {
-                    val requestBuilder = Request.Builder().url(resolvedUrl!!)
-                    requestBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
-                    requestBuilder.header("Accept", "*/*")
-                    val request = requestBuilder.build()
-                    val response = downloadClient.newCall(request).execute()
+                        if (!response.isSuccessful) throw IOException("HTTP ${response.code} downloading track")
 
-                    if (!response.isSuccessful) throw IOException("HTTP ${response.code} downloading track")
-
-                    // Validate response is actual media payload and not an HTML/JSON error page
-                    val contentType = response.header("Content-Type").orEmpty().lowercase()
-                    if (contentType.contains("text/html") || contentType.contains("application/json")) {
-                        response.close()
-                        throw IOException("Invalid download payload ($contentType)")
-                    }
-
-                    val body = response.body ?: throw IOException("Empty response body")
-                    totalLength = body.contentLength()
-                    val source = body.byteStream()
-
-                    bytesReadTotal = 0L
-                    val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
-                    var bytesRead: Int
-                    var lastProgress = 0
-                    val isChunked = totalLength <= 0
-
-                    if (isChunked) {
-                        // Chunked transfer — show indeterminate progress
-                        updateProgress(
-                            DownloadProgress(
-                                key = key, title = title, artist = artist,
-                                progressPercent = 0, formatBadge = formatBadge,
-                            ),
-                        )
-                        showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
-                    }
-
-                    val out = currentOutputStream ?: run {
-                        if (uri != null) {
-                            context.contentResolver.openOutputStream(uri, "wt")
-                                ?: context.contentResolver.openOutputStream(uri)
-                                ?: throw IOException("Could not re-open stream for $uri")
-                        } else if (file != null) {
-                            FileOutputStream(file)
-                        } else {
-                            throw IOException("No output target available")
+                        // Validate response is actual media payload and not an HTML/JSON error page
+                        val contentType = response.header("Content-Type").orEmpty().lowercase()
+                        if (contentType.contains("text/html") || contentType.contains("application/json")) {
+                            response.close()
+                            throw IOException("Invalid download payload ($contentType)")
                         }
-                    }
 
-                    out.use { fos ->
-                        while (source.read(buffer).also { bytesRead = it } != -1) {
-                            fos.write(buffer, 0, bytesRead)
-                            bytesReadTotal += bytesRead
+                        val body = response.body ?: throw IOException("Empty response body")
+                        totalLength = body.contentLength()
+                        val source = body.byteStream()
 
-                            if (!isChunked && totalLength > 0) {
-                                val progress = ((bytesReadTotal * 100) / totalLength).toInt().coerceIn(0, 100)
-                                if (progress != lastProgress) {
-                                    lastProgress = progress
+                        bytesReadTotal = 0L
+                        val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+                        var bytesRead: Int
+                        var lastProgress = 0
+                        val isChunked = totalLength <= 0
+
+                        if (isChunked) {
+                            updateProgress(
+                                DownloadProgress(
+                                    key = key, title = title, artist = artist,
+                                    progressPercent = 0, formatBadge = formatBadge,
+                                ),
+                            )
+                            showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
+                        }
+
+                        FileOutputStream(tempDownloadFile).use { fos ->
+                            while (source.read(buffer).also { bytesRead = it } != -1) {
+                                fos.write(buffer, 0, bytesRead)
+                                bytesReadTotal += bytesRead
+
+                                if (!isChunked && totalLength > 0) {
+                                    val progress = ((bytesReadTotal * 100) / totalLength).toInt().coerceIn(0, 100)
+                                    if (progress != lastProgress) {
+                                        lastProgress = progress
+                                        updateProgress(
+                                            DownloadProgress(
+                                                key = key, title = title, artist = artist,
+                                                progressPercent = progress,
+                                                bytesDownloaded = bytesReadTotal,
+                                                totalBytes = totalLength,
+                                                formatBadge = formatBadge,
+                                            ),
+                                        )
+                                        showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
+                                    }
+                                } else if (isChunked) {
+                                    val mbDown = String.format("%.1f MB", bytesReadTotal / (1024.0 * 1024.0))
                                     updateProgress(
                                         DownloadProgress(
                                             key = key, title = title, artist = artist,
-                                            progressPercent = progress,
+                                            progressPercent = 0,
                                             bytesDownloaded = bytesReadTotal,
-                                            totalBytes = totalLength,
-                                            formatBadge = formatBadge,
+                                            totalBytes = -1L,
+                                            formatBadge = "$formatBadge • $mbDown",
                                         ),
                                     )
-                                    showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
                                 }
-                            } else if (isChunked) {
-                                // Update byte count for chunked transfers
-                                val mbDown = String.format("%.1f MB", bytesReadTotal / (1024.0 * 1024.0))
-                                updateProgress(
-                                    DownloadProgress(
-                                        key = key, title = title, artist = artist,
-                                        progressPercent = 0,
-                                        bytesDownloaded = bytesReadTotal,
-                                        totalBytes = -1L,
-                                        formatBadge = "$formatBadge • $mbDown",
-                                    ),
-                                )
                             }
+                            fos.flush()
                         }
-                        fos.flush()
-                    }
-                    currentOutputStream = null
 
-                    // Verify Content-Length match (when known)
-                    if (totalLength > 0 && bytesReadTotal != totalLength) {
-                        downloadAttempt++
-                        if (downloadAttempt > MAX_DOWNLOAD_RETRIES) {
-                            throw IOException(
-                                "Download truncated: received $bytesReadTotal of $totalLength bytes"
-                            )
+                        if (totalLength > 0 && bytesReadTotal != totalLength) {
+                            downloadAttempt++
+                            if (downloadAttempt > MAX_DOWNLOAD_RETRIES) {
+                                throw IOException("Download truncated: received $bytesReadTotal of $totalLength bytes")
+                            }
+                            continue
                         }
-                        continue
+
+                        downloadSuccess = true
                     }
 
-                    downloadSuccess = true
-                }
+                    // 3. Embed Audio Metadata & Album Art Tags directly into the downloaded audio file
+                    audioTagWriter.embedMetadata(
+                        audioFile = tempDownloadFile,
+                        title = title,
+                        artist = artist,
+                        album = resolvedAlbum,
+                        artworkUrl = resolvedArtworkUrl,
+                    )
 
-                // 4. Mark public MediaStore file as finished (IS_PENDING = 0)
-                finalizePublicFile(uri)
+                    // 4. Transfer tagged file to public storage / MediaStore
+                    val (destStream, uri, file) = openPublicOutputStream(
+                        filename = safeFilename,
+                        mimeType = mimeType,
+                        title = title,
+                        artist = artist,
+                        album = resolvedAlbum,
+                        durationMs = durationMs,
+                    )
+                    destinationUri = uri
+                    destinationFile = file
+                    if (uri != null) activeUris[key] = uri
+                    if (file != null) activeFiles[key] = file
 
-                val finalPath = file?.absolutePath ?: uri?.toString() ?: safeFilename
+                    tempDownloadFile.inputStream().use { input ->
+                        destStream.use { output ->
+                            input.copyTo(output)
+                            output.flush()
+                        }
+                    }
+
+                    // 5. Mark public MediaStore file as finished (IS_PENDING = 0)
+                    finalizePublicFile(uri)
+
+                    val finalPath = file?.absolutePath ?: uri?.toString() ?: safeFilename
+
 
                 // 5. Fetch lyrics from LRCLIB and write sidecar .lrc file in Music/LastWave
                 var hasLyrics = false
@@ -447,7 +456,9 @@ class TrackDownloadManager @Inject constructor(
                 activeJobs.remove(key)
                 activeUris.remove(key)
                 activeFiles.remove(key)
+                tempDownloadFile?.let { runCatching { if (it.exists()) it.delete() } }
             }
+
         }
         activeJobs[key] = job
     }
@@ -462,6 +473,7 @@ class TrackDownloadManager @Inject constructor(
         title: String,
         artist: String,
         album: String?,
+        durationMs: Long = 0L,
     ): Triple<java.io.OutputStream, Uri?, File?> {
         val resolver = context.contentResolver
 
@@ -483,6 +495,7 @@ class TrackDownloadManager @Inject constructor(
                 put(MediaStore.Audio.Media.TITLE, title)
                 put(MediaStore.Audio.Media.ARTIST, artist)
                 if (!album.isNullOrBlank()) put(MediaStore.Audio.Media.ALBUM, album)
+                if (durationMs > 0) put(MediaStore.Audio.Media.DURATION, durationMs)
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
             }
 

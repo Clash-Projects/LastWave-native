@@ -324,6 +324,7 @@ fun TrackDetailsSheet(
         },
     ) {
         val currentSpecs = specs ?: TrackSpecs(title = title, artist = artist, album = album, artworkUrl = artworkUrl)
+        val numberFormatter = NumberFormat.getNumberInstance(Locale.getDefault())
 
         Column(
             modifier = Modifier
@@ -331,67 +332,71 @@ fun TrackDetailsSheet(
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp + safeDrawingBottomPadding())
                 .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Header: Cover Art + Badge
-            Box(
-                modifier = Modifier
-                    .size(130.dp)
-                    .shadow(12.dp, RoundedCornerShape(20.dp), spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+            // 1. Hero Track Header (Artwork + Title + Artist + Album + Format Badge)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                ArtworkImage(
-                    name = title,
-                    artist = artist,
-                    embeddedUrl = artworkUrl,
-                    fallbackIcon = Icons.Filled.MusicNote,
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp)),
-                )
-                Surface(
-                    shape = RoundedCornerShape(bottomStart = 8.dp, topEnd = 20.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.align(Alignment.TopEnd),
+                Box(
+                    modifier = Modifier
+                        .size(88.dp)
+                        .shadow(10.dp, RoundedCornerShape(18.dp), spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
                 ) {
-                    Text(
-                        text = currentSpecs.qualityBadge,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    ArtworkImage(
+                        name = title,
+                        artist = artist,
+                        embeddedUrl = artworkUrl,
+                        fallbackIcon = Icons.Filled.MusicNote,
+                        modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(18.dp)),
                     )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = artist,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (!album.isNullOrBlank()) {
+                        Text(
+                            text = album,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Text(
+                            text = currentSpecs.qualityBadge,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
-
-            // Title & Artist
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                text = artist,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-            )
-            if (!album.isNullOrBlank()) {
-                Text(
-                    text = album,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
-            }
-
-            Spacer(Modifier.height(18.dp))
-
-            // Quick Actions: Play & Download
+            // 2. Action Buttons (Play & Download)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -411,7 +416,7 @@ fun TrackDetailsSheet(
                     ) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Play", fontWeight = FontWeight.Bold)
+                        Text("Play Track", fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -440,79 +445,75 @@ fun TrackDetailsSheet(
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            // 3. Listening Stats 2x2 Grid
+            Text(
+                text = "Listening Statistics",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
-            // Technical Audio Specs Card
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                StatCard(
+                    title = "Your Scrobbles",
+                    value = if (currentSpecs.userPlayCount > 0) "${numberFormatter.format(currentSpecs.userPlayCount)} plays" else if (currentSpecs.isScrobbleStatsLoaded) "0 plays" else "...",
+                    modifier = Modifier.weight(1f),
+                )
+                StatCard(
+                    title = "Last Played",
+                    value = currentSpecs.lastPlayedText ?: "Checking...",
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                StatCard(
+                    title = "Global Plays",
+                    value = if (currentSpecs.globalPlayCount > 0) numberFormatter.format(currentSpecs.globalPlayCount) else "\u2014",
+                    modifier = Modifier.weight(1f),
+                )
+                StatCard(
+                    title = "Listeners",
+                    value = if (currentSpecs.listenersCount > 0) numberFormatter.format(currentSpecs.listenersCount) else "\u2014",
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            // 4. Audio & Stream Specifications Card
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.HighQuality, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Audio & Stream Specifications", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("Stream & Audio Specs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                     }
 
-                    DetailRow(label = "Format Tier", value = currentSpecs.qualityBadge)
-                    DetailRow(label = "Audio Codec", value = currentSpecs.audioCodec)
+                    DetailRow(label = "Codec", value = currentSpecs.audioCodec)
                     DetailRow(label = "Resolution", value = currentSpecs.bitDepthSampleRate)
-                    DetailRow(label = "Stream Source", value = currentSpecs.provider)
+                    DetailRow(label = "Provider", value = currentSpecs.provider)
                     if (currentSpecs.durationText != "--:--") {
                         DetailRow(label = "Duration", value = currentSpecs.durationText)
                     }
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
-
-            // Scrobbler & Play History Card
+            // 5. Offline Storage Card
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Scrobbler & Listening History", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    }
-
-                    val numberFormatter = NumberFormat.getNumberInstance(Locale.getDefault())
-                    val scrobbleScoreText = if (currentSpecs.userPlayCount > 0) {
-                        "${numberFormatter.format(currentSpecs.userPlayCount)} scrobbles"
-                    } else if (currentSpecs.isScrobbleStatsLoaded) {
-                        "0 scrobbles (Never played)"
-                    } else {
-                        "Loading scrobble score..."
-                    }
-
-                    DetailRow(label = "Your Scrobble Score", value = scrobbleScoreText)
-                    DetailRow(label = "Last Played", value = currentSpecs.lastPlayedText ?: "Checking history...")
-
-                    if (currentSpecs.globalPlayCount > 0) {
-                        DetailRow(label = "Total Global Scrobbles", value = "${numberFormatter.format(currentSpecs.globalPlayCount)} plays")
-                    }
-                    if (currentSpecs.listenersCount > 0) {
-                        DetailRow(label = "Total Listeners", value = "${numberFormatter.format(currentSpecs.listenersCount)} listeners")
-                    }
-                    if (currentSpecs.isLoved) {
-                        DetailRow(label = "Favorite Status", value = "Loved Track \u2665")
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            // Offline & File Storage Info Card
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
@@ -520,21 +521,53 @@ fun TrackDetailsSheet(
                     }
 
                     DetailRow(
-                        label = "Offline File",
-                        value = if (currentSpecs.downloadedEntity != null) "Saved in Music/LastWave/" else "Not downloaded yet",
+                        label = "Status",
+                        value = if (currentSpecs.downloadedEntity != null) "Downloaded" else "Not downloaded",
                     )
                     if (currentSpecs.downloadedEntity != null) {
                         DetailRow(
                             label = "File Size",
-                            value = "${currentSpecs.downloadedEntity.fileSizeBytes / (1024 * 1024)} MB",
+                            value = "%.1f MB".format(currentSpecs.downloadedEntity.fileSizeBytes / (1024.0 * 1024.0)),
                         )
                         DetailRow(
-                            label = "Location",
+                            label = "File Path",
                             value = currentSpecs.downloadedEntity.filePath,
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun StatCard(
+    title: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier,
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -562,3 +595,4 @@ private fun DetailRow(label: String, value: String) {
         )
     }
 }
+

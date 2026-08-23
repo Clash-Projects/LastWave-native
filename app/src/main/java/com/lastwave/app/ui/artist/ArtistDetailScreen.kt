@@ -191,32 +191,30 @@ fun ArtistDetailScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 6.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
                         ) {
-                            // Circular Artist Portrait with breathing glow shadow
+                            // Full-width Hero Cover Banner with gradient scrim
                             Box(
                                 modifier = Modifier
-                                    .size(170.dp)
+                                    .fillMaxWidth()
+                                    .height(260.dp)
                                     .shadow(
-                                        elevation = 18.dp,
-                                        shape = CircleShape,
+                                        elevation = 16.dp,
+                                        shape = RoundedCornerShape(28.dp),
                                         ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                                         spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                    ),
+                                    )
+                                    .clip(RoundedCornerShape(28.dp)),
                             ) {
                                 if (!data.artworkUrl.isNullOrBlank()) {
                                     AsyncImage(
                                         model = data.artworkUrl,
                                         contentDescription = data.name,
                                         contentScale = ContentScale.Crop,
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(CircleShape),
+                                        modifier = Modifier.fillMaxSize(),
                                     )
                                 } else {
                                     Surface(
-                                        shape = CircleShape,
                                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                                         modifier = Modifier.fillMaxSize(),
                                     ) {
@@ -225,135 +223,158 @@ fun ArtistDetailScreen(
                                                 Icons.Filled.Person,
                                                 contentDescription = null,
                                                 tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(72.dp),
+                                                modifier = Modifier.size(96.dp),
                                             )
                                         }
                                     }
                                 }
 
+                                // Dark gradient overlay at the base of the hero
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(
+                                                    Color.Transparent,
+                                                    Color.Black.copy(alpha = 0.4f),
+                                                    Color.Black.copy(alpha = 0.85f),
+                                                ),
+                                                startY = 100f,
+                                            ),
+                                        ),
+                                )
+
                                 if (isArtistPlaying) {
                                     Surface(
-                                        shape = CircleShape,
+                                        shape = RoundedCornerShape(topStart = 12.dp),
                                         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f),
                                         tonalElevation = 4.dp,
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .size(38.dp),
+                                        modifier = Modifier.align(Alignment.TopEnd),
                                     ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            PlayingWaveBars(modifier = Modifier.size(20.dp))
+                                        PlayingWaveBars(
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        )
+                                    }
+                                }
+
+                                // Artist Title & Stats overlaid on hero
+                                Column(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(18.dp),
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = data.name,
+                                            style = MaterialTheme.typography.headlineLarge,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color.White,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Icon(
+                                            Icons.Filled.Verified,
+                                            contentDescription = "Verified Artist",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                    }
+
+                                    if (!data.subscribers.isNullOrBlank() || !data.monthlyListeners.isNullOrBlank()) {
+                                        Spacer(Modifier.height(4.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(50),
+                                            color = Color.White.copy(alpha = 0.18f),
+                                        ) {
+                                            Text(
+                                                text = data.subscribers ?: data.monthlyListeners.orEmpty(),
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color.White,
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                            )
                                         }
                                     }
                                 }
                             }
 
-                            Spacer(Modifier.height(18.dp))
+                            Spacer(Modifier.height(16.dp))
 
-                            // Artist Name + Verified Badge
+                            // Native Music App Action Bar (Shuffle, Radio, Primary Play FAB)
                             Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
                             ) {
-                                Text(
-                                    text = data.name,
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Icon(
-                                    Icons.Filled.Verified,
-                                    contentDescription = "Verified Artist",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(22.dp),
-                                )
-                            }
-
-                            if (!data.subscribers.isNullOrBlank() || !data.monthlyListeners.isNullOrBlank()) {
-                                Spacer(Modifier.height(6.dp))
-                                Surface(
-                                    shape = RoundedCornerShape(50),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.75f),
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(
-                                        text = data.subscribers ?: data.monthlyListeners.orEmpty(),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Medium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
-                                    )
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.playShuffle()
+                                        },
+                                        enabled = data.topSongs.isNotEmpty(),
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(48.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Shuffle,
+                                            contentDescription = "Shuffle Artist",
+                                            modifier = Modifier.size(22.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.startArtistMix()
+                                        },
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(48.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Radio,
+                                            contentDescription = "Artist Radio",
+                                            modifier = Modifier.size(22.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
                                 }
-                            }
 
-                            Spacer(Modifier.height(20.dp))
-
-                            // Action Buttons (Play All, Shuffle, Radio)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Button(
+                                // Large Floating Primary Play Button (56dp circle)
+                                Surface(
                                     onClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         viewModel.playAll()
                                     },
                                     enabled = data.topSongs.isNotEmpty(),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                                    ),
-                                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp, pressedElevation = 6.dp),
-                                    modifier = Modifier.weight(1f).height(50.dp),
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    shadowElevation = 6.dp,
+                                    modifier = Modifier.size(56.dp),
                                 ) {
-                                    Icon(
-                                        if (isArtistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(22.dp),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        if (isArtistPlaying) "Playing" else "Play",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.titleMedium,
-                                    )
-                                }
-
-                                FilledTonalButton(
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        viewModel.playShuffle()
-                                    },
-                                    enabled = data.topSongs.isNotEmpty(),
-                                    shape = RoundedCornerShape(16.dp),
-                                    modifier = Modifier.weight(1f).height(50.dp),
-                                ) {
-                                    Icon(Icons.Filled.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        "Shuffle",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.titleMedium,
-                                    )
-                                }
-
-                                FilledTonalIconButton(
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        viewModel.startArtistMix()
-                                    },
-                                    shape = RoundedCornerShape(16.dp),
-                                    modifier = Modifier.size(50.dp),
-                                ) {
-                                    Icon(Icons.Filled.Radio, contentDescription = "Artist Radio", tint = MaterialTheme.colorScheme.primary)
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            if (isArtistPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                            contentDescription = "Play Artist",
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(30.dp),
+                                        )
+                                    }
                                 }
                             }
-
                         }
                     }
+
 
                     // 2. Genre Tags & Bio
                     if (data.tags.isNotEmpty() || !data.bio.isNullOrBlank()) {

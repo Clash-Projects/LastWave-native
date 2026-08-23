@@ -273,72 +273,80 @@ fun AlbumDetailScreen(
                                 }
                             }
 
-                            Spacer(Modifier.height(20.dp))
+                            Spacer(Modifier.height(18.dp))
 
-                            // Action Buttons (Play, Shuffle, Download)
+                            // Native Music App Action Bar (Shuffle, Download, Primary Play FAB)
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Button(
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.playShuffle()
+                                        },
+                                        enabled = data.tracks.isNotEmpty(),
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(48.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Shuffle,
+                                            contentDescription = "Shuffle Album",
+                                            modifier = Modifier.size(22.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+
+                                    FilledTonalIconButton(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.downloadAlbum()
+                                        },
+                                        enabled = data.tracks.isNotEmpty(),
+                                        shape = CircleShape,
+                                        modifier = Modifier.size(48.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Download,
+                                            contentDescription = "Download Album",
+                                            modifier = Modifier.size(22.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+
+                                // Large Floating Primary Play Button (56dp circle)
+                                Surface(
                                     onClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         viewModel.playAll()
                                     },
                                     enabled = data.tracks.isNotEmpty(),
-                                    shape = RoundedCornerShape(16.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                                    ),
-                                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp, pressedElevation = 6.dp),
-                                    modifier = Modifier.weight(1f).height(50.dp),
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    shadowElevation = 6.dp,
+                                    modifier = Modifier.size(56.dp),
                                 ) {
-                                    Icon(
-                                        if (isAlbumPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(22.dp),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        if (isAlbumPlaying) "Playing" else "Play",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.titleMedium,
-                                    )
-                                }
-
-                                FilledTonalButton(
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        viewModel.playShuffle()
-                                    },
-                                    enabled = data.tracks.isNotEmpty(),
-                                    shape = RoundedCornerShape(16.dp),
-                                    modifier = Modifier.weight(1f).height(50.dp),
-                                ) {
-                                    Icon(Icons.Filled.Shuffle, contentDescription = null, modifier = Modifier.size(20.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        "Shuffle",
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.titleMedium,
-                                    )
-                                }
-
-                                FilledTonalIconButton(
-                                    onClick = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        viewModel.downloadAlbum()
-                                    },
-                                    shape = RoundedCornerShape(16.dp),
-                                    modifier = Modifier.size(50.dp),
-                                ) {
-                                    Icon(Icons.Filled.Download, contentDescription = "Download Album", tint = MaterialTheme.colorScheme.primary)
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            if (isAlbumPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                            contentDescription = "Play Album",
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(30.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
+
 
                     // 2. Tracklist Header
                     item(key = "tracklist_header") {
