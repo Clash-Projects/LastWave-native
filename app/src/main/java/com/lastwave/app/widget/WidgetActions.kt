@@ -58,15 +58,17 @@ class TogglePlayPauseAction : ActionCallback {
         if (succeeded) {
             WidgetUpdater.setPlaying(context, !wasPlaying)
             // Some players publish the MediaSession state a moment after
-            // accepting the transport command. Confirm that transition so
-            // the artwork waves and play/pause glyph never remain stale.
+            // accepting the transport command. Re-check the live controller
+            // and force one final resync so the play/pause glyph, status dot
+            // and artwork waves always match the real playback state.
             delay(300)
-            val confirmedState = controller.playbackState?.state
-            val confirmedPlaying = confirmedState == PlaybackState.STATE_PLAYING ||
-                confirmedState == PlaybackState.STATE_BUFFERING
-            if (confirmedPlaying != wasPlaying) {
-                WidgetUpdater.setPlaying(context, confirmedPlaying)
-            }
+            val confirmedState = runCatching { controller.playbackState?.state }.getOrNull()
+            val confirmedPlaying = when (confirmedState) {
+                PlaybackState.STATE_PLAYING, PlaybackState.STATE_BUFFERING -> true
+                PlaybackState.STATE_PAUSED, PlaybackState.STATE_STOPPED, PlaybackState.STATE_NONE -> false
+                else -> null
+            } ?: !wasPlaying
+            WidgetUpdater.setPlaying(context, confirmedPlaying)
         }
     }
 }

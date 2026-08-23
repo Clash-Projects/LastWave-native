@@ -839,34 +839,16 @@ private fun TrackRow(
                 .padding(vertical = 6.dp, horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
+            ArtworkImage(
+                name = track.name,
+                artist = track.artist,
+                embeddedUrl = track.artworkUrl,
+                fallbackIcon = if (isNowPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote,
                 modifier = Modifier
                     .size(52.dp)
                     .clip(ArtworkShape)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-            ) {
-                ArtworkImage(
-                    name = track.name,
-                    artist = track.artist,
-                    embeddedUrl = track.artworkUrl,
-                    fallbackIcon = if (isNowPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                if (isNowPlaying) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.45f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        com.lastwave.app.ui.player.PlayingWaveBars(
-                            modifier = Modifier.size(20.dp),
-                            waveColor = Color.White,
-                            containerColor = Color.Transparent,
-                        )
-                    }
-                }
-            }
+            )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -887,38 +869,26 @@ private fun TrackRow(
             }
             Spacer(Modifier.width(8.dp))
             if (isNowPlaying) {
-                val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "nowPlayingPulse")
-                val pulseScale by infiniteTransition.animateFloat(
-                    initialValue = 1.0f,
-                    targetValue = 1.06f,
-                    animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                        animation = androidx.compose.animation.core.tween(1200, easing = androidx.compose.animation.core.LinearEasing),
-                        repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-                    ),
-                    label = "pulseScale"
-                )
                 Surface(
                     shape = BadgePillShape,
-                    color = MaterialTheme.colorScheme.primary,
-                    tonalElevation = 4.dp,
-                    shadowElevation = 2.dp,
-                    modifier = Modifier.graphicsLayer {
-                        scaleX = pulseScale
-                        scaleY = pulseScale
-                    },
+                    color = MaterialTheme.colorScheme.primaryContainer,
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                        com.lastwave.app.ui.player.PlayingWaveBars(
-                            modifier = Modifier.size(14.dp),
-                            waveColor = MaterialTheme.colorScheme.onPrimary,
-                            containerColor = Color.Transparent,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.onPrimaryContainer),
                         )
-                        Spacer(Modifier.width(5.dp))
+                        Spacer(Modifier.width(6.dp))
                         Text(
                             "Now Playing",
                             style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
                     }
                 }

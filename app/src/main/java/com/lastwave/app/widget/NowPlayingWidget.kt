@@ -87,7 +87,7 @@ data class NowPlayingWidgetSnapshot(
     }
 }
 
-/** The single fixed 4 x 1 artwork-and-controls widget exposed in the widget picker. */
+/** The single fixed 3 x 1 artwork-and-controls widget exposed in the widget picker. */
 class NowPlayingWidget : GlanceAppWidget() {
 
     @EntryPoint
@@ -122,6 +122,15 @@ class NowPlayingWidget : GlanceAppWidget() {
             .contains(context.packageName)
         val snapshot = NowPlayingWidgetSnapshot.read(context)
         val animationFrame = WidgetUpdater.animationFrame
+        // Keep the artwork's equalizer waves ticking after process death or
+        // a freshly placed widget that restored a playing snapshot.
+        if (snapshot.hasSession && snapshot.isPlaying &&
+            (hasNotificationAccess || snapshot.sourcePackage == context.packageName)
+        ) {
+            WidgetUpdater.startWaveAnimation(context.applicationContext)
+        } else {
+            WidgetUpdater.stopWaveAnimation()
+        }
 
         provideContent {
             GlanceTheme(colors = colors) {
@@ -241,11 +250,11 @@ private fun PlayerWidget(state: WidgetUiState) {
     Row(
         modifier = playerSurface(GlanceModifier)
             .clickable(actionRunCallback<OpenLastWaveAction>())
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MiniArtwork(state.art, 58, state.isPlaying, state.animationFrame)
-        Spacer(GlanceModifier.width(12.dp))
+        MiniArtwork(state.art, 54, state.isPlaying, state.animationFrame)
+        Spacer(GlanceModifier.width(10.dp))
         Column(
             modifier = GlanceModifier.defaultWeight(),
             verticalAlignment = Alignment.CenterVertically,

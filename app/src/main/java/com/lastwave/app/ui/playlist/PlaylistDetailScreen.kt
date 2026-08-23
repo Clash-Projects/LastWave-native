@@ -925,21 +925,16 @@ private fun NativeTrackRow(
 
             Spacer(Modifier.width(6.dp))
 
-            // High-res track artwork with animated waves overlay
-            Box(modifier = Modifier.size(48.dp)) {
-                ArtworkImage(
-                    name = track.name,
-                    artist = track.artist,
-                    embeddedUrl = track.artworkUrl,
-                    fallbackIcon = if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote,
-                    modifier = Modifier.fillMaxSize().clip(ArtworkShape),
-                )
-                if (isPlaying) {
-                    com.lastwave.app.ui.player.PlayingWaveBars(
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp),
-                    )
-                }
-            }
+            // High-res track artwork (clean, no wave overlay)
+            ArtworkImage(
+                name = track.name,
+                artist = track.artist,
+                embeddedUrl = track.artworkUrl,
+                fallbackIcon = if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote,
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(ArtworkShape),
+            )
 
             Spacer(Modifier.width(14.dp))
 
@@ -961,6 +956,34 @@ private fun NativeTrackRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+
+            // Now Playing badge if active
+            if (isPlaying) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.onPrimaryContainer),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Now Playing",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(4.dp))
             }
 
             // Options menu button
