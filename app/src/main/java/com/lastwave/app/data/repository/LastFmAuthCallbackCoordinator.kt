@@ -34,6 +34,9 @@ class LastFmAuthCallbackCoordinator @Inject constructor() {
 
     @Synchronized
     fun consume(token: String) {
-        if (_pendingToken.value == token) _pendingToken.value = null
+        if (_pendingToken.value == token) {
+            _pendingToken.value = null
+            lastAcceptedToken = null
+        }
     }
 }

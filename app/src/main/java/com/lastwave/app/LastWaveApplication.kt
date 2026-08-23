@@ -19,11 +19,13 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
     @Inject lateinit var themeRepository: ThemeRepository
     @Inject lateinit var applicationScope: CoroutineScope
     @Inject lateinit var okHttpClient: okhttp3.OkHttpClient
+    @Inject lateinit var streamExtractor: com.lastwave.app.data.music.YouTubeStreamExtractor
 
     override fun onCreate() {
         super.onCreate()
         com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.initialize(this)
         applicationScope.launch(Dispatchers.IO) {
+            streamExtractor.preWarm()
             com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.preWarm()
         }
         // A widget is a separate RemoteViews surface, so it needs an explicit

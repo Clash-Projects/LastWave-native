@@ -2,6 +2,9 @@ package com.lastwave.app.data.generate
 
 import com.lastwave.app.data.local.SessionPreferences
 import com.lastwave.app.data.network.LastFmApiService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -32,9 +35,9 @@ class TasteProfileProvider @Inject constructor(
 
     private suspend fun call(params: Map<String, String>): JsonObject? {
         val session = sessionPreferences.session.first()
-        if (session.apiKey.isBlank()) return null
+        val apiKey = session.apiKey.ifBlank { com.lastwave.app.data.network.LastFmAppCredentials.API_KEY }
         return try {
-            val response = api.get(params + ("api_key" to session.apiKey) + ("format" to "json"))
+            val response = api.get(params + ("api_key" to apiKey) + ("format" to "json"))
             val body = response.body()?.string() ?: return null
             val parsed = json.parseToJsonElement(body).jsonObject
             if (parsed["error"] != null) null else parsed
@@ -46,6 +49,7 @@ class TasteProfileProvider @Inject constructor(
     suspend fun get(forceRefresh: Boolean = false): TasteProfile = mutex.withLock {
         val session = sessionPreferences.session.first()
         val username = session.username
+        val isGuest = username.isBlank() || username.equals("Guest User", ignoreCase = true)
 
         cached?.let {
             if (!forceRefresh && cachedForUsername == username && System.currentTimeMillis() - it.builtAtMillis < TASTE_PROFILE_TTL_MILLIS) {
@@ -53,29 +57,68 @@ class TasteProfileProvider @Inject constructor(
             }
         }
 
-        val topTracksResult = call(mapOf("method" to "user.gettoptracks", "user" to username, "period" to "overall", "limit" to "50"))
-        val recentResult = call(mapOf("method" to "user.getrecenttracks", "user" to username, "limit" to "50"))
-        val topArtistsResult = call(mapOf("method" to "user.gettopartists", "user" to username, "period" to "overall", "limit" to "30"))
-        val topTagsResult = call(mapOf("method" to "user.gettoptags", "user" to username, "limit" to "15"))
+        var topTracksRaw: List<GeneratedTrack> = emptyList()
+        var recentRaw: List<GeneratedTrack> = emptyList()
+        var topArtistNames: Set<String> = emptySet()
+        var topTags: Set<String> = emptySet()
 
-        val topTracksRaw = topTracksResult?.let { GenerateJson.normalise(it["toptracks"]?.jsonObject?.get("track")) } ?: emptyList()
+        if (!isGuest) {
+            coroutineScope {
+                val topTracksDeferred = async(Dispatchers.IO) { call(mapOf("method" to "user.gettoptracks", "user" to username, "period" to "overall", "limit" to "50")) }
+                val recentDeferred = async(Dispatchers.IO) { call(mapOf("method" to "user.getrecenttracks", "user" to username, "limit" to "50")) }
+                val topArtistsDeferred = async(Dispatchers.IO) { call(mapOf("method" to "user.gettopartists", "user" to username, "period" to "overall", "limit" to "30")) }
+                val topTagsDeferred = async(Dispatchers.IO) { call(mapOf("method" to "user.gettoptags", "user" to username, "limit" to "15")) }
 
-        val recentRaw = recentResult?.let { r ->
-            val raw = r["recenttracks"]?.jsonObject?.get("track")
-            val withoutNowPlaying = GenerateJson.asObjectList(raw)
-                .filterNot { it["@attr"]?.jsonObject?.get("nowplaying") != null }
-            GenerateJson.normalise(kotlinx.serialization.json.JsonArray(withoutNowPlaying))
-        } ?: emptyList()
+                val topTracksResult = topTracksDeferred.await()
+                val recentResult = recentDeferred.await()
+                val topArtistsResult = topArtistsDeferred.await()
+                val topTagsResult = topTagsDeferred.await()
 
-        val topArtistNames = topArtistsResult
-            ?.let { GenerateJson.namesOf(it["topartists"]?.jsonObject?.get("artist")) }
-            ?.map { it.lowercase() }
-            ?.toSet() ?: emptySet()
+                topTracksRaw = topTracksResult?.let { GenerateJson.normalise(it["toptracks"]?.jsonObject?.get("track")) } ?: emptyList()
 
-        val topTags = topTagsResult
-            ?.let { GenerateJson.namesOf(it["toptags"]?.jsonObject?.get("tag")) }
-            ?.map { it.lowercase() }
-            ?.toSet() ?: emptySet()
+                recentRaw = recentResult?.let { r ->
+                    val raw = r["recenttracks"]?.jsonObject?.get("track")
+                    val withoutNowPlaying = GenerateJson.asObjectList(raw)
+                        .filterNot { it["@attr"]?.jsonObject?.get("nowplaying") != null }
+                    GenerateJson.normalise(kotlinx.serialization.json.JsonArray(withoutNowPlaying))
+                } ?: emptyList()
+
+                topArtistNames = topArtistsResult
+                    ?.let { GenerateJson.namesOf(it["topartists"]?.jsonObject?.get("artist")) }
+                    ?.map { it.lowercase() }
+                    ?.toSet() ?: emptySet()
+
+                topTags = topTagsResult
+                    ?.let { GenerateJson.namesOf(it["toptags"]?.jsonObject?.get("tag")) }
+                    ?.map { it.lowercase() }
+                    ?.toSet() ?: emptySet()
+            }
+        }
+
+        // Seamless chart seeding fallback if user data is missing or user is a guest
+        if (topTracksRaw.isEmpty() && recentRaw.isEmpty()) {
+            coroutineScope {
+                val chartTracksDeferred = async(Dispatchers.IO) { call(mapOf("method" to "chart.gettoptracks", "limit" to "50")) }
+                val chartArtistsDeferred = async(Dispatchers.IO) { call(mapOf("method" to "chart.gettopartists", "limit" to "30")) }
+                val chartTagsDeferred = async(Dispatchers.IO) { call(mapOf("method" to "chart.gettoptags", "limit" to "15")) }
+
+                val chartTracksResult = chartTracksDeferred.await()
+                val chartArtistsResult = chartArtistsDeferred.await()
+                val chartTagsResult = chartTagsDeferred.await()
+
+                topTracksRaw = chartTracksResult?.let { GenerateJson.normalise(it["tracks"]?.jsonObject?.get("track")) }
+                    ?: chartTracksResult?.let { GenerateJson.normalise(it["toptracks"]?.jsonObject?.get("track")) }
+                    ?: emptyList()
+                recentRaw = topTracksRaw
+
+                topArtistNames = chartArtistsResult?.let { GenerateJson.namesOf(it["artists"]?.jsonObject?.get("artist")) }
+                    ?.map { it.lowercase() }?.toSet() ?: emptySet()
+
+                topTags = chartTagsResult?.let { GenerateJson.namesOf(it["tags"]?.jsonObject?.get("tag")) }
+                    ?.map { it.lowercase() }?.toSet()
+                    ?: setOf("rock", "indie", "pop", "electronic", "hip-hop", "synthwave", "alternative", "rnb", "jazz")
+            }
+        }
 
         val recentArtists = recentRaw.map { it.artist.lowercase() }.toSet()
         val topTrackKeys = topTracksRaw.map { it.key }.toSet()
@@ -84,7 +127,7 @@ class TasteProfileProvider @Inject constructor(
         val profile = TasteProfile(
             topArtistNames = topArtistNames,
             recentArtists = recentArtists,
-            topTags = topTags,
+            topTags = topTags.ifEmpty { setOf("rock", "indie", "pop", "electronic", "hip-hop", "synthwave", "alternative", "rnb") },
             topTrackKeys = topTrackKeys,
             recentTrackKeys = recentTrackKeys,
             topTracksRaw = topTracksRaw,

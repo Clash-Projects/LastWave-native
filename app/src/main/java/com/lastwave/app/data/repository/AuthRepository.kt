@@ -39,12 +39,14 @@ class AuthRepository @Inject constructor(
         sessionPreferences.session,
         transientState,
     ) { session, transient ->
-        transient ?: if (session.isAuthenticated) {
+        transient ?: if (!session.isLoaded) {
+            AuthState.Unknown
+        } else if (session.isAuthenticated) {
             AuthState.SignedIn(session.username)
         } else {
             AuthState.SignedOut
         }
-    }.stateIn(externalScope, SharingStarted.WhileSubscribed(5_000), AuthState.Unknown)
+    }.stateIn(externalScope, SharingStarted.Eagerly, AuthState.Unknown)
 
     suspend fun saveApiCredentials(apiKey: String, apiSecret: String) {
         sessionPreferences.setApiCredentials(
@@ -86,9 +88,12 @@ class AuthRepository @Inject constructor(
             if (sessionKey.isNullOrBlank() || username.isNullOrBlank()) {
                 throw LastFmException("Last.fm didn't return a session")
             }
-            sessionPreferences.setApiCredentials(LastFmAppCredentials.API_KEY, LastFmAppCredentials.API_SECRET)
-            sessionPreferences.setSignedIn(username)
-            sessionPreferences.setSessionKey(sessionKey)
+            sessionPreferences.saveSession(
+                username = username,
+                sessionKey = sessionKey,
+                apiKey = LastFmAppCredentials.API_KEY,
+                apiSecret = LastFmAppCredentials.API_SECRET,
+            )
             transientState.value = null // defer to persisted SignedIn state
             Result.success(username)
         } catch (e: Exception) {
@@ -98,14 +103,14 @@ class AuthRepository @Inject constructor(
         }
     }
 
+    suspend fun signInDirect(username: String): Result<String> {
+        return signIn(LastFmAppCredentials.API_KEY, LastFmAppCredentials.API_SECRET, username)
+    }
+
     /**
      * Verifies the API key + username pair against Last.fm (user.getInfo,
      * unsigned) and, on success, saves everything and marks the session
-     * signed in — no token, no browser, no session exchange. The API
-     * secret isn't required for this call, but it's saved alongside the
-     * key anyway since a couple of other signed calls elsewhere in the app
-     * (e.g. track.scrobble.delete, if a session key is ever added later)
-     * need it.
+     * signed in.
      */
     suspend fun signIn(apiKey: String, apiSecret: String, username: String): Result<String> {
         transientState.value = AuthState.SigningIn
@@ -142,8 +147,12 @@ class AuthRepository @Inject constructor(
             }
             val confirmedUsername = parsed["user"]?.jsonObject?.get("name")?.jsonPrimitive?.content ?: usernameNorm
 
-            sessionPreferences.setApiCredentials(keyNorm, secretNorm)
-            sessionPreferences.setSignedIn(confirmedUsername)
+            sessionPreferences.saveSession(
+                username = confirmedUsername,
+                sessionKey = "",
+                apiKey = keyNorm,
+                apiSecret = secretNorm,
+            )
             transientState.value = null // defer to persisted SignedIn state
             Result.success(confirmedUsername)
         } catch (e: Exception) {

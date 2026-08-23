@@ -63,6 +63,10 @@ class YouTubeStreamExtractor @Inject constructor(
         result
     }
 
+    fun preWarm() {
+        initialize()
+    }
+
     private fun initialize() {
         if (initialized) return
         synchronized(this) {

@@ -44,19 +44,22 @@ fun ArtworkImage(
 ) {
     if (!embeddedUrl.isNullOrBlank()) {
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
-            AsyncImage(model = embeddedUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            AsyncImage(
+                model = embeddedUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
         return
     }
 
     val key = remember(name, artist) { ArtworkNormalizer.cacheKey(name, artist) }
     val resolvedMap by artworkViewModel.resolved.collectAsState()
-    val resolvedUrl by remember(key) {
-        derivedStateOf { resolvedMap[key] }
-    }
+    val resolvedUrl = resolvedMap[key]
 
-    LaunchedEffect(key) {
-        if (!artworkViewModel.resolved.value.containsKey(key)) {
+    LaunchedEffect(key, resolvedUrl) {
+        if (resolvedUrl == null) {
             artworkViewModel.resolve(name, artist)
         }
     }
@@ -69,14 +72,12 @@ fun ArtworkImage(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
-            resolvedUrl == "" -> Icon(
+            else -> Icon(
                 fallbackIcon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (resolvedUrl == null) 0.35f else 0.6f),
+                modifier = Modifier.fillMaxSize(0.42f),
             )
-            // else (resolvedUrl == null): still resolving — show nothing but
-            // the caller's background, per "don't show placeholder unless
-            // every provider fails".
         }
     }
 }

@@ -239,18 +239,7 @@ fun PlaylistDetailScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
 
-                    // Subtitle & Mode description
-                    if (playlist.subtitle.isNotBlank()) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = playlist.subtitle,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
 
                     // Metadata Pill
                     Surface(

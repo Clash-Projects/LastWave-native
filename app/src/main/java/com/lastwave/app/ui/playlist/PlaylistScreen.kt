@@ -555,7 +555,7 @@ private fun PlaylistCard(
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "${playlist.tracks.size} tracks \u00b7 ${formatDate(playlist.createdAtMillis)}${if (playlist.subtitle.isNotBlank()) " \u00b7 ${playlist.subtitle}" else ""}",
+                    "${playlist.tracks.size} tracks \u00b7 ${formatDate(playlist.createdAtMillis)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

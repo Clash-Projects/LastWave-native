@@ -54,6 +54,19 @@ class AuthViewModel @Inject constructor(
         _webAuthState.value = WebAuthState.AwaitingApproval(authRepository.authUrl())
     }
 
+    fun signInDirect(username: String) {
+        if (username.isBlank()) return
+        _webAuthState.value = WebAuthState.CompletingSignIn
+        viewModelScope.launch {
+            val res = authRepository.signInDirect(username)
+            if (res.isSuccess) {
+                _webAuthState.value = WebAuthState.Idle
+            } else {
+                _webAuthState.value = WebAuthState.Error(res.exceptionOrNull()?.message ?: "Sign in failed")
+            }
+        }
+    }
+
     fun beginRestoreAndSignIn(content: String) {
         when (backupRepository.checkBackup(content)) {
             is BackupCheck.Valid -> {

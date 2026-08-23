@@ -25,6 +25,11 @@ import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Deferred
+
 /** playcount * 210s — the same fixed avg-track-length estimate home.js used
  *  to derive a "total lifetime listening time" from a raw scrobble count. */
 private const val AVG_TRACK_SECONDS = 210L
@@ -64,6 +69,13 @@ class HomeRepository @Inject constructor(
     private val innerTube: InnerTubeMusicApi,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val inFlightScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val inFlightInitialData = ConcurrentHashMap<String, Deferred<Result<HomeInitialData>>>()
+    private val inFlightStats = ConcurrentHashMap<String, Deferred<Result<HomeStats>>>()
+    private val inFlightRecent = ConcurrentHashMap<String, Deferred<Result<RecentTracksPage>>>()
+
+    private var cachedInitialData: Pair<String, HomeInitialData>? = null
+    private var cachedInitialDataTimestamp: Long = 0L
 
     private val playableCheckSemaphore = kotlinx.coroutines.sync.Semaphore(6)
 
@@ -79,100 +91,201 @@ class HomeRepository @Inject constructor(
         checks.awaitAll().filterNotNull()
     }
 
-    private suspend fun requireSession() = sessionPreferences.session.first().also { session ->
-        if (session.apiKey.isBlank() || session.username.isBlank()) {
-            throw LastFmException("Not signed in")
+    private suspend fun requireSession(): com.lastwave.app.data.local.SessionData =
+        sessionPreferences.session.first().let { session ->
+            session.copy(apiKey = session.apiKey.ifBlank { com.lastwave.app.data.network.LastFmAppCredentials.API_KEY })
         }
-    }
 
     /** Every fetch below takes an optional [username] override for viewing
-     *  a friend's profile (see fetchFriends/§ Home friend-switching) —
-     *  every one of these Last.fm methods is an unsigned read that only
-     *  ever needed a `user` param, so viewing someone else's data needs
-     *  nothing more than swapping that one parameter; api_key still comes
-     *  from the signed-in session either way. */
-    suspend fun fetchRecentTracks(page: Int = 1, limit: Int = 50, username: String? = null): Result<RecentTracksPage> = try {
+     *  a friend's profile (see fetchFriends/§ Home friend-switching). */
+    suspend fun fetchRecentTracks(
+        page: Int = 1,
+        limit: Int = 50,
+        username: String? = null,
+        forceRefresh: Boolean = false,
+    ): Result<RecentTracksPage> {
         val session = requireSession()
-        val response = api.get(
-            mapOf(
-                "method" to "user.getrecenttracks",
-                "user" to (username ?: session.username),
-                "limit" to limit.toString(),
-                "page" to page.toString(),
-                "extended" to "0",
-                "api_key" to session.apiKey,
-                "format" to "json",
-            )
-        )
-        val body = response.body()?.string() ?: throw LastFmException("Empty response from Last.fm")
-        val parsed = json.decodeFromString<RecentTracksEnvelope>(body)
-        if (parsed.error != null || parsed.recenttracks == null) {
-            throw LastFmException(LastFmErrors.friendlyMessage(parsed.error, parsed.message), parsed.error)
+        val targetUser = username ?: session.username
+        val cacheKey = "$targetUser:$page:$limit"
+
+        val deferred = inFlightRecent.getOrPut(cacheKey) {
+            inFlightScope.async {
+                fetchRecentTracksInternal(session, targetUser, page, limit)
+            }.also { d ->
+                d.invokeOnCompletion { inFlightRecent.remove(cacheKey, d) }
+            }
         }
-        val all = parsed.recenttracks.track.tracks
-        val nowPlaying = all.firstOrNull { it.isNowPlaying }
-        val history = all.filter { it.name.isNotBlank() && !it.isNowPlaying }
-        Result.success(
-            RecentTracksPage(
-                nowPlaying = nowPlaying,
-                tracks = history,
-                page = parsed.recenttracks.attr.page.toIntOrNull() ?: page,
-                totalPages = parsed.recenttracks.attr.totalPages.toIntOrNull() ?: 1,
+        return deferred.await()
+    }
+
+    private suspend fun fetchRecentTracksInternal(
+        session: com.lastwave.app.data.local.SessionData,
+        targetUser: String,
+        page: Int,
+        limit: Int,
+    ): Result<RecentTracksPage> = try {
+        if (targetUser.isBlank() || targetUser.equals("Guest User", ignoreCase = true)) {
+            val chartResponse = api.get(
+                mapOf(
+                    "method" to "chart.gettoptracks",
+                    "limit" to limit.toString(),
+                    "page" to page.toString(),
+                    "api_key" to session.apiKey,
+                    "format" to "json",
+                )
             )
-        )
+            val body = chartResponse.body()?.string().orEmpty()
+            val parsed = json.decodeFromString<TopTracksFullEnvelope>(body)
+            val tracks = parsed.toptracks?.track?.tracks.orEmpty().filter { it.name.isNotBlank() }.map {
+                RecentTrack(
+                    name = it.name,
+                    artist = it.artist,
+                    image = it.image,
+                    url = it.url,
+                    date = null,
+                )
+            }
+            Result.success(
+                RecentTracksPage(
+                    nowPlaying = null,
+                    tracks = tracks,
+                    page = page,
+                    totalPages = 10,
+                )
+            )
+        } else {
+            val response = api.get(
+                mapOf(
+                    "method" to "user.getrecenttracks",
+                    "user" to targetUser,
+                    "limit" to limit.toString(),
+                    "page" to page.toString(),
+                    "extended" to "0",
+                    "api_key" to session.apiKey,
+                    "format" to "json",
+                )
+            )
+            val body = response.body()?.string() ?: throw LastFmException("Empty response from Last.fm")
+            val parsed = json.decodeFromString<RecentTracksEnvelope>(body)
+            if (parsed.error != null || parsed.recenttracks == null) {
+                throw LastFmException(LastFmErrors.friendlyMessage(parsed.error, parsed.message), parsed.error)
+            }
+            val all = parsed.recenttracks.track.tracks
+            val nowPlaying = all.firstOrNull { it.isNowPlaying }
+            val history = all.filter { it.name.isNotBlank() && !it.isNowPlaying }
+            Result.success(
+                RecentTracksPage(
+                    nowPlaying = nowPlaying,
+                    tracks = history,
+                    page = parsed.recenttracks.attr.page.toIntOrNull() ?: page,
+                    totalPages = parsed.recenttracks.attr.totalPages.toIntOrNull() ?: 1,
+                )
+            )
+        }
     } catch (e: Exception) {
         Result.failure(e)
     }
 
-    /** user.getinfo (scrobbles + timer base) + the three limit=1 stat totals —
-     *  exactly the 4 calls _fetchHomeData() fires in parallel via Promise.allSettled. */
-    suspend fun fetchStats(username: String? = null): Result<HomeStats> = try {
+    /** user.getinfo (scrobbles + timer base) + the three limit=1 stat totals, parallelized */
+    suspend fun fetchStats(username: String? = null, forceRefresh: Boolean = false): Result<HomeStats> {
         val session = requireSession()
-        val base = mapOf("user" to (username ?: session.username), "api_key" to session.apiKey, "format" to "json")
+        val targetUser = username ?: session.username
+        val cacheKey = targetUser.ifBlank { "guest" }
 
-        val infoBody = api.get(base + ("method" to "user.getinfo")).body()?.string().orEmpty()
-        val tracksBody = api.get(base + ("method" to "user.gettoptracks") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty()
-        val artistsBody = api.get(base + ("method" to "user.gettopartists") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty()
-        val albumsBody = api.get(base + ("method" to "user.gettopalbums") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty()
+        val deferred = inFlightStats.getOrPut(cacheKey) {
+            inFlightScope.async {
+                fetchStatsInternal(session, targetUser)
+            }.also { d ->
+                d.invokeOnCompletion { inFlightStats.remove(cacheKey, d) }
+            }
+        }
+        return deferred.await()
+    }
 
-        val info = runCatching { json.decodeFromString<UserInfoEnvelope>(infoBody) }.getOrNull()
-        val tracks = runCatching { json.decodeFromString<TopTracksEnvelope>(tracksBody) }.getOrNull()
-        val artists = runCatching { json.decodeFromString<TopArtistsEnvelope>(artistsBody) }.getOrNull()
-        val albums = runCatching { json.decodeFromString<TopAlbumsEnvelope>(albumsBody) }.getOrNull()
-
-        Result.success(
-            HomeStats(
-                scrobbles = info?.user?.playcount?.toLongOrNull() ?: 0L,
-                trackCount = tracks?.toptracks?.attr?.total?.toLongOrNull() ?: 0L,
-                artistCount = artists?.topartists?.attr?.total?.toLongOrNull() ?: 0L,
-                albumCount = albums?.topalbums?.attr?.total?.toLongOrNull() ?: 0L,
-                // Matches loadUserProfile()'s exact priority: large > medium > first
-                // available — not the extralarge>large>medium>any track-art ladder.
-                avatarUrl = info?.user?.image?.let { images ->
-                    images.firstOrNull { it.size == "large" }?.url
-                        ?: images.firstOrNull { it.size == "medium" }?.url
-                        ?: images.firstOrNull()?.url
-                }?.takeIf { it.isNotBlank() },
+    private suspend fun fetchStatsInternal(
+        session: com.lastwave.app.data.local.SessionData,
+        targetUser: String,
+    ): Result<HomeStats> = try {
+        if (targetUser.isBlank() || targetUser.equals("Guest User", ignoreCase = true)) {
+            Result.success(
+                HomeStats(
+                    scrobbles = 0L,
+                    trackCount = 0L,
+                    artistCount = 0L,
+                    albumCount = 0L,
+                    avatarUrl = null,
+                )
             )
-        )
+        } else {
+            val base = mapOf("user" to targetUser, "api_key" to session.apiKey, "format" to "json")
+
+            coroutineScope {
+                val infoDeferred = async(Dispatchers.IO) {
+                    try { api.get(base + ("method" to "user.getinfo")).body()?.string().orEmpty() } catch (_: Exception) { "" }
+                }
+                val tracksDeferred = async(Dispatchers.IO) {
+                    try { api.get(base + ("method" to "user.gettoptracks") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty() } catch (_: Exception) { "" }
+                }
+                val artistsDeferred = async(Dispatchers.IO) {
+                    try { api.get(base + ("method" to "user.gettopartists") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty() } catch (_: Exception) { "" }
+                }
+                val albumsDeferred = async(Dispatchers.IO) {
+                    try { api.get(base + ("method" to "user.gettopalbums") + ("limit" to "1") + ("period" to "overall")).body()?.string().orEmpty() } catch (_: Exception) { "" }
+                }
+
+                val infoBody = infoDeferred.await()
+                val tracksBody = tracksDeferred.await()
+                val artistsBody = artistsDeferred.await()
+                val albumsBody = albumsDeferred.await()
+
+                val info = runCatching { json.decodeFromString<UserInfoEnvelope>(infoBody) }.getOrNull()
+                val tracks = runCatching { json.decodeFromString<TopTracksEnvelope>(tracksBody) }.getOrNull()
+                val artists = runCatching { json.decodeFromString<TopArtistsEnvelope>(artistsBody) }.getOrNull()
+                val albums = runCatching { json.decodeFromString<TopAlbumsEnvelope>(albumsBody) }.getOrNull()
+
+                Result.success(
+                    HomeStats(
+                        scrobbles = info?.user?.playcount?.toLongOrNull() ?: 0L,
+                        trackCount = tracks?.toptracks?.attr?.total?.toLongOrNull() ?: 0L,
+                        artistCount = artists?.topartists?.attr?.total?.toLongOrNull() ?: 0L,
+                        albumCount = albums?.topalbums?.attr?.total?.toLongOrNull() ?: 0L,
+                        avatarUrl = info?.user?.image?.let { images ->
+                            images.firstOrNull { it.size == "large" }?.url
+                                ?: images.firstOrNull { it.size == "medium" }?.url
+                                ?: images.firstOrNull()?.url
+                        }?.takeIf { it.isNotBlank() },
+                    )
+                )
+            }
+        }
     } catch (e: Exception) {
         Result.failure(e)
     }
 
-    /** user.gettoptracks(period=overall/7day/1month, limit=50) — real playcounts
-     *  for home screen sorting modes. */
     suspend fun fetchTopTracksForPeriod(period: String = "overall", limit: Int = 50, username: String? = null): Result<List<HomeTrack>> = try {
         val session = requireSession()
-        val response = api.get(
-            mapOf(
-                "method" to "user.gettoptracks",
-                "user" to (username ?: session.username),
-                "period" to period,
-                "limit" to limit.toString(),
-                "api_key" to session.apiKey,
-                "format" to "json",
+        val targetUser = username ?: session.username
+        val response = if (targetUser.isBlank() || targetUser.equals("Guest User", ignoreCase = true)) {
+            api.get(
+                mapOf(
+                    "method" to "chart.gettoptracks",
+                    "limit" to limit.toString(),
+                    "api_key" to session.apiKey,
+                    "format" to "json",
+                )
             )
-        )
+        } else {
+            api.get(
+                mapOf(
+                    "method" to "user.gettoptracks",
+                    "user" to targetUser,
+                    "period" to period,
+                    "limit" to limit.toString(),
+                    "api_key" to session.apiKey,
+                    "format" to "json",
+                )
+            )
+        }
         val body = response.body()?.string() ?: throw LastFmException("Empty response from Last.fm")
         val parsed = json.decodeFromString<TopTracksFullEnvelope>(body)
         if (parsed.error != null) {
@@ -197,16 +310,50 @@ class HomeRepository @Inject constructor(
     suspend fun fetchTopTracksOverall(limit: Int = 50, username: String? = null): Result<List<HomeTrack>> = fetchTopTracksForPeriod("overall", limit, username)
 
     /** Fires the full initial data-fetch set for the Home screen: recent
-     *  tracks, stats, and all-time top tracks — mirrors the single
-     *  Promise.allSettled batch in _fetchHomeData(). [username] switches
-     *  whose data this loads — the signed-in user's own when null (default),
-     *  or a friend's when viewing their profile. */
-    suspend fun fetchInitialData(username: String? = null): Result<HomeInitialData> = try {
-        requireSession()
-        val recent = fetchRecentTracks(username = username).getOrThrow()
-        val stats = fetchStats(username = username).getOrThrow()
-        val topTracks = fetchTopTracksOverall(username = username).getOrElse { emptyList() }
-        Result.success(HomeInitialData(stats, recent, topTracks))
+     *  tracks, stats, and all-time top tracks in parallel with caching and deduplication. */
+    suspend fun fetchInitialData(username: String? = null, forceRefresh: Boolean = false): Result<HomeInitialData> {
+        val session = requireSession()
+        val targetUser = username ?: session.username
+        val cacheKey = targetUser.ifBlank { "guest" }
+
+        val now = System.currentTimeMillis()
+        if (!forceRefresh && cachedInitialData?.first == cacheKey && (now - cachedInitialDataTimestamp < 30_000L)) {
+            return Result.success(cachedInitialData!!.second)
+        }
+
+        val deferred = inFlightInitialData.getOrPut(cacheKey) {
+            inFlightScope.async {
+                fetchInitialDataInternal(targetUser)
+            }.also { d ->
+                d.invokeOnCompletion { inFlightInitialData.remove(cacheKey, d) }
+            }
+        }
+        val result = deferred.await()
+        if (result.isSuccess) {
+            cachedInitialData = cacheKey to result.getOrThrow()
+            cachedInitialDataTimestamp = System.currentTimeMillis()
+        }
+        return result
+    }
+
+    private suspend fun fetchInitialDataInternal(username: String): Result<HomeInitialData> = try {
+        coroutineScope {
+            val recentDeferred = async(Dispatchers.IO) { fetchRecentTracks(username = username) }
+            val statsDeferred = async(Dispatchers.IO) { fetchStats(username = username) }
+            val topTracksDeferred = async(Dispatchers.IO) { fetchTopTracksOverall(username = username) }
+
+            val recentResult = recentDeferred.await()
+            val statsResult = statsDeferred.await()
+            val topTracksResult = topTracksDeferred.await()
+
+            val recent = recentResult.getOrThrow()
+            val stats = statsResult.getOrElse {
+                HomeStats(scrobbles = 0L, trackCount = 0L, artistCount = 0L, albumCount = 0L, avatarUrl = null)
+            }
+            val topTracks = topTracksResult.getOrElse { emptyList() }
+
+            Result.success(HomeInitialData(stats, recent, topTracks))
+        }
     } catch (e: Exception) {
         Result.failure(e)
     }

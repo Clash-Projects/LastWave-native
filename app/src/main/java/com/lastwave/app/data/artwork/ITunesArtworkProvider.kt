@@ -40,29 +40,34 @@ class ITunesArtworkProvider @Inject constructor(
     private val upscalePattern = Regex("""/\d+x\d+bb\.(jpg|png|webp)$""", RegexOption.IGNORE_CASE)
 
     suspend fun fetchArtworkUrl(track: String, artist: String): String? = withContext(Dispatchers.IO) {
-        val term = if (artist.isNotBlank()) "$track $artist" else track
+        // Try direct term first
+        fetchByTerm(if (artist.isNotBlank()) "$track $artist" else track)
+            ?: run {
+                val cleanedTrack = ArtworkNormalizer.cleanTitle(track)
+                val cleanedArtist = ArtworkNormalizer.cleanArtist(artist)
+                val cleanedTerm = if (cleanedArtist.isNotBlank()) "$cleanedTrack $cleanedArtist" else cleanedTrack
+                if (cleanedTerm != "$track $artist") {
+                    fetchByTerm(cleanedTerm)
+                } else null
+            }
+    }
+
+    private fun fetchByTerm(term: String): String? {
         val url = "https://itunes.apple.com/search?term=${URLEncoder.encode(term, "UTF-8")}&media=music&entity=song&limit=1"
         try {
             val request = Request.Builder().url(url).build()
             client.newCall(request).execute().use { response ->
-                Log.d(TAG, "Provider: itunes | Track: $track | Artist: $artist | Request URL: $url | Response code: ${response.code}")
-                if (!response.isSuccessful) {
-                    Log.d(TAG, "Provider: itunes | Track: $track | Artist: $artist | Result: miss | Reason: HTTP ${response.code}")
-                    return@withContext null
-                }
+                if (!response.isSuccessful) return null
                 val body = response.body?.string().orEmpty()
                 val parsed = json.decodeFromString<ITunesSearchResponse>(body)
                 val raw = parsed.results.firstOrNull()?.let { it.artworkUrl100 ?: it.artworkUrl60 }
-                val upscaled = raw?.let { upscale(it) }
-                Log.d(TAG, "Provider: itunes | Track: $track | Artist: $artist | Result: ${if (upscaled != null) "hit" else "miss"}")
-                upscaled
+                return raw?.let { upscale(it) }
             }
         } catch (e: Exception) {
-            Log.e(CRASH_TAG, "Provider: itunes | Track: $track | Artist: $artist | Request URL: $url | Exception during fetch/parse", e)
-            null
+            return null
         }
     }
 
-    /** …/100x100bb.jpg -> …/600x600bb.jpg — same regex as _itunesUpscale(). */
-    private fun upscale(rawUrl: String): String = upscalePattern.replace(rawUrl, "/600x600bb.jpg")
+    /** …/100x100bb.jpg -> …/1200x1200bb.jpg */
+    private fun upscale(rawUrl: String): String = upscalePattern.replace(rawUrl, "/1200x1200bb.jpg")
 }

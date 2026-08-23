@@ -100,8 +100,8 @@ class SearchRepository @Inject constructor(
                 )
             }
             SearchTab.USERS -> {
-                val key = sessionPreferences.session.first().apiKey
-                if (key.isBlank()) emptyList() else lookupUser(key, query)
+                val key = sessionPreferences.session.first().apiKey.ifBlank { com.lastwave.app.data.network.LastFmAppCredentials.API_KEY }
+                lookupUser(key, query)
             }
         }.filter { it.name.isNotBlank() }
     }

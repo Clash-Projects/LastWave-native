@@ -88,9 +88,28 @@ class GenresRepository @Inject constructor(
                 }
             }
             val sorted = weighted.entries.sortedByDescending { it.value }.take(15).map { it.key to it.value }
-            normalizeStats(sorted)
+            if (sorted.isNotEmpty()) {
+                normalizeStats(sorted)
+            } else {
+                fetchChartTags()
+            }
         } catch (e: Exception) {
             Log.d(TAG, "tier-2 genre derivation failed", e)
+            fetchChartTags()
+        }
+    }
+
+    private suspend fun fetchChartTags(): List<GenreStat> {
+        return try {
+            val d = call(mapOf("method" to "chart.gettoptags", "limit" to "18"))
+            val tags = GenerateJson.asObjectList(d["tags"]?.jsonObject?.get("tag"))
+                .mapNotNull { obj ->
+                    val name = (obj["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@mapNotNull null
+                    val count = (obj["count"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toLongOrNull() ?: 100L
+                    name to count
+                }
+            normalizeStats(tags)
+        } catch (_: Exception) {
             emptyList()
         }
     }

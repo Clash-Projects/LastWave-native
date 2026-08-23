@@ -161,6 +161,7 @@ class InnerTubeMusicApi @Inject constructor(
         val artworkUrl = thumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
 
         val songs = parseSongRenderers(root)
+        songs.take(3).forEach { prefetchStream(it.videoId) }
         YouTubePlaylistResult(
             id = rawId,
             title = title,
@@ -188,7 +189,9 @@ class InnerTubeMusicApi @Inject constructor(
             clientVersion = config.clientVersion,
             userAgent = WEB_USER_AGENT,
         )
-        parseSongRenderers(root).take(limit)
+        val results = parseSongRenderers(root).take(limit)
+        results.take(2).forEach { prefetchStream(it.videoId) }
+        results
     }
 
     suspend fun searchArtists(query: String, limit: Int = 30): List<YouTubeMusicEntity> =
@@ -218,7 +221,9 @@ class InnerTubeMusicApi @Inject constructor(
                 ?.joinToString("") { it.asObject()?.string("text").orEmpty() }
             heading.equals("Songs", ignoreCase = true) || heading.equals("Tracks", ignoreCase = true)
         } ?: shelves.firstOrNull()
-        parseSongRenderers(primaryShelf ?: root).take(limit)
+        val songs = parseSongRenderers(primaryShelf ?: root).take(limit)
+        songs.take(2).forEach { prefetchStream(it.videoId) }
+        songs
     }
 
     private suspend fun searchEntities(
@@ -288,18 +293,41 @@ class InnerTubeMusicApi @Inject constructor(
         }
     }
 
-    private suspend fun resolveAudioStreamInternal(videoId: String): YouTubeAudioStream {
+    private suspend fun resolveAudioStreamInternal(videoId: String): YouTubeAudioStream = kotlinx.coroutines.coroutineScope {
         val now = System.currentTimeMillis()
-        val poToken = runCatching { BotGuardTokenGenerator.mintToken(videoId) }.getOrNull()?.playerToken
+        
+        // Fast non-blocking PO Token lookup (0-50ms if cached, background mint if not)
+        val poToken = runCatching {
+            kotlinx.coroutines.withTimeoutOrNull(50L) {
+                BotGuardTokenGenerator.mintToken(videoId)
+            }
+        }.getOrNull()?.playerToken ?: run {
+            apiScope.launch { runCatching { BotGuardTokenGenerator.mintToken(videoId) } }
+            null
+        }
 
-        var lastReason = "This track is unavailable"
+        val channel = kotlinx.coroutines.channels.Channel<YouTubeAudioStream>(2)
+        val jobs = mutableListOf<kotlinx.coroutines.Job>()
 
-        // 1. Multi-Client Fallback Matrix
-        for (client in PLAYER_CLIENTS) {
-            val blockedUntil = failedClientsUntil[client.name] ?: 0L
-            if (now < blockedUntil) continue
+        // 1. Primary: High-speed NewPipe Extractor (direct audio format with JS signature deciphering)
+        jobs += launch(Dispatchers.IO) {
+            runCatching {
+                val npStream = streamExtractor.resolveAudioStream(videoId)
+                val finalUrl = if (!poToken.isNullOrBlank() && !npStream.url.contains("&pot=")) {
+                    if (npStream.url.contains("?")) "${npStream.url}&pot=$poToken" else "${npStream.url}?pot=$poToken"
+                } else npStream.url
+                channel.trySend(npStream.copy(url = finalUrl))
+            }
+        }
 
-            val result = runCatching {
+        // 2. Parallel Racer: Direct InnerTube Client
+        jobs += launch(Dispatchers.IO) {
+            runCatching {
+                val client = PLAYER_CLIENTS.firstOrNull { client ->
+                    val blockedUntil = failedClientsUntil[client.name] ?: 0L
+                    now >= blockedUntil
+                } ?: return@launch
+
                 val body = buildJsonObject {
                     put("context", buildJsonObject {
                         put("client", buildJsonObject {
@@ -324,16 +352,13 @@ class InnerTubeMusicApi @Inject constructor(
                         })
                     })
                 }
-                post(
+                val root = post(
                     url = "$YOUTUBE_API/player?key=${client.apiKey}&prettyPrint=false",
                     body = body,
                     clientName = client.name,
                     clientVersion = client.version,
                     userAgent = client.userAgent,
                 )
-            }
-
-            result.onSuccess { root ->
                 val status = root.obj("playabilityStatus")
                 val state = status?.string("status")
                 if (state == "OK") {
@@ -357,36 +382,29 @@ class InnerTubeMusicApi @Inject constructor(
                         }
                     val bestStream = candidates.maxByOrNull { it.bitrate }
                     if (bestStream != null) {
-                        streamCache[videoId] = Pair(now, bestStream)
-                        return bestStream
+                        channel.trySend(bestStream)
                     }
-                    lastReason = "YouTube Music did not return a direct audio stream for ${client.name}"
-                } else {
-                    lastReason = status?.string("reason")
-                        ?: status?.obj("errorScreen")?.toString()
-                        ?: "YouTube Music playback status: ${state ?: "unknown"}"
-                    failedClientsUntil[client.name] = now + 5 * 60 * 1000L
                 }
-            }.onFailure {
-                lastReason = it.message ?: lastReason
-                failedClientsUntil[client.name] = now + 5 * 60 * 1000L
             }
         }
 
-        // 2. Fallback to NewPipe Extractor
-        runCatching {
+        try {
+            val winner = channel.receive()
+            streamCache[videoId] = Pair(now, winner)
+            jobs.forEach { it.cancel() }
+            winner
+        } catch (e: Exception) {
             val npStream = streamExtractor.resolveAudioStream(videoId)
-            val finalUrl = if (!poToken.isNullOrBlank() && !npStream.url.contains("&pot=")) {
-                if (npStream.url.contains("?")) "${npStream.url}&pot=$poToken" else "${npStream.url}?pot=$poToken"
-            } else npStream.url
-            val result = npStream.copy(url = finalUrl)
+            val result = npStream.copy(
+                url = if (!poToken.isNullOrBlank() && !npStream.url.contains("&pot=")) {
+                    if (npStream.url.contains("?")) "${npStream.url}&pot=$poToken" else "${npStream.url}?pot=$poToken"
+                } else npStream.url,
+            )
             streamCache[videoId] = Pair(now, result)
-            return result
-        }.onFailure {
-            lastReason = it.message ?: lastReason
+            result
+        } finally {
+            channel.close()
         }
-
-        throw IOException(lastReason)
     }
 
     suspend fun findBestMatch(title: String, artist: String): YouTubeMusicTrack {

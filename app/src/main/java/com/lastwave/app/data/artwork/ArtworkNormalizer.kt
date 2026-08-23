@@ -34,4 +34,16 @@ object ArtworkNormalizer {
      *  _resolveTrackArt() uses. No punctuation/feat./remaster stripping:
      *  the original app doesn't do any of that, so neither does this. */
     fun cacheKey(name: String, artist: String): String = "t:${name}|${artist}".lowercase()
+
+    private val FEAT_REGEX = Regex("(?i)\\s*[(|\\[](feat|ft|with|featuring)\\.?\\s+.*?[)|\\]]")
+    private val REMASTER_REGEX = Regex("(?i)\\s*[(|\\[].*?(remaster|live|version|edit|mono|stereo|deluxe|bonus).*?[)|\\]]")
+
+    fun cleanTitle(title: String): String = title
+        .replace(FEAT_REGEX, "")
+        .replace(REMASTER_REGEX, "")
+        .trim()
+
+    fun cleanArtist(artist: String): String = artist
+        .replace(Regex("(?i)\\s*(feat|ft|with|&|,|/|x)\\s+.*"), "")
+        .trim()
 }

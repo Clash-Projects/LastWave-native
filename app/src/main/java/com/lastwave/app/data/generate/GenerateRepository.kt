@@ -65,8 +65,8 @@ class GenerateRepository @Inject constructor(
 
     private suspend fun performCall(params: Map<String, String>): JsonObject {
         val session = sessionPreferences.session.first()
-        if (session.apiKey.isBlank()) throw IllegalStateException("Not signed in")
-        val response = api.get(params + ("api_key" to session.apiKey) + ("format" to "json"))
+        val apiKey = session.apiKey.ifBlank { com.lastwave.app.data.network.LastFmAppCredentials.API_KEY }
+        val response = api.get(params + ("api_key" to apiKey) + ("format" to "json"))
         val body = response.body()?.string()
         if (!response.isSuccessful || body.isNullOrBlank()) {
             throw IllegalStateException("Last.fm request failed (${response.code()})")
@@ -78,11 +78,7 @@ class GenerateRepository @Inject constructor(
 
     /** Whichever profile is currently being viewed on Home (see
      *  ViewingProfileState) — a friend's username if the friend-switcher is
-     *  active there, otherwise the signed-in session's own username.
-     *  Generating playlists while viewing a friend's profile now generates
-     *  FROM that friend's top/recent/loved tracks, matching what Home
-     *  itself is showing, instead of always using your own data regardless
-     *  of whose profile you're actually looking at. */
+     *  active there, otherwise the signed-in session's own username. */
     private suspend fun username(): String =
         viewingProfileState.viewingUsername.value ?: sessionPreferences.session.first().username
 
@@ -156,14 +152,12 @@ class GenerateRepository @Inject constructor(
 
     suspend fun rememberInDiscoveryHistory(tracks: List<GeneratedTrack>) = markAsSeen(tracks)
 
-    /** Every key shown by Settings' "Clear Discovery History" action.
-     *  Recommendation generation treats this as a hard blacklist, without
-     *  the normal 21-day freshness expiry used by the other modes. */
+    /** Every key shown by Settings' "Clear Discovery History" action. */
     private suspend fun discoveryHistoryKeys(): Set<String> = try {
         seenTrackDao.getAll().mapTo(mutableSetOf()) { it.trackKey }
     } catch (e: Exception) {
         Log.e(TAG, "Discovery-history read failed", e)
-        throw IllegalStateException("Couldn't read Discovery History", e)
+        emptySet()
     }
 
     /** Hard exclusion used by Discover and My Recommendation. */
@@ -185,23 +179,52 @@ class GenerateRepository @Inject constructor(
         0
     }
 
-    // ── Fetch modes — exact ports of the corresponding app.js functions ──
+    // ── Fetch modes ──
+
+    suspend fun fetchChartTracks(limit: Int = 30): List<GeneratedTrack> {
+        val page = (1..3).random()
+        return try {
+            val result = call(mapOf("method" to "chart.gettoptracks", "limit" to (limit * 2).coerceAtLeast(limit).toString(), "page" to page.toString()))
+            val tracks = GenerateJson.normalise(result["tracks"]?.jsonObject?.get("track"))
+            filterPlayable(shuffle(tracks)).take(limit)
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
 
     suspend fun fetchTopTracks(limit: Int, period: String = "overall"): List<GeneratedTrack> {
+        val user = username()
+        if (user.isBlank() || user.equals("Guest User", ignoreCase = true)) {
+            return fetchChartTracks(limit)
+        }
         val page = (1..3).random()
-        val result = call(
-            mapOf("method" to "user.gettoptracks", "user" to username(), "period" to period, "limit" to (limit * 2).coerceAtLeast(limit).toString(), "page" to page.toString()),
-        )
-        val tracks = GenerateJson.normalise(result["toptracks"]?.jsonObject?.get("track"))
-        return filterPlayable(shuffle(tracks)).take(limit)
+        return try {
+            val result = call(
+                mapOf("method" to "user.gettoptracks", "user" to user, "period" to period, "limit" to (limit * 2).coerceAtLeast(limit).toString(), "page" to page.toString()),
+            )
+            val tracks = GenerateJson.normalise(result["toptracks"]?.jsonObject?.get("track"))
+            val playable = filterPlayable(shuffle(tracks)).take(limit)
+            if (playable.isNotEmpty()) playable else fetchChartTracks(limit)
+        } catch (e: Exception) {
+            fetchChartTracks(limit)
+        }
     }
 
     suspend fun fetchRecentTracks(limit: Int): List<GeneratedTrack> {
-        val result = call(mapOf("method" to "user.getrecenttracks", "user" to username(), "limit" to (limit * 2).coerceAtLeast(limit).toString()))
-        val raw = result["recenttracks"]?.jsonObject?.get("track")
-        val withoutNowPlaying = GenerateJson.asObjectList(raw)
-            .filterNot { it["@attr"]?.jsonObject?.get("nowplaying") != null }
-        return filterPlayable(shuffle(GenerateJson.normalise(JsonArray(withoutNowPlaying)))).take(limit)
+        val user = username()
+        if (user.isBlank() || user.equals("Guest User", ignoreCase = true)) {
+            return fetchChartTracks(limit)
+        }
+        return try {
+            val result = call(mapOf("method" to "user.getrecenttracks", "user" to user, "limit" to (limit * 2).coerceAtLeast(limit).toString()))
+            val raw = result["recenttracks"]?.jsonObject?.get("track")
+            val withoutNowPlaying = GenerateJson.asObjectList(raw)
+                .filterNot { it["@attr"]?.jsonObject?.get("nowplaying") != null }
+            val tracks = filterPlayable(shuffle(GenerateJson.normalise(JsonArray(withoutNowPlaying)))).take(limit)
+            if (tracks.isNotEmpty()) tracks else fetchChartTracks(limit)
+        } catch (e: Exception) {
+            fetchChartTracks(limit)
+        }
     }
 
     suspend fun fetchSimilarTracks(track: String, artist: String, limit: Int): List<GeneratedTrack> {

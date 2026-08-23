@@ -1062,12 +1062,12 @@ private fun AccountCard(
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (isSignedIn) "Signed in as" else "Last.fm Account",
+                    "Last.fm Account",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
-                    if (isSignedIn && username.isNotBlank()) username else "Guest User",
+                    if (username.isNotBlank()) username else "Not connected",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -1088,7 +1088,7 @@ private fun AccountCard(
     if (showLogoutConfirm) {
         AlertDialog(
             onDismissRequest = { showLogoutConfirm = false },
-            title = { Text(if (isSignedIn) "Log out?" else "Leave Guest Mode?") },
+            title = { Text("Log out from Last.fm?") },
             text = { Text("Your playlists and cached data will be kept.") },
             confirmButton = { TextButton(onClick = { showLogoutConfirm = false; onLogOut() }) { Text("Log Out") } },
             dismissButton = { TextButton(onClick = { showLogoutConfirm = false }) { Text("Cancel") } },

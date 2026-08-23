@@ -5,8 +5,11 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.booleanPreferencesKey
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import com.lastwave.app.data.network.LastFmAppCredentials
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -14,22 +17,17 @@ import javax.inject.Singleton
 data class SessionData(
     val apiKey: String = LastFmAppCredentials.API_KEY,
     val apiSecret: String = LastFmAppCredentials.API_SECRET,
-    /** Left blank under the current sign-in method (API key + secret +
-     *  username, verified with an unsigned read call — no browser/WebView
-     *  OAuth step). Nothing else in the app needs a session key except
-     *  track.scrobble.delete, which already degrades gracefully
-     *  (AuthRepository.DeleteScrobbleResult.AuthorizationRequired) when
-     *  this is blank — every read feature (recent tracks, top tracks,
-     *  Discover, Generate, stats) only needs api_key + username. */
     val sessionKey: String = "",
     val username: String = "",
+    val isLoaded: Boolean = true,
 ) {
-    val isAuthenticated: Boolean get() = username.isNotBlank()
+    val isAuthenticated: Boolean get() = isLoaded && username.isNotBlank()
 }
 
 @Singleton
 class SessionPreferences @Inject constructor(
     private val dataStore: DataStore<Preferences>,
+    private val externalScope: CoroutineScope,
 ) {
     private object Keys {
         val API_KEY = stringPreferencesKey("lw_apikey")
@@ -39,7 +37,7 @@ class SessionPreferences @Inject constructor(
         val GUEST_MODE = booleanPreferencesKey("lw_guest_mode")
     }
 
-    val session: Flow<SessionData> = dataStore.data.map { p ->
+    val session: StateFlow<SessionData> = dataStore.data.map { p ->
         val storedKey = p[Keys.API_KEY]
         val storedSecret = p[Keys.API_SECRET]
         SessionData(
@@ -47,7 +45,30 @@ class SessionPreferences @Inject constructor(
             apiSecret = if (!storedSecret.isNullOrBlank()) storedSecret else LastFmAppCredentials.API_SECRET,
             sessionKey = p[Keys.SESSION_KEY] ?: "",
             username = p[Keys.USERNAME] ?: "",
+            isLoaded = true,
         )
+    }.stateIn(
+        scope = externalScope,
+        started = SharingStarted.Eagerly,
+        initialValue = SessionData(
+            apiKey = LastFmAppCredentials.API_KEY,
+            apiSecret = LastFmAppCredentials.API_SECRET,
+            sessionKey = "",
+            username = "",
+            isLoaded = false,
+        )
+    )
+
+    val currentSession: SessionData get() = session.value
+
+    suspend fun saveSession(username: String, sessionKey: String = "", apiKey: String = LastFmAppCredentials.API_KEY, apiSecret: String = LastFmAppCredentials.API_SECRET) {
+        dataStore.edit {
+            it[Keys.USERNAME] = username.trim()
+            it[Keys.SESSION_KEY] = sessionKey.trim()
+            it[Keys.API_KEY] = apiKey.trim()
+            it[Keys.API_SECRET] = apiSecret.trim()
+            it[Keys.GUEST_MODE] = false
+        }
     }
 
     suspend fun setApiCredentials(apiKey: String, apiSecret: String) {

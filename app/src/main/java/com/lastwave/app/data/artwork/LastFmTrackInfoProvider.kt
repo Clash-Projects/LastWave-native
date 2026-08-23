@@ -24,16 +24,13 @@ class LastFmTrackInfoProvider @Inject constructor(
 
     suspend fun fetchArtworkUrl(name: String, artist: String): String? {
         val session = sessionPreferences.session.first()
-        if (session.apiKey.isBlank()) {
-            Log.d(TAG, "Provider: lastfm | Track: $name | Artist: $artist | Result: skipped | Reason: no API key")
-            return null
-        }
+        val apiKey = session.apiKey.ifBlank { com.lastwave.app.data.network.LastFmAppCredentials.API_KEY }
         val params = mapOf(
             "method" to "track.getInfo",
             "track" to name,
             "artist" to artist,
             "autocorrect" to "1",
-            "api_key" to session.apiKey,
+            "api_key" to apiKey,
             "format" to "json",
         )
         val requestUrl = "https://ws.audioscrobbler.com/2.0/?" + params.entries.joinToString("&") { "${it.key}=${it.value}" }

@@ -323,6 +323,9 @@ class MusicPlayer @Inject constructor(
         disableDiscoverQueue()
         playRequest?.cancel()
         unavailableSkipJob?.cancel()
+        if (!track.videoId.isNullOrBlank()) {
+            innerTube.prefetchStream(track.videoId)
+        }
         onMain {
             ensureForegroundService()
             _state.value = MusicPlayerState(
@@ -362,9 +365,13 @@ class MusicPlayer @Inject constructor(
         queueEnrichmentJob?.cancel()
         unavailableSkipJob?.cancel()
 
+        val selectedTrack = tracks[selectedIndex]
+        if (!selectedTrack.videoId.isNullOrBlank()) {
+            innerTube.prefetchStream(selectedTrack.videoId)
+        }
+
         onMain {
             ensureForegroundService()
-            val selectedTrack = tracks[selectedIndex]
             _state.value = MusicPlayerState(
                 current = selectedTrack,
                 queue = tracks,
@@ -529,7 +536,7 @@ class MusicPlayer @Inject constructor(
      * YouTube Music identity, album and high-resolution catalog artwork.
      */
     private suspend fun matchMetadata(track: PlayableTrack): PlayableTrack {
-        if (!track.videoId.isNullOrBlank()) return track
+        if (!track.videoId.isNullOrBlank() && !track.artworkUrl.isNullOrBlank()) return track
         val match = innerTube.findBestMatch(track.title, track.artist)
         return track.copy(
             title = track.title.ifBlank { match.title },
@@ -537,7 +544,7 @@ class MusicPlayer @Inject constructor(
             album = track.album?.takeIf(String::isNotBlank) ?: match.album,
             artworkUrl = match.artworkUrl?.takeIf(String::isNotBlank)
                 ?: track.artworkUrl?.takeIf(String::isNotBlank),
-            videoId = match.videoId,
+            videoId = track.videoId ?: match.videoId,
         )
     }
 
