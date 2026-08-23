@@ -201,25 +201,16 @@ fun YouTubePlaylistImportScreen(
                             shape = RoundedCornerShape(16.dp),
                             color = if (selected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent,
                             contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f).height(40.dp),
+                            modifier = Modifier.weight(1f).height(44.dp),
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically,
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
                                     imageVector = icon,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(17.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    tab.title,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
+                                    contentDescription = tab.title,
+                                    modifier = Modifier.size(22.dp),
                                 )
                             }
                         }
