@@ -106,6 +106,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.input.pointer.pointerInput
+import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.liquidGlassChrome
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.R
 import com.lastwave.app.data.local.AccentMode
@@ -1072,7 +1083,7 @@ private fun SettingsToggleCard(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
@@ -1655,16 +1666,13 @@ private fun ColorWheelSheet(onDismiss: () -> Unit, onApply: (Color) -> Unit) {
 // -- Experimental 15-band equalizer (Settings → Experimental → Equalizer) --
 
 private val EQ_MAX_DB = 12f
-/** Vertical length of each band's slider track (before rotation). */
-private val EQ_TRACK_LENGTH = 160.dp
-/** Full height of the curve area that hosts the 15 sliders. */
-private val EQ_CURVE_HEIGHT = 210.dp
 
 /**
- * Bottom sheet hosting the Experimental equalizer: a master on/off switch,
- * the curated preset bank as chips, and the live 15-band curve. Everything
- * is drawn from MaterialTheme color scheme roles only, so it reads natively
- * in both the classic opaque look and Liquid Glass mode.
+ * Bottom sheet hosting the native 15-band Equalizer:
+ * - Native status bar insets protection (avoids punchhole collision)
+ * - Tactile capsule fader bars with high-contrast level fills and glowing thumb knobs
+ * - Responsive presets bank
+ * - Rich Liquid Glass container styling
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -1677,10 +1685,8 @@ private fun EqualizerSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val liquidGlass = LocalLiquidGlass.current
 
-    // Live curve the sliders draw from — re-syncs whenever persisted settings
-    // change (preset picked elsewhere / drag commit round-trips), while
-    // dragging stays purely local so DataStore isn't hit every frame.
     var gains by remember(eq.gainsDb) { mutableStateOf(eq.gainsDb.toFloatArray()) }
 
     ModalBottomSheet(
@@ -1701,47 +1707,70 @@ private fun EqualizerSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .statusBarsPadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp + safeDrawingBottomPadding()),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .padding(bottom = 32.dp + safeDrawingBottomPadding()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            // Header Row
             Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.Filled.GraphicEq,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(24.dp),
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.GraphicEq,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            "Equalizer",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "15-band hardware acoustic tuning",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                        )
+                    }
                 }
-                Spacer(Modifier.width(14.dp))
-                Column {
-                    Text(
-                        "Equalizer",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        "Fine-tune your sound across 15 frequencies",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+
+                TextButton(
+                    onClick = {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        onPickPreset(EqualizerPresets.FLAT.name)
+                    },
+                    enabled = eq.enabled,
+                ) {
+                    Icon(Icons.Filled.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Reset", style = MaterialTheme.typography.labelMedium)
                 }
             }
 
+            // Master On/Off Switch Card
             Surface(
                 shape = RoundedCornerShape(20.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth(),
+                tonalElevation = 2.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .liquidGlassChrome(RoundedCornerShape(20.dp), liquidGlass),
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
@@ -1750,9 +1779,10 @@ private fun EqualizerSheet(
                     Column(Modifier.weight(1f)) {
                         Text("Enable Equalizer", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                         Text(
-                            if (eq.enabled) "Shaping your music live" else "Off \u2014 original audio passes through",
+                            if (eq.enabled) "Shaping your music in real-time" else "Off \u2014 original audio passes through",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
                         )
                     }
                     Switch(
@@ -1765,10 +1795,11 @@ private fun EqualizerSheet(
                 }
             }
 
+            // Presets Horizontal Row
             SectionLabel("Presets")
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 EqualizerPresets.ALL.forEach { preset ->
@@ -1778,67 +1809,78 @@ private fun EqualizerSheet(
                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                             onPickPreset(preset.name)
                         },
-                        label = { Text(preset.name) },
+                        label = { Text(preset.name, style = MaterialTheme.typography.labelMedium) },
                     )
                 }
                 if (eq.presetName == EqualizerPresets.CUSTOM_NAME) {
-                    FilterChip(selected = true, onClick = {}, label = { Text("Custom") })
+                    FilterChip(selected = true, onClick = {}, label = { Text("Custom", style = MaterialTheme.typography.labelMedium) })
                 }
             }
 
+            // Capsule Fader Bars Container Card
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth(),
+                tonalElevation = 3.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .liquidGlassChrome(RoundedCornerShape(24.dp), liquidGlass),
             ) {
                 val curveAlpha by animateFloatAsState(
-                    targetValue = if (eq.enabled) 1f else 0.35f,
+                    targetValue = if (eq.enabled) 1f else 0.38f,
                     animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                     label = "eqCurveAlpha",
                 )
-                Row(
+
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 16.dp)
+                        .padding(vertical = 16.dp)
                         .alpha(curveAlpha),
-                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // dB scale markers along the left edge of the curve.
-                    Column(
-                        modifier = Modifier.width(26.dp).height(EQ_CURVE_HEIGHT),
-                        verticalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text("+12", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("0", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("-12", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Spacer(Modifier.width(2.dp))
+                    // Top Scale Label & Subtext
                     Row(
-                        modifier = Modifier.weight(1f).height(EQ_CURVE_HEIGHT),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "+12 dB (Max Boost)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            "-12 dB (Max Cut)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+
+                    // Scrollable Horizontal Row of Capsule Fader Bars
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         EQ_BAND_FREQS_HZ.forEachIndexed { index, hz ->
-                            Column(
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                EqBandSlider(
-                                    gainDb = gains[index],
-                                    enabled = eq.enabled,
-                                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                                    onGainChange = { value ->
-                                        gains = gains.copyOf().also { it[index] = value }
-                                    },
-                                    onChangeFinished = { onBandChange(index, gains[index]) },
-                                )
-                                Spacer(Modifier.height(6.dp))
-                                Text(
-                                    eqBandLabel(hz),
-                                    fontSize = 8.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                )
-                            }
+                            EqFaderBar(
+                                gainDb = gains[index],
+                                hz = hz,
+                                enabled = eq.enabled,
+                                onGainChange = { value ->
+                                    gains = gains.copyOf().also { it[index] = value }
+                                },
+                                onChangeFinished = { onBandChange(index, gains[index]) },
+                            )
                         }
                     }
                 }
@@ -1846,47 +1888,179 @@ private fun EqualizerSheet(
 
             Text(
                 text = when {
-                    !eq.enabled -> "Turn on to hear your curve applied"
-                    eq.presetName == EqualizerPresets.CUSTOM_NAME -> "Custom curve \u2014 tuned by you"
-                    else -> "${eq.presetName} preset \u2022 drag any band to customize"
+                    !eq.enabled -> "Turn on to apply equalization live"
+                    eq.presetName == EqualizerPresets.CUSTOM_NAME -> "Custom profile \u2022 touch and drag any bar up/down"
+                    else -> "${eq.presetName} preset active \u2022 touch any bar to customize"
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
             )
         }
     }
 }
 
 /**
- * One vertical EQ band: a stock Material 3 [Slider] rotated -90\u00B0 inside a
- * fixed-height slot — keeps native M3 visuals, haptics and accessibility
- * behavior while reading as an upright fader. Compose maps pointer events
- * through graphicsLayer rotation, so dragging works exactly like an
- * unrotated slider. Steps quantize to 0.5 dB for clean, confident stops.
+ * Modern tactile capsule equalizer fader bar:
+ * - A thick rounded capsule track (36dp wide, 150dp tall)
+ * - Filled active level from baseline (0 dB) to the thumb level
+ * - Circular/pill tactile thumb knob showing clean grip
+ * - Direct drag interaction with finger: dragging up increases gain, dragging down decreases
+ * - Frequency label underneath (e.g. "63", "1K", "16K")
  */
 @Composable
-private fun EqBandSlider(
+private fun EqFaderBar(
     gainDb: Float,
+    hz: Int,
     enabled: Boolean,
     modifier: Modifier = Modifier,
     onGainChange: (Float) -> Unit,
     onChangeFinished: () -> Unit,
 ) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val normalized = ((gainDb + EQ_MAX_DB) / (EQ_MAX_DB * 2f)).coerceIn(0f, 1f)
-    Box(modifier, contentAlignment = Alignment.Center) {
-        Slider(
-            value = normalized,
-            onValueChange = { fraction -> onGainChange(fraction * EQ_MAX_DB * 2f - EQ_MAX_DB) },
-            onValueChangeFinished = onChangeFinished,
-            valueRange = 0f..1f,
-            steps = 47, // 24 dB span / 48 segments = 0.5 dB per stop
-            enabled = enabled,
+    var isDragging by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // Gain display text on top
+        Text(
+            text = if (gainDb > 0f) "+${"%.1f".format(gainDb)}" else "${"%.1f".format(gainDb)}",
+            fontSize = 10.sp,
+            fontWeight = if (gainDb != 0f) FontWeight.Bold else FontWeight.Normal,
+            color = if (gainDb != 0f && enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        // Capsule Fader Bar Track
+        Box(
             modifier = Modifier
-                .graphicsLayer { rotationZ = -90f }
-                .width(EQ_TRACK_LENGTH)
-                .height(28.dp),
+                .width(36.dp)
+                .height(150.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .pointerInput(enabled) {
+                    if (!enabled) return@pointerInput
+                    detectVerticalDragGestures(
+                        onDragStart = { isDragging = true },
+                        onDragEnd = {
+                            isDragging = false
+                            onChangeFinished()
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                            onChangeFinished()
+                        },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        val deltaFraction = -dragAmount / size.height.toFloat()
+                        val currentFraction = ((gainDb + EQ_MAX_DB) / (EQ_MAX_DB * 2f))
+                        val newFraction = (currentFraction + deltaFraction).coerceIn(0f, 1f)
+                        val newGain = (newFraction * EQ_MAX_DB * 2f - EQ_MAX_DB).let {
+                            if (it in -0.3f..0.3f) 0f else (Math.round(it * 2f) / 2f)
+                        }
+                        if (newGain != gainDb) {
+                            if (newGain == 0f && gainDb != 0f) {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            }
+                            onGainChange(newGain)
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            // Background center baseline line (0 dB mark)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.5.dp)
+                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+            )
+
+            // Active level fill bar (from center 0 dB to thumb)
+            val baselineFraction = 0.5f
+            val topFraction = if (normalized >= baselineFraction) 1f - normalized else 1f - baselineFraction
+            val heightFraction = Math.abs(normalized - baselineFraction)
+
+            if (heightFraction > 0.01f && enabled) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.65f)
+                        .fillMaxHeight(heightFraction)
+                        .align(Alignment.TopCenter)
+                        .graphicsLayer {
+                            translationY = size.height * topFraction
+                        }
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primary,
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                )
+                            )
+                        ),
+                )
+            }
+
+            // Draggable Pill Thumb Knob
+            val thumbHeight = 28.dp
+            Box(
+                modifier = Modifier
+                    .size(width = 32.dp, height = thumbHeight)
+                    .align(Alignment.TopCenter)
+                    .graphicsLayer {
+                        val maxTravel = (150.dp - thumbHeight).toPx()
+                        translationY = maxTravel * (1f - normalized)
+                    }
+                    .shadow(if (isDragging) 6.dp else 2.dp, RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                // Grip lines inside thumb
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(10.dp)
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(10.dp)
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(
+                                if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                            ),
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Frequency Label
+        Text(
+            text = eqBandLabel(hz),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            color = if (gainDb != 0f && enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
         )
     }
 }
