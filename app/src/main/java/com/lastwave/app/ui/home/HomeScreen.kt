@@ -874,35 +874,21 @@ private fun TrackRow(
             }
             Spacer(Modifier.width(8.dp))
             if (isNowPlaying) {
-                val infiniteTransition = rememberInfiniteTransition(label = "nowPlayingAnim")
-                val b1 by infiniteTransition.animateFloat(
-                    initialValue = 0.25f,
-                    targetValue = 1f,
-                    animationSpec = infiniteRepeatable(tween(440, easing = LinearEasing), RepeatMode.Reverse),
-                    label = "b1",
-                )
-                val b2 by infiniteTransition.animateFloat(
-                    initialValue = 0.95f,
-                    targetValue = 0.3f,
-                    animationSpec = infiniteRepeatable(tween(580, easing = LinearEasing), RepeatMode.Reverse),
-                    label = "b2",
-                )
-                val b3 by infiniteTransition.animateFloat(
-                    initialValue = 0.4f,
-                    targetValue = 1f,
-                    animationSpec = infiniteRepeatable(tween(480, easing = LinearEasing), RepeatMode.Reverse),
-                    label = "b3",
-                )
+                val infiniteTransition = rememberInfiniteTransition(label = "nowPlayingPulse")
                 val pulseScale by infiniteTransition.animateFloat(
-                    initialValue = 0.985f,
-                    targetValue = 1.015f,
-                    animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                    initialValue = 1.0f,
+                    targetValue = 1.06f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1200, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
                     label = "pulseScale",
                 )
-
                 Surface(
                     shape = BadgePillShape,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.14f),
+                    color = MaterialTheme.colorScheme.primary,
+                    tonalElevation = 4.dp,
+                    shadowElevation = 2.dp,
                     modifier = Modifier.graphicsLayer {
                         scaleX = pulseScale
                         scaleY = pulseScale
@@ -912,40 +898,17 @@ private fun TrackRow(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                     ) {
-                        // Live breathing equalizer bars
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(2.dp),
-                            verticalAlignment = Alignment.Bottom,
-                            modifier = Modifier.height(10.dp),
-                        ) {
-                            Box(
-                                Modifier
-                                    .width(2.dp)
-                                    .height((3f + b1 * 7f).dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.onPrimaryContainer),
-                            )
-                            Box(
-                                Modifier
-                                    .width(2.dp)
-                                    .height((3f + b2 * 7f).dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.onPrimaryContainer),
-                            )
-                            Box(
-                                Modifier
-                                    .width(2.dp)
-                                    .height((3f + b3 * 7f).dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.onPrimaryContainer),
-                            )
-                        }
+                        Spacer(
+                            Modifier
+                                .size(6.dp)
+                                .background(MaterialTheme.colorScheme.onPrimary, CircleShape),
+                        )
                         Spacer(Modifier.width(6.dp))
                         Text(
                             "Now Playing",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            color = MaterialTheme.colorScheme.onPrimary,
                         )
                     }
                 }
