@@ -103,18 +103,18 @@ class NowPlayingWidget : GlanceAppWidget() {
         val scheme = entryPoint?.themeRepository()?.uiState?.value?.colorScheme
             ?: com.lastwave.app.ui.theme.Md3SchemeBuilder.buildScheme("#E03030", false)
 
-        val darkThemeSurface = blendColor(scheme.surfaceContainerHigh, scheme.primary, 0.22f)
-        val darkThemeRaised = blendColor(scheme.surfaceContainerHighest, scheme.primary, 0.34f)
+        val darkThemeSurface = Color(0xFF0F1017)
+        val darkThemeRaised = Color(0xFF1E1F2B)
 
         val widgetScheme = scheme.copy(
             surface = darkThemeSurface,
-            onSurface = scheme.onSurface,
+            onSurface = Color(0xFFEEEEF5),
             surfaceVariant = darkThemeRaised,
-            onSurfaceVariant = scheme.onSurfaceVariant,
+            onSurfaceVariant = Color(0xFFA0A1B2),
             primary = scheme.primary,
             onPrimary = scheme.onPrimary,
-            primaryContainer = scheme.primary,
-            onPrimaryContainer = scheme.onPrimary,
+            primaryContainer = Color(0xFF2C2738),
+            onPrimaryContainer = Color(0xFFEADBFA),
         )
         val colors = ColorProviders(light = widgetScheme, dark = widgetScheme)
         val hasNotificationAccess = NotificationManagerCompat
@@ -221,11 +221,11 @@ private fun PlayerWidget(state: WidgetUiState) {
     Row(
         modifier = playerSurface(GlanceModifier)
             .clickable(actionRunCallback<OpenLastWaveAction>())
-            .padding(12.dp),
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MiniArtwork(state.art, 76, state.isPlaying, state.animationFrame)
-        Spacer(GlanceModifier.width(12.dp))
+        MiniArtwork(state.art, 64, state.isPlaying, state.animationFrame)
+        Spacer(GlanceModifier.width(14.dp))
         Column(
             modifier = GlanceModifier.defaultWeight(),
             verticalAlignment = Alignment.CenterVertically,
@@ -243,7 +243,7 @@ private fun PlayerWidget(state: WidgetUiState) {
 private fun playerSurface(modifier: GlanceModifier): GlanceModifier = modifier
     .fillMaxSize()
     .background(GlanceTheme.colors.surface)
-    .cornerRadius(28.dp)
+    .cornerRadius(26.dp)
     .appWidgetBackground()
 
 @Composable
@@ -265,45 +265,6 @@ private fun MiniArtwork(art: Bitmap?, size: Int, isPlaying: Boolean, animationFr
                 contentDescription = null,
                 modifier = GlanceModifier.size((size * 0.6f).dp),
             )
-        }
-        if (isPlaying) {
-            Box(
-                modifier = GlanceModifier.fillMaxSize().padding(5.dp),
-                contentAlignment = Alignment.BottomEnd,
-            ) {
-                PlayingWaves(animationFrame)
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlayingWaves(frame: Int) {
-    val heights = when (frame % 4) {
-        0 -> intArrayOf(6, 15, 9)
-        1 -> intArrayOf(11, 7, 15)
-        2 -> intArrayOf(15, 10, 6)
-        else -> intArrayOf(8, 15, 12)
-    }
-    Row(
-        modifier = GlanceModifier
-            .width(28.dp)
-            .height(22.dp)
-            .background(GlanceTheme.colors.surface)
-            .cornerRadius(8.dp)
-            .padding(horizontal = 4.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        heights.forEachIndexed { index, height ->
-            Spacer(
-                GlanceModifier
-                    .width(3.dp)
-                    .height(height.dp)
-                    .background(GlanceTheme.colors.primary)
-                    .cornerRadius(2.dp),
-            )
-            if (index < heights.lastIndex) Spacer(GlanceModifier.width(2.dp))
         }
     }
 }
@@ -341,10 +302,10 @@ private fun PlaybackControls(isPlaying: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Row(
             modifier = GlanceModifier
-                .width(88.dp)
-                .height(36.dp)
-                .background(GlanceTheme.colors.primary)
-                .cornerRadius(18.dp)
+                .height(34.dp)
+                .background(GlanceTheme.colors.primaryContainer)
+                .cornerRadius(17.dp)
+                .padding(horizontal = 14.dp)
                 .clickable(actionRunCallback<TogglePlayPauseAction>()),
             verticalAlignment = Alignment.CenterVertically,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -352,34 +313,35 @@ private fun PlaybackControls(isPlaying: Boolean) {
             Image(
                 provider = ImageProvider(icon),
                 contentDescription = label,
-                modifier = GlanceModifier.size(18.dp),
-                colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimary),
+                modifier = GlanceModifier.size(16.dp),
+                colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimaryContainer),
             )
-            Spacer(GlanceModifier.width(5.dp))
+            Spacer(GlanceModifier.width(6.dp))
             Text(
                 text = label,
                 style = TextStyle(
-                    color = GlanceTheme.colors.onPrimary,
-                    fontSize = 14.sp,
+                    color = GlanceTheme.colors.onPrimaryContainer,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
         }
-        Spacer(GlanceModifier.width(6.dp))
+        Spacer(GlanceModifier.width(8.dp))
         Box(
             modifier = GlanceModifier
-                .size(36.dp)
-                .background(GlanceTheme.colors.primary)
-                .cornerRadius(18.dp)
+                .size(34.dp)
+                .background(GlanceTheme.colors.primaryContainer)
+                .cornerRadius(17.dp)
                 .clickable(actionRunCallback<SkipNextAction>()),
             contentAlignment = Alignment.Center,
         ) {
             Image(
                 provider = ImageProvider(R.drawable.ic_widget_skip_next),
                 contentDescription = "Next",
-                modifier = GlanceModifier.size(18.dp),
-                colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimary),
+                modifier = GlanceModifier.size(16.dp),
+                colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimaryContainer),
             )
         }
     }
 }
+

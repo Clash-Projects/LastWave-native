@@ -1,5 +1,6 @@
 package com.lastwave.app.ui.player
 
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -19,6 +20,8 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -26,7 +29,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -38,22 +43,26 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ClearAll
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HighQuality
-import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
@@ -77,17 +86,24 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -97,6 +113,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
+import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.lyrics.LyricsRepository
+import com.lastwave.app.data.lyrics.LyricsResult
+import com.lastwave.app.data.playlist.PlaylistRepository
+import com.lastwave.app.data.playlist.SavedPlaylist
+import com.lastwave.app.playback.MusicPlayer
+import com.lastwave.app.playback.MusicPlayerState
+import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator
 import com.lastwave.app.ui.common.ExpressiveMotion
@@ -104,18 +128,18 @@ import com.lastwave.app.ui.common.PlaylistCover
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
-import com.lastwave.app.playback.MusicPlayer
-import com.lastwave.app.playback.MusicPlayerState
-import com.lastwave.app.playback.PlayableTrack
-import com.lastwave.app.data.generate.GeneratedTrack
-import com.lastwave.app.data.playlist.PlaylistRepository
-import com.lastwave.app.data.playlist.SavedPlaylist
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+
+enum class FullPlayerTab {
+    NOW_PLAYING,
+    LYRICS,
+    QUEUE
+}
 
 val LocalMusicPlayer = staticCompositionLocalOf<MusicPlayer> {
     error("MusicPlayer is only available inside PlayerHost")
@@ -136,20 +160,71 @@ val LocalMiniPlayerScrollClearance = staticCompositionLocalOf { 0.dp }
 class PlayerViewModel @Inject constructor(
     val player: MusicPlayer,
     private val playlistRepository: PlaylistRepository,
+    private val lyricsRepository: LyricsRepository,
 ) : ViewModel() {
     val state = player.state
     private val _customPlaylists = MutableStateFlow<List<SavedPlaylist>>(emptyList())
     val customPlaylists = _customPlaylists.asStateFlow()
+
+    private val _lyricsState = MutableStateFlow<LyricsUiState>(LyricsUiState.Idle)
+    val lyricsState = _lyricsState.asStateFlow()
+
+    private var currentTrackLyricsKey: String? = null
 
     init {
         viewModelScope.launch {
             refreshCustomPlaylists()
             playlistRepository.changes.collect { refreshCustomPlaylists() }
         }
+        viewModelScope.launch {
+            player.state.collect { playerState ->
+                val track = playerState.current
+                val key = track?.let { "${it.artist}|${it.title}" }
+                if (key != currentTrackLyricsKey) {
+                    currentTrackLyricsKey = key
+                    if (track != null) {
+                        loadLyrics(track, forceRefresh = false)
+                    } else {
+                        _lyricsState.value = LyricsUiState.Idle
+                    }
+                }
+            }
+        }
     }
 
     private suspend fun refreshCustomPlaylists() {
         _customPlaylists.value = playlistRepository.getAll().filter { it.mode == "custom" && !it.isCompleted }
+    }
+
+    fun loadLyrics(track: PlayableTrack, forceRefresh: Boolean = false) {
+        viewModelScope.launch {
+            _lyricsState.value = LyricsUiState.Loading
+            val durationSeconds = if (player.state.value.durationMs > 0) {
+                (player.state.value.durationMs / 1000).toInt()
+            } else null
+
+            when (val result = lyricsRepository.getLyrics(track.title, track.artist, track.album, durationSeconds, forceRefresh)) {
+                is LyricsResult.Success -> {
+                    _lyricsState.value = LyricsUiState.Success(
+                        lines = result.lines,
+                        isSynced = result.isSynced,
+                        plainLyrics = result.plainLyrics,
+                        isInstrumental = result.isInstrumental,
+                    )
+                }
+                is LyricsResult.Empty -> {
+                    _lyricsState.value = LyricsUiState.Empty
+                }
+                is LyricsResult.Error -> {
+                    _lyricsState.value = LyricsUiState.Error(result.message)
+                }
+            }
+        }
+    }
+
+    fun retryLyrics() {
+        val track = player.state.value.current ?: return
+        loadLyrics(track, forceRefresh = true)
     }
 
     fun addToPlaylist(playlistId: Long, track: PlayableTrack, allowDuplicate: Boolean = false) {
@@ -180,14 +255,30 @@ fun PlayerHost(
 ) {
     val state by viewModel.state.collectAsState()
     val customPlaylists by viewModel.customPlaylists.collectAsState()
+    val lyricsState by viewModel.lyricsState.collectAsState()
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var currentTab by rememberSaveable { mutableStateOf(FullPlayerTab.NOW_PLAYING) }
     var playlistTrack by remember { mutableStateOf<PlayableTrack?>(null) }
     val requestAddToPlaylist = remember { { track: PlayableTrack -> playlistTrack = track } }
     val trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" }
     LaunchedEffect(trackKey) {
-        if (trackKey == null) expanded = false
+        if (trackKey == null) {
+            expanded = false
+            currentTab = FullPlayerTab.NOW_PLAYING
+        }
     }
-    BackHandler(enabled = expanded) { expanded = false }
+    LaunchedEffect(expanded) {
+        if (!expanded) {
+            currentTab = FullPlayerTab.NOW_PLAYING
+        }
+    }
+    BackHandler(enabled = expanded) {
+        if (currentTab != FullPlayerTab.NOW_PLAYING) {
+            currentTab = FullPlayerTab.NOW_PLAYING
+        } else {
+            expanded = false
+        }
+    }
 
     CompositionLocalProvider(
         LocalMusicPlayer provides viewModel.player,
@@ -223,6 +314,10 @@ fun PlayerHost(
                 FullPlayer(
                     state = state,
                     player = viewModel.player,
+                    lyricsState = lyricsState,
+                    currentTab = currentTab,
+                    onTabChange = { currentTab = it },
+                    onRetryLyrics = viewModel::retryLyrics,
                     onCollapse = { expanded = false },
                 )
             }
@@ -246,7 +341,7 @@ fun PlayerHost(
 }
 
 @Composable
-private fun AnimatedPlayPauseIcon(isPlaying: Boolean, modifier: Modifier = Modifier) {
+internal fun AnimatedPlayPauseIcon(isPlaying: Boolean, modifier: Modifier = Modifier) {
     AnimatedContent(
         targetState = isPlaying,
         transitionSpec = {
@@ -597,18 +692,29 @@ private fun AddToPlaylistDialog(
     )
 }
 
+private enum class SeekDirection { REWIND, FORWARD }
+
 @Composable
 private fun FullPlayer(
     state: MusicPlayerState,
     player: MusicPlayer,
+    lyricsState: LyricsUiState,
+    currentTab: FullPlayerTab,
+    onTabChange: (FullPlayerTab) -> Unit,
+    onRetryLyrics: () -> Unit,
     onCollapse: () -> Unit,
 ) {
     val track = state.current ?: return
-    var showQueue by remember(track.videoId, track.title) { mutableStateOf(false) }
     var showTrackMenu by remember(track.videoId, track.title) { mutableStateOf(false) }
     var artworkDragX by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var dismissDragY by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var isDismissDragging by remember { mutableStateOf(false) }
+    var seekOverlayDirection by remember(track.videoId, track.title) { mutableStateOf<SeekDirection?>(null) }
+    var seekOverlaySeconds by remember(track.videoId, track.title) { mutableIntStateOf(0) }
+    var lastTapTimestamp by remember(track.videoId, track.title) { mutableLongStateOf(0L) }
+    var lastTapSide by remember(track.videoId, track.title) { mutableStateOf<SeekDirection?>(null) }
+    var seekResetJob by remember(track.videoId, track.title) { mutableStateOf<Job?>(null) }
+    val coroutineScope = rememberCoroutineScope()
     val shownArtworkX by animateFloatAsState(
         artworkDragX,
         ExpressiveMotion.spatialSpring(),
@@ -621,7 +727,7 @@ private fun FullPlayer(
     )
     val swipeThreshold = with(LocalDensity.current) { 88.dp.toPx() }
 
-    fun Modifier.playerVerticalSwipe(enabled: Boolean): Modifier = if (!enabled) this else pointerInput(track.videoId, track.title, showQueue) {
+    fun Modifier.playerVerticalSwipe(enabled: Boolean): Modifier = if (!enabled) this else pointerInput(track.videoId, track.title, currentTab) {
         detectVerticalDragGestures(
             onDragStart = { isDismissDragging = true },
             onDragCancel = {
@@ -631,14 +737,14 @@ private fun FullPlayer(
             onDragEnd = {
                 isDismissDragging = false
                 when {
-                    showQueue && dismissDragY > swipeThreshold -> showQueue = false
-                    !showQueue && dismissDragY < -swipeThreshold -> showQueue = true
-                    !showQueue && dismissDragY > swipeThreshold -> onCollapse()
+                    currentTab != FullPlayerTab.NOW_PLAYING && dismissDragY > swipeThreshold -> onTabChange(FullPlayerTab.NOW_PLAYING)
+                    currentTab == FullPlayerTab.NOW_PLAYING && dismissDragY < -swipeThreshold -> onTabChange(FullPlayerTab.QUEUE)
+                    currentTab == FullPlayerTab.NOW_PLAYING && dismissDragY > swipeThreshold -> onCollapse()
                 }
                 dismissDragY = 0f
             },
         ) { change, amount ->
-            val updatedDrag = if (showQueue) {
+            val updatedDrag = if (currentTab != FullPlayerTab.NOW_PLAYING) {
                 (dismissDragY + amount).coerceAtLeast(0f)
             } else {
                 dismissDragY + amount
@@ -657,7 +763,7 @@ private fun FullPlayer(
                 val playerHeight = size.height.coerceAtLeast(1f)
                 alpha = (1f - shownDismissY.coerceAtLeast(0f) / (playerHeight * 1.5f)).coerceIn(0.72f, 1f)
             }
-            .playerVerticalSwipe(enabled = !showQueue),
+            .playerVerticalSwipe(enabled = currentTab == FullPlayerTab.NOW_PLAYING),
     ) {
         Box(Modifier.fillMaxSize()) {
             PlayerArtwork(
@@ -691,30 +797,48 @@ private fun FullPlayer(
                     Modifier
                         .fillMaxWidth()
                         .height(52.dp)
-                        .playerVerticalSwipe(enabled = showQueue),
+                        .playerVerticalSwipe(enabled = currentTab != FullPlayerTab.NOW_PLAYING),
                 ) {
                     IconButton(
-                        onClick = onCollapse,
+                        onClick = {
+                            if (currentTab != FullPlayerTab.NOW_PLAYING) {
+                                onTabChange(FullPlayerTab.NOW_PLAYING)
+                            } else {
+                                onCollapse()
+                            }
+                        },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .size(44.dp)
                             .clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                     ) {
-                        Icon(Icons.Filled.ExpandMore, "Minimize player", modifier = Modifier.size(26.dp))
+                        Icon(
+                            if (currentTab != FullPlayerTab.NOW_PLAYING) Icons.Filled.ArrowBack else Icons.Filled.ExpandMore,
+                            if (currentTab != FullPlayerTab.NOW_PLAYING) "Back to player" else "Minimize player",
+                            modifier = Modifier.size(26.dp),
+                        )
                     }
                     Column(
-                        Modifier.align(Alignment.Center).padding(horizontal = 108.dp),
+                        Modifier.align(Alignment.Center).padding(horizontal = 96.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(
-                            if (showQueue) "PLAYING QUEUE" else "NOW PLAYING",
+                            when (currentTab) {
+                                FullPlayerTab.NOW_PLAYING -> "NOW PLAYING"
+                                FullPlayerTab.LYRICS -> "LYRICS"
+                                FullPlayerTab.QUEUE -> "PLAYING QUEUE"
+                            },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            state.sourceLabel.takeIf { it.isNotBlank() } ?: "LastWave",
+                            if (currentTab == FullPlayerTab.LYRICS) {
+                                "${track.title} • ${track.artist}"
+                            } else {
+                                state.sourceLabel.takeIf { it.isNotBlank() } ?: "LastWave"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -738,10 +862,10 @@ private fun FullPlayer(
                     }
                 }
 
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(6.dp))
 
                 AnimatedContent(
-                    targetState = showQueue,
+                    targetState = currentTab,
                     modifier = Modifier.weight(1f),
                     transitionSpec = {
                         (fadeIn(tween(ExpressiveMotion.Standard)) +
@@ -749,82 +873,228 @@ private fun FullPlayer(
                             (fadeOut(tween(ExpressiveMotion.Quick)) +
                                 scaleOut(tween(ExpressiveMotion.Standard), targetScale = 0.98f))
                     },
-                    label = "playerQueue",
-                ) { queueVisible ->
-                    if (queueVisible) {
-                        QueuePanel(state, player, Modifier.fillMaxSize())
-                    } else {
-                        Column(
-                            Modifier.fillMaxSize().padding(bottom = 22.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            BoxWithConstraints(
-                                modifier = Modifier.fillMaxWidth().weight(1f),
-                                contentAlignment = Alignment.Center,
+                    label = "playerTabContent",
+                ) { tab ->
+                    when (tab) {
+                        FullPlayerTab.LYRICS -> {
+                            LyricsPanel(
+                                state = state,
+                                player = player,
+                                lyricsState = lyricsState,
+                                onRetry = onRetryLyrics,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+
+                        FullPlayerTab.QUEUE -> {
+                            QueuePanel(state, player, Modifier.fillMaxSize())
+                        }
+
+                        FullPlayerTab.NOW_PLAYING -> {
+                            Column(
+                                Modifier.fillMaxSize().padding(bottom = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
-                                val artworkSize = (minOf(maxWidth, maxHeight) - 8.dp)
-                                    .coerceAtLeast(0.dp)
-                                    .coerceAtMost(365.dp)
-                                Surface(
-                                    shape = RoundedCornerShape(32.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    tonalElevation = 8.dp,
-                                    shadowElevation = 18.dp,
-                                    modifier = Modifier
-                                        .size(artworkSize)
-                                        .graphicsLayer {
-                                            translationX = shownArtworkX
-                                            rotationZ = shownArtworkX / 80f
-                                        }
-                                        .pointerInput(track.videoId, track.title) {
-                                            detectHorizontalDragGestures(
-                                                onDragCancel = { artworkDragX = 0f },
-                                                onDragEnd = {
-                                                    when {
-                                                        artworkDragX < -swipeThreshold -> player.next()
-                                                        artworkDragX > swipeThreshold -> player.previous()
-                                                    }
-                                                    artworkDragX = 0f
-                                                },
-                                            ) { change, amount ->
-                                                change.consume()
-                                                artworkDragX += amount
-                                            }
-                                        },
+                                BoxWithConstraints(
+                                    modifier = Modifier.fillMaxWidth().weight(1f),
+                                    contentAlignment = Alignment.Center,
                                 ) {
-                                    PlayerArtwork(track, Modifier.fillMaxSize(), 32.dp)
+                                    val artworkSize = (minOf(maxWidth, maxHeight) - 6.dp)
+                                        .coerceAtLeast(0.dp)
+                                        .coerceAtMost(370.dp)
+                                    Surface(
+                                        shape = RoundedCornerShape(32.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        tonalElevation = 8.dp,
+                                        shadowElevation = 18.dp,
+                                        modifier = Modifier
+                                            .size(artworkSize)
+                                            .graphicsLayer {
+                                                translationX = shownArtworkX
+                                                rotationZ = shownArtworkX / 80f
+                                            }
+                                            .pointerInput(track.videoId, track.title, state.durationMs) {
+                                                awaitEachGesture {
+                                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                                    var isDrag = false
+                                                    val touchSlop = viewConfiguration.touchSlop
+                                                    val initialX = down.position.x
+                                                    val initialY = down.position.y
+
+                                                    while (true) {
+                                                        val event = awaitPointerEvent()
+                                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                                                        if (!change.pressed) {
+                                                            if (isDrag) {
+                                                                when {
+                                                                    artworkDragX < -swipeThreshold -> player.next()
+                                                                    artworkDragX > swipeThreshold -> player.previous()
+                                                                }
+                                                                artworkDragX = 0f
+                                                            } else {
+                                                                // Tap on left or right half of artwork
+                                                                val side = if (change.position.x < size.width / 2) SeekDirection.REWIND else SeekDirection.FORWARD
+                                                                val now = SystemClock.elapsedRealtime()
+                                                                if (now - lastTapTimestamp < 380L && lastTapSide == side) {
+                                                                    // Incremental multi-tap seek (5s, 10s, 15s, 20s...)
+                                                                    val newSeconds = seekOverlaySeconds + 5
+                                                                    seekOverlaySeconds = newSeconds
+                                                                    seekOverlayDirection = side
+                                                                    lastTapTimestamp = now
+                                                                    val deltaMs = if (side == SeekDirection.FORWARD) 5_000L else -5_000L
+                                                                    val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
+                                                                    player.seekTo(newPos)
+
+                                                                    seekResetJob?.cancel()
+                                                                    seekResetJob = coroutineScope.launch {
+                                                                        delay(750L)
+                                                                        seekOverlayDirection = null
+                                                                        seekOverlaySeconds = 0
+                                                                        lastTapSide = null
+                                                                    }
+                                                                } else {
+                                                                    // First tap
+                                                                    lastTapTimestamp = now
+                                                                    lastTapSide = side
+                                                                    seekOverlaySeconds = 0
+                                                                }
+                                                            }
+                                                            break
+                                                        }
+
+                                                        if (change.isConsumed) {
+                                                            artworkDragX = 0f
+                                                            break
+                                                        }
+
+                                                        val dx = change.position.x - initialX
+                                                        val dy = change.position.y - initialY
+                                                        if (!isDrag) {
+                                                            if (kotlin.math.abs(dx) > touchSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                                                                isDrag = true
+                                                                change.consume()
+                                                            }
+                                                        } else {
+                                                            change.consume()
+                                                            artworkDragX = dx
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                    ) {
+                                        Box(Modifier.fillMaxSize()) {
+                                            PlayerArtwork(track, Modifier.fillMaxSize(), 32.dp)
+
+                                            // Double / Multi-tap Seek Feedback Overlay (Left / Right)
+                                            androidx.compose.animation.AnimatedVisibility(
+                                                visible = seekOverlayDirection != null,
+                                                enter = fadeIn(tween(100)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.88f),
+                                                exit = fadeOut(tween(220)),
+                                                modifier = Modifier.fillMaxSize(),
+                                            ) {
+                                                val isForward = seekOverlayDirection == SeekDirection.FORWARD
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .padding(if (isForward) PaddingValues(start = artworkSize * 0.44f) else PaddingValues(end = artworkSize * 0.44f))
+                                                        .clip(
+                                                            if (isForward) RoundedCornerShape(topEnd = 32.dp, bottomEnd = 32.dp, topStart = 120.dp, bottomStart = 120.dp)
+                                                            else RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp, topEnd = 120.dp, bottomEnd = 120.dp)
+                                                        )
+                                                        .background(Color.Black.copy(alpha = 0.55f)),
+                                                    contentAlignment = Alignment.Center,
+                                                ) {
+                                                    Column(
+                                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                                        verticalArrangement = Arrangement.Center,
+                                                    ) {
+                                                        Surface(
+                                                            shape = CircleShape,
+                                                            color = Color.White.copy(alpha = 0.22f),
+                                                            modifier = Modifier.size(52.dp),
+                                                        ) {
+                                                            Box(contentAlignment = Alignment.Center) {
+                                                                Icon(
+                                                                    if (isForward) Icons.Filled.FastForward else Icons.Filled.FastRewind,
+                                                                    contentDescription = if (isForward) "Seek forward" else "Seek rewind",
+                                                                    tint = Color.White,
+                                                                    modifier = Modifier.size(28.dp),
+                                                                )
+                                                            }
+                                                        }
+                                                        Spacer(Modifier.height(6.dp))
+                                                        Text(
+                                                            "${if (isForward) "+" else "-"}${seekOverlaySeconds}s",
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            color = Color.White,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
+                                Spacer(Modifier.height(12.dp))
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            track.title,
+                                            style = MaterialTheme.typography.headlineSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Spacer(Modifier.height(3.dp))
+                                        Text(
+                                            track.artist,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+
+                                    Spacer(Modifier.width(12.dp))
+
+                                    // Lyrics button in circled position
+                                    Surface(
+                                        onClick = { onTabChange(FullPlayerTab.LYRICS) },
+                                        shape = RoundedCornerShape(18.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        contentColor = MaterialTheme.colorScheme.primary,
+                                        tonalElevation = 2.dp,
+                                        modifier = Modifier.size(50.dp),
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                Icons.Filled.Lyrics,
+                                                contentDescription = "Show lyrics",
+                                                modifier = Modifier.size(24.dp),
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                SeekBar(state, player::seekTo)
+                                Spacer(Modifier.height(10.dp))
+                                MainControls(state, player)
+                                Spacer(Modifier.height(16.dp))
+                                PlayerUtilityControls(state, player)
                             }
-                            Spacer(Modifier.height(18.dp))
-                            Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                                Text(
-                                    track.title,
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    track.artist,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            Spacer(Modifier.height(14.dp))
-                            SeekBar(state, player::seekTo)
-                            Spacer(Modifier.height(14.dp))
-                            MainControls(state, player)
-                            Spacer(Modifier.height(20.dp))
-                            PlayerUtilityControls(state, player)
                         }
                     }
                 }
                 state.error?.let { message ->
                     Surface(
-                        onClick = player::clearError,
+                        onClick = player::retry,
                         shape = RoundedCornerShape(20.dp),
                         color = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -835,14 +1105,26 @@ private fun FullPlayer(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(Icons.Filled.ErrorOutline, null, modifier = Modifier.size(21.dp))
-                            Text(
-                                message,
-                                style = MaterialTheme.typography.bodySmall,
-                                modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Icon(Icons.Filled.Close, "Dismiss error", modifier = Modifier.size(18.dp))
+                            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                                Text(
+                                    message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    "Tap to retry",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f),
+                                )
+                            }
+                            IconButton(
+                                onClick = player::clearError,
+                                modifier = Modifier.size(28.dp),
+                            ) {
+                                Icon(Icons.Filled.Close, "Dismiss error", modifier = Modifier.size(18.dp))
+                            }
                         }
                     }
                 }
@@ -1116,7 +1398,7 @@ private fun PlayerArtwork(track: PlayableTrack, modifier: Modifier, corner: andr
     }
 }
 
-private fun formatTime(ms: Long): String {
+internal fun formatTime(ms: Long): String {
     val total = (ms.coerceAtLeast(0) / 1000)
     return "%d:%02d".format(total / 60, total % 60)
 }

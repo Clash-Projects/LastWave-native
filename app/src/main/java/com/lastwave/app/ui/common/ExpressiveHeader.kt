@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 
 /** Only the bottom corners are rounded, and a modest 24dp at that (not
  *  36dp) — a short header (just a title row, no back button, minimal
@@ -81,7 +82,7 @@ fun ExpressiveHeader(
 ) {
     val glow = MaterialTheme.colorScheme.primary
     val secondaryGlow = MaterialTheme.colorScheme.tertiary
-    Box(modifier.fillMaxWidth()) {
+    Box(modifier.fillMaxWidth().zIndex(1f)) {
         Surface(
             shape = HeaderShape,
             color = MaterialTheme.colorScheme.surfaceContainer,

@@ -122,16 +122,58 @@ class MusicPlayer @Inject constructor(
     private val _state = MutableStateFlow(MusicPlayerState())
     val state: StateFlow<MusicPlayerState> = _state.asStateFlow()
 
+    private var errorRetryCount = 0
+
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = refresh(player)
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            errorRetryCount = 0
             if (mediaItem != null) {
                 enrichUpcomingQueue(player.currentMediaItemIndex)
                 extendDiscoverQueueIfNeeded(player.currentMediaItemIndex)
             }
         }
         override fun onPlayerError(error: PlaybackException) {
-            _state.update { it.copy(error = error.message ?: error.errorCodeName, isBuffering = false) }
+            val currentTrack = _state.value.current
+            val currentPos = player.currentPosition.coerceAtLeast(0)
+            val videoId = currentTrack?.videoId
+
+            if (currentTrack != null && errorRetryCount < 2) {
+                errorRetryCount++
+                applicationScope.launch(Dispatchers.Main.immediate) {
+                    _state.update { it.copy(isBuffering = true, error = null) }
+                    try {
+                        val resolvedId = videoId ?: innerTube.findBestMatch(currentTrack.title, currentTrack.artist).videoId
+                        if (!resolvedId.isNullOrBlank()) {
+                            val stream = withContext(Dispatchers.IO) { innerTube.resolveAudioStream(resolvedId) }
+                            publishStreamQuality(stream)
+                            val updated = currentTrack.copy(
+                                videoId = resolvedId,
+                                playbackUrl = stream.url,
+                                playbackMimeType = stream.mimeType,
+                            )
+                            val currentIndex = player.currentMediaItemIndex
+                            if (currentIndex in 0 until player.mediaItemCount) {
+                                player.replaceMediaItem(currentIndex, updated.toMediaItem())
+                                player.seekTo(currentIndex, currentPos)
+                                player.prepare()
+                                player.play()
+                                return@launch
+                            }
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("MusicPlayer", "Auto-retry stream failed", e)
+                    }
+                    _state.update { it.copy(error = error.message ?: "Playback error (${error.errorCodeName})", isBuffering = false) }
+                    scheduleUnavailableMediaSkip(
+                        failedIndex = player.currentMediaItemIndex,
+                        failedMediaId = player.currentMediaItem?.mediaId,
+                    )
+                }
+                return
+            }
+
+            _state.update { it.copy(error = error.message ?: "Playback error (${error.errorCodeName})", isBuffering = false) }
             scheduleUnavailableMediaSkip(
                 failedIndex = player.currentMediaItemIndex,
                 failedMediaId = player.currentMediaItem?.mediaId,
@@ -143,6 +185,8 @@ class MusicPlayer @Inject constructor(
         val upstream = DefaultHttpDataSource.Factory()
             .setUserAgent(YOUTUBE_WEB_USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(20_000)
+            .setReadTimeoutMs(20_000)
         val resolving = ResolvingDataSource.Factory(upstream) { dataSpec ->
             val requested = dataSpec.uri
             if (requested.scheme != "lastwave") {
@@ -422,6 +466,11 @@ class MusicPlayer @Inject constructor(
         if (index in 0 until player.mediaItemCount) player.removeMediaItem(index)
     }
     fun clearError() = _state.update { it.copy(error = null) }
+    fun retry() = onMain {
+        val currentTrack = _state.value.current ?: return@onMain
+        clearError()
+        play(currentTrack, _state.value.sourceLabel)
+    }
 
     /**
      * Keeps Last.fm's canonical display naming while attaching the exact
@@ -721,8 +770,10 @@ class MusicPlayer @Inject constructor(
 }
 
 private fun PlayableTrack.toMediaItem(): MediaItem {
-    val playbackUri = playbackUrl?.takeIf(String::isNotBlank)?.let(Uri::parse) ?: if (!videoId.isNullOrBlank()) {
+    val playbackUri = if (!videoId.isNullOrBlank()) {
         Uri.Builder().scheme("lastwave").authority("youtube").appendPath(videoId).build()
+    } else if (playbackUrl?.isNotBlank() == true) {
+        Uri.parse(playbackUrl)
     } else {
         Uri.Builder().scheme("lastwave").authority("search")
             .appendQueryParameter("title", title)

@@ -79,6 +79,7 @@ fun Modifier.wobbleOverscroll(): Modifier {
             // exactly one source of truth for translationY, never both at
             // once fighting each other.
             translationY = if (raw != 0f) raw else settleAnim.value
+            clip = true
         }
 }
 
