@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
@@ -108,6 +109,8 @@ private val EXPLORE_GENRES = listOf(
 @Composable
 fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsState()
+    val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
+    val playbackState by musicPlayer.state.collectAsState()
     var menuTarget by remember { mutableStateOf<TrackMenuTarget?>(null) }
     val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
     val focusManager = LocalFocusManager.current
@@ -362,10 +365,15 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                                     ),
                                 ) {
                                     if (topResult != null && state.tab != SearchTab.USERS) {
+                                        val isTopPlaying = state.tab == SearchTab.TRACKS && playbackState.isPlaying &&
+                                            playbackState.current?.title.equals(topResult.name, ignoreCase = true) &&
+                                            (topResult.artist.isNullOrBlank() || playbackState.current?.artist.equals(topResult.artist, ignoreCase = true))
+
                                         item(key = "top_result_card") {
                                             TopResultCard(
                                                 item = topResult,
                                                 tab = state.tab,
+                                                isPlaying = isTopPlaying,
                                                 onPlay = { viewModel.playResult(topResult) },
                                                 onMenu = {
                                                     menuTarget = when (state.tab) {
@@ -381,9 +389,14 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                                     }
 
                                     items(if (state.tab == SearchTab.USERS) state.results else otherResults, key = { it.entityId ?: it.url.ifBlank { it.name + it.artist.orEmpty() } }) { item ->
+                                        val isItemPlaying = state.tab == SearchTab.TRACKS && playbackState.isPlaying &&
+                                            playbackState.current?.title.equals(item.name, ignoreCase = true) &&
+                                            (item.artist.isNullOrBlank() || playbackState.current?.artist.equals(item.artist, ignoreCase = true))
+
                                         SearchResultRow(
                                             item = item,
                                             tab = state.tab,
+                                            isPlaying = isItemPlaying,
                                             modifier = Modifier.animateItem(),
                                             onClick = { viewModel.playResult(item) },
                                             onLongClick = {
@@ -433,12 +446,15 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
 private fun TopResultCard(
     item: SearchResultItem,
     tab: SearchTab,
+    isPlaying: Boolean = false,
     onPlay: () -> Unit,
     onMenu: () -> Unit,
 ) {
     Card(
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f)),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f),
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -451,20 +467,29 @@ private fun TopResultCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val fallback = when (tab) {
-                SearchTab.TRACKS -> Icons.Filled.MusicNote
+                SearchTab.TRACKS -> if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote
                 SearchTab.ARTISTS -> Icons.Filled.Person
                 SearchTab.ALBUMS -> Icons.Filled.Album
                 SearchTab.USERS -> Icons.Filled.Person
             }
-            ArtworkImage(
-                name = item.name,
-                artist = item.artist.orEmpty(),
-                embeddedUrl = item.artworkUrl,
-                fallbackIcon = fallback,
+            Box(
                 modifier = Modifier
                     .size(68.dp)
                     .clip(if (tab == SearchTab.ARTISTS) CircleShape else RoundedCornerShape(14.dp)),
-            )
+            ) {
+                ArtworkImage(
+                    name = item.name,
+                    artist = item.artist.orEmpty(),
+                    embeddedUrl = item.artworkUrl,
+                    fallbackIcon = fallback,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                if (isPlaying) {
+                    com.lastwave.app.ui.player.PlayingWaveBars(
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(3.dp),
+                    )
+                }
+            }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Surface(
@@ -656,6 +681,7 @@ private fun RecentSearchRow(
 private fun SearchResultRow(
     item: SearchResultItem,
     tab: SearchTab,
+    isPlaying: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onMenu: () -> Unit,
@@ -684,20 +710,34 @@ private fun SearchResultRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val fallback = when (tab) {
-            SearchTab.TRACKS -> Icons.Filled.MusicNote
+            SearchTab.TRACKS -> if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote
             SearchTab.ARTISTS -> Icons.Filled.Person
             SearchTab.ALBUMS -> Icons.Filled.Album
             SearchTab.USERS -> Icons.Filled.Person
         }
-        ArtworkImage(
-            name = item.name,
-            artist = item.artist.orEmpty(),
-            embeddedUrl = item.artworkUrl,
-            fallbackIcon = fallback,
-            modifier = Modifier.size(44.dp).clip(if (tab == SearchTab.ARTISTS || tab == SearchTab.USERS) CircleShape else RoundedCornerShape(10.dp)),
-        )
+        Box(modifier = Modifier.size(44.dp)) {
+            ArtworkImage(
+                name = item.name,
+                artist = item.artist.orEmpty(),
+                embeddedUrl = item.artworkUrl,
+                fallbackIcon = fallback,
+                modifier = Modifier.fillMaxSize().clip(if (tab == SearchTab.ARTISTS || tab == SearchTab.USERS) CircleShape else RoundedCornerShape(10.dp)),
+            )
+            if (isPlaying) {
+                com.lastwave.app.ui.player.PlayingWaveBars(
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp),
+                )
+            }
+        }
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(item.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                item.name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.Normal,
+                color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             val subtitle = when (tab) {
                 SearchTab.TRACKS -> listOfNotNull(item.artist, item.subtitle).joinToString(" \u00b7 ")
                 SearchTab.ALBUMS -> item.subtitle ?: item.artist.orEmpty()

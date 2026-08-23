@@ -7,12 +7,13 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import com.lastwave.app.data.network.LastFmAppCredentials
 import javax.inject.Inject
 import javax.inject.Singleton
 
 data class SessionData(
-    val apiKey: String = "",
-    val apiSecret: String = "",
+    val apiKey: String = LastFmAppCredentials.API_KEY,
+    val apiSecret: String = LastFmAppCredentials.API_SECRET,
     /** Left blank under the current sign-in method (API key + secret +
      *  username, verified with an unsigned read call — no browser/WebView
      *  OAuth step). Nothing else in the app needs a session key except
@@ -23,7 +24,7 @@ data class SessionData(
     val sessionKey: String = "",
     val username: String = "",
 ) {
-    val isAuthenticated: Boolean get() = username.isNotBlank() && apiKey.isNotBlank()
+    val isAuthenticated: Boolean get() = username.isNotBlank()
 }
 
 @Singleton
@@ -39,9 +40,11 @@ class SessionPreferences @Inject constructor(
     }
 
     val session: Flow<SessionData> = dataStore.data.map { p ->
+        val storedKey = p[Keys.API_KEY]
+        val storedSecret = p[Keys.API_SECRET]
         SessionData(
-            apiKey = p[Keys.API_KEY] ?: "",
-            apiSecret = p[Keys.API_SECRET] ?: "",
+            apiKey = if (!storedKey.isNullOrBlank()) storedKey else LastFmAppCredentials.API_KEY,
+            apiSecret = if (!storedSecret.isNullOrBlank()) storedSecret else LastFmAppCredentials.API_SECRET,
             sessionKey = p[Keys.SESSION_KEY] ?: "",
             username = p[Keys.USERNAME] ?: "",
         )

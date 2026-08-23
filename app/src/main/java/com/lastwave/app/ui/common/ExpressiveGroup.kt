@@ -229,6 +229,7 @@ fun ExpressiveGroupTrackRow(
     position: GroupPosition,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    isPlaying: Boolean = false,
     onLongClick: (() -> Unit)? = null,
     leading: @Composable () -> Unit,
     trailing: (@Composable () -> Unit)? = null,
@@ -237,15 +238,11 @@ fun ExpressiveGroupTrackRow(
     val scale = rememberGroupPressScale(interactionSource)
     val haptics = LocalHapticFeedback.current
 
-    // A single combinedClickable (not Card's own onClick + a second,
-    // separate gesture detector layered on top) — two independent tap
-    // recognizers on the same node race for the same pointer-down event,
-    // which is exactly the kind of thing that silently breaks either the
-    // click or the long-press. combinedClickable handles both from one
-    // recognizer, the way Compose actually intends this to be done.
     Card(
         shape = groupShape(position),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = modifier
             .fillMaxWidth()
@@ -272,13 +269,15 @@ fun ExpressiveGroupTrackRow(
                 Text(
                     title,
                     style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (isPlaying) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isPlaying) MaterialTheme.colorScheme.primary.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

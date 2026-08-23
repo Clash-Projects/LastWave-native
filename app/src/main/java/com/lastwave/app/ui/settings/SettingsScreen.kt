@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
@@ -43,6 +44,7 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -53,6 +55,8 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -65,7 +69,6 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -91,7 +94,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -178,6 +180,8 @@ fun SettingsScreen(
     onBack: () -> Unit = {},
     onLoggedOut: () -> Unit = {},
     onOpenChooseApps: () -> Unit = {},
+    onOpenDownloads: () -> Unit = {},
+    onOpenYouTubeImport: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val session by viewModel.session.collectAsState()
@@ -185,6 +189,8 @@ fun SettingsScreen(
     val misc by viewModel.misc.collectAsState()
     val scrobbler by viewModel.scrobbler.collectAsState()
     val state by viewModel.uiState.collectAsState()
+    val downloadCount by viewModel.downloadCount.collectAsState()
+    val downloadTotalBytes by viewModel.downloadTotalBytes.collectAsState()
     val context = LocalContext.current
     var showQualityDialog by remember { mutableStateOf(false) }
 
@@ -208,12 +214,17 @@ fun SettingsScreen(
     // read (stagePendingRestore), so being permissive here is safe.
     val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            try {
-                val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                if (text != null) viewModel.stagePendingRestore(text, uri)
-            } catch (e: Exception) { }
+            viewModel.handleRestorePicked(uri)
         }
     }
+
+    val csvPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            viewModel.handleCsvPicked(uri)
+        }
+    }
+
+    var showYouTubeImportSheet by remember { mutableStateOf(false) }
 
     // Lets the user pick exactly where the backup file is saved (SAF), so
     // it's guaranteed to be somewhere restoreLauncher's picker can browse
@@ -239,10 +250,63 @@ fun SettingsScreen(
                 AccountCard(
                     isSignedIn = session.username.isNotBlank(),
                     username = session.username,
-                    hasCredentials = session.apiKey.isNotBlank() && session.apiSecret.isNotBlank(),
-                    onSaveCredentials = viewModel::saveApiCredentials,
                     onLogOut = { viewModel.logOut(onLoggedOut) },
                 )
+            }
+
+            item {
+                val mb = (downloadTotalBytes ?: 0L).toDouble() / (1024 * 1024)
+                val formattedStorage = if (mb >= 1000) "%.1f GB".format(mb / 1024) else "%.1f MB".format(mb)
+                val downloadsSubtitle = if (downloadCount > 0) "$downloadCount song(s) \u2022 $formattedStorage \u2022 Music/LastWave" else "No offline songs downloaded"
+
+                Card(
+                    onClick = onOpenDownloads,
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Filled.Download,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Downloads & Offline Music",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                downloadsSubtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                            )
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForwardIos,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
             }
 
             item {
@@ -307,7 +371,11 @@ fun SettingsScreen(
                         5 -> "Standard (320 kbps MP3)"
                         else -> "Max (Up to 24-bit / 192 kHz)"
                     }
-                    SettingsGroup(rowCount = 2) { index, position ->
+                    val mb = (downloadTotalBytes ?: 0L).toDouble() / (1024 * 1024)
+                    val formattedStorage = if (mb >= 1000) "%.1f GB".format(mb / 1024) else "%.1f MB".format(mb)
+                    val downloadsSubtitle = if (downloadCount > 0) "$downloadCount song(s) \u2022 $formattedStorage \u2022 Music/LastWave" else "No offline songs downloaded"
+
+                    SettingsGroup(rowCount = 3) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.HighQuality,
@@ -326,6 +394,45 @@ fun SettingsScreen(
                                 title = "Qobuz Streaming Quality",
                                 subtitle = qualitySubtitle,
                                 onClick = { showQualityDialog = true },
+                                position = position,
+                            )
+                            2 -> SettingsActionCard(
+                                icon = Icons.Filled.Download,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Downloads & Offline Music",
+                                subtitle = downloadsSubtitle,
+                                onClick = onOpenDownloads,
+                                position = position,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel("Library & Playlist Imports")
+                    SettingsGroup(rowCount = 2) { index, position ->
+                        when (index) {
+                            0 -> SettingsActionCard(
+                                icon = Icons.Filled.QueueMusic,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "Import YouTube Music Playlists",
+                                subtitle = "Search, browse, or paste playlist links & IDs",
+                                onClick = onOpenYouTubeImport,
+                                position = position,
+                            )
+                            1 -> SettingsActionCard(
+                                icon = Icons.Filled.FileUpload,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Import Songs from CSV",
+                                subtitle = "Spotify, Soundiiz, TuneMyMusic, or custom CSV",
+                                onClick = {
+                                    csvPickerLauncher.launch(arrayOf("text/*", "application/*", "*/*"))
+                                },
                                 position = position,
                             )
                         }
@@ -557,61 +664,157 @@ fun SettingsScreen(
     }
 
     if (showQualityDialog) {
-        val qualities = listOf(
-            27 to "Max (Up to 24-bit / 192 kHz)",
-            7 to "Hi-Res (24-bit / 96 kHz)",
-            6 to "CD Lossless (16-bit / 44.1 kHz FLAC)",
-            5 to "Standard (320 kbps MP3)",
+        val tiers = listOf(
+            Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Lossless Studio FLAC" to "24-BIT / 192k"),
+            Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Lossless Studio FLAC" to "24-BIT / 96k"),
+            Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Lossless CD FLAC" to "16-BIT / 44.1k"),
+            Triple(5, "Standard Quality", "320 kbps • MP3 (Data Saver)" to "320 kbps"),
         )
-        AlertDialog(
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
+        ModalBottomSheet(
             onDismissRequest = { showQualityDialog = false },
-            title = { Text("Streaming Quality") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "Select preferred streaming tier. If a track is not available in the selected quality, the highest available quality is streamed automatically.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    qualities.forEach { (qualityId, label) ->
-                        val selected = misc.qobuzQuality == qualityId
+            sheetState = sheetState,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            dragHandle = {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .padding(top = 12.dp, bottom = 8.dp)
+                        .size(width = 36.dp, height = 4.dp),
+                ) {}
+            },
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp + safeDrawingBottomPadding()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.HighQuality,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            "Streaming Quality",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "Select preferred audio resolution & bit depth",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                Text(
+                    "If a track is unavailable in the chosen quality, the highest available quality will be streamed automatically.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    tiers.forEach { (qualityId, title, meta) ->
+                        val (subtitle, badge) = meta
+                        val isSelected = misc.qobuzQuality == qualityId
                         Surface(
                             onClick = {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                 viewModel.setQobuzQuality(qualityId)
                                 showQualityDialog = false
                             },
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (selected) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                            shadowElevation = if (isSelected) 3.dp else 0.dp,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(
-                                    label,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
-                                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                if (selected) {
-                                    Icon(
-                                        Icons.Filled.Check,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.size(18.dp),
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            title,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        ) {
+                                            Text(
+                                                badge,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                }
+
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primary),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = "Selected",
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showQualityDialog = false }) { Text("Close") }
+            }
+        }
+    }
+
+    if (showYouTubeImportSheet) {
+        YouTubeImportSheet(
+            onDismiss = { showYouTubeImportSheet = false },
+            innerTube = viewModel.innerTube,
+            importManager = viewModel.playlistImportManager,
+            onImportSuccess = { saved ->
+                viewModel.showToast("Imported \"${saved.title}\" (${saved.tracks.size} tracks)")
             },
         )
     }
@@ -827,96 +1030,57 @@ private fun SettingsActionCard(
 private fun AccountCard(
     isSignedIn: Boolean,
     username: String,
-    hasCredentials: Boolean,
-    onSaveCredentials: (String, String) -> Unit,
     onLogOut: () -> Unit,
 ) {
-    var apiKey by remember { mutableStateOf("") }
-    var apiSecret by remember { mutableStateOf("") }
     var showLogoutConfirm by remember { mutableStateOf(false) }
 
     Card(
         shape = CardOuterShape,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        modifier = Modifier.animateContentSize(),
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
     ) {
-        Column(Modifier.padding(20.dp)) {
-            if (hasCredentials) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            username.take(1).uppercase(),
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.headlineSmall,
-                        )
-                    }
-                    Spacer(Modifier.width(16.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Signed in as",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            username.ifBlank { "Last.fm user" },
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    FilledTonalIconButton(
-                        onClick = { showLogoutConfirm = true },
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                            contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                        ),
-                    ) {
-                        Icon(Icons.Filled.Logout, contentDescription = "Log out")
-                    }
-                }
-            } else {
-                Text("Connect Last.fm", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(14.dp))
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it },
-                    label = { Text("API Key") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = apiSecret,
-                    onValueChange = { apiSecret = it },
-                    label = { Text("API Secret") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
-                    "Get your API key at last.fm/api/account/create",
-                    style = MaterialTheme.typography.bodySmall,
+                    if (isSignedIn && username.isNotBlank()) username.take(1).uppercase() else "L",
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (isSignedIn) "Signed in as" else "Last.fm Account",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(14.dp))
-                Button(
-                    onClick = { onSaveCredentials(apiKey, apiSecret) },
-                    enabled = apiKey.isNotBlank() && apiSecret.isNotBlank(),
-                    shape = ExpressivePillShape,
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                ) {
-                    Text("Save API Credentials", fontWeight = FontWeight.Medium)
-                }
+                Text(
+                    if (isSignedIn && username.isNotBlank()) username else "Guest User",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            FilledTonalIconButton(
+                onClick = { showLogoutConfirm = true },
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+            ) {
+                Icon(Icons.Filled.Logout, contentDescription = "Log out")
             }
         }
     }
@@ -924,7 +1088,7 @@ private fun AccountCard(
     if (showLogoutConfirm) {
         AlertDialog(
             onDismissRequest = { showLogoutConfirm = false },
-            title = { Text("Log out?") },
+            title = { Text(if (isSignedIn) "Log out?" else "Leave Guest Mode?") },
             text = { Text("Your playlists and cached data will be kept.") },
             confirmButton = { TextButton(onClick = { showLogoutConfirm = false; onLogOut() }) { Text("Log Out") } },
             dismissButton = { TextButton(onClick = { showLogoutConfirm = false }) { Text("Cancel") } },

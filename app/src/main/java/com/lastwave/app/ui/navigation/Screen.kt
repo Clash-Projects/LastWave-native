@@ -23,4 +23,9 @@ sealed class Screen(val route: String) {
     data object Settings : Screen("settings")
     data object ScrobblerApps : Screen("scrobbler_apps")
     data object Friends : Screen("friends")
+    data object Downloads : Screen("downloads")
+    data object YouTubeImport : Screen("youtube_import")
+    data object PlaylistDetail : Screen("playlist_detail/{playlistId}") {
+        fun createRoute(playlistId: Long) = "playlist_detail/$playlistId"
+    }
 }

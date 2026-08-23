@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Card
@@ -123,6 +124,7 @@ private fun shimmerBrush(): Brush {
 fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsState()
     val musicPlayer = LocalMusicPlayer.current
+    val playbackState by musicPlayer.state.collectAsState()
     val listState = rememberLazyListState()
     var menuTrack by remember { mutableStateOf<GeneratedTrack?>(null) }
     val playbackQueue = remember(state.tracks) { state.tracks.map(GeneratedTrack::toPlayableTrack) }
@@ -236,9 +238,14 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                     ) {
                         itemsIndexed(state.tracks, key = { _, t -> t.key }) { index, track ->
                             val position = if (index == 0) GroupPosition.TOP else GroupPosition.MIDDLE
+                            val isPlayingThisSong = playbackState.isPlaying &&
+                                playbackState.current?.title.equals(track.name, ignoreCase = true) &&
+                                playbackState.current?.artist.equals(track.artist, ignoreCase = true)
+
                             DiscoverCard(
                                 track = track,
                                 position = position,
+                                isPlaying = isPlayingThisSong,
                                 onPlay = { playFromDiscover(track) },
                                 onMenu = { menuTrack = track },
                                 modifier = Modifier.animateItem(),
@@ -281,6 +288,7 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
 private fun DiscoverCard(
     track: GeneratedTrack,
     position: GroupPosition,
+    isPlaying: Boolean,
     onPlay: () -> Unit,
     onMenu: () -> Unit,
     modifier: Modifier = Modifier,
@@ -289,10 +297,24 @@ private fun DiscoverCard(
         title = track.name,
         subtitle = track.artist,
         position = position,
+        isPlaying = isPlaying,
         onClick = onPlay,
         modifier = modifier,
         leading = {
-            ArtworkImage(name = track.name, artist = track.artist, embeddedUrl = track.artworkUrl, fallbackIcon = Icons.Filled.MusicNote, modifier = Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)))
+            Box(modifier = Modifier.size(52.dp)) {
+                ArtworkImage(
+                    name = track.name,
+                    artist = track.artist,
+                    embeddedUrl = track.artworkUrl,
+                    fallbackIcon = if (isPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote,
+                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+                )
+                if (isPlaying) {
+                    com.lastwave.app.ui.player.PlayingWaveBars(
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(3.dp),
+                    )
+                }
+            }
         },
         trailing = { com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenu) },
     )

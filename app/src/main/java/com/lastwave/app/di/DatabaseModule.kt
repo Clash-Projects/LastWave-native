@@ -62,4 +62,9 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideSavedPlaylistDao(database: AppDatabase): SavedPlaylistDao = database.savedPlaylistDao()
+
+    @Provides
+    @Singleton
+    fun provideDownloadedTrackDao(database: AppDatabase): com.lastwave.app.data.local.db.DownloadedTrackDao =
+        database.downloadedTrackDao()
 }

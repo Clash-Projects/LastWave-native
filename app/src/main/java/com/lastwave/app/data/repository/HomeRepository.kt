@@ -10,10 +10,16 @@ import com.lastwave.app.data.model.TopArtistsEnvelope
 import com.lastwave.app.data.model.TopTracksEnvelope
 import com.lastwave.app.data.model.TopTracksFullEnvelope
 import com.lastwave.app.data.model.UserInfoEnvelope
+import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.network.LastFmApiService
 import com.lastwave.app.data.network.LastFmErrors
 import com.lastwave.app.data.network.LastFmException
 import androidx.compose.runtime.Immutable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
@@ -55,8 +61,23 @@ data class HomeInitialData(
 class HomeRepository @Inject constructor(
     private val api: LastFmApiService,
     private val sessionPreferences: SessionPreferences,
+    private val innerTube: InnerTubeMusicApi,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+
+    private val playableCheckSemaphore = kotlinx.coroutines.sync.Semaphore(6)
+
+    private suspend fun filterPlayable(tracks: List<HomeTrack>): List<HomeTrack> = coroutineScope {
+        if (tracks.isEmpty()) return@coroutineScope emptyList()
+        val checks = tracks.map { track ->
+            async(Dispatchers.IO) {
+                playableCheckSemaphore.withPermit {
+                    if (innerTube.isPlayable(track.name, track.artist)) track else null
+                }
+            }
+        }
+        checks.awaitAll().filterNotNull()
+    }
 
     private suspend fun requireSession() = sessionPreferences.session.first().also { session ->
         if (session.apiKey.isBlank() || session.username.isBlank()) {

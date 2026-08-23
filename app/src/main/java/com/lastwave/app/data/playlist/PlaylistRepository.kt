@@ -1,17 +1,22 @@
 package com.lastwave.app.data.playlist
 
 import android.util.Log
+import androidx.compose.runtime.Immutable
 import com.lastwave.app.data.local.db.SavedPlaylistDao
 import com.lastwave.app.data.local.db.SavedPlaylistEntity
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.StoredTrack
 import com.lastwave.app.data.generate.toGenerated
 import com.lastwave.app.data.generate.toStored
+import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.util.FileExportHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
@@ -24,8 +29,6 @@ import javax.inject.Singleton
 /** Port of playlist.js's `lw_playlists` model: id, title, subtitle, mode,
  *  tracks, date. [id] doubles as the creation timestamp (matches the
  *  original's `Date.now()`-based id). */
-import androidx.compose.runtime.Immutable
-
 @Immutable
 data class SavedPlaylist(
     val id: Long,
@@ -49,6 +52,7 @@ class PlaylistRepository @Inject constructor(
     private val fileExportHelper: FileExportHelper,
     private val exportEvents: PlaylistExportEvents,
     private val publicMirror: PlaylistPublicMirror,
+    private val innerTube: InnerTubeMusicApi,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
@@ -72,6 +76,20 @@ class PlaylistRepository @Inject constructor(
         startupSync.await()
     }
 
+    private val playableCheckSemaphore = kotlinx.coroutines.sync.Semaphore(6)
+
+    private suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> = coroutineScope {
+        if (tracks.isEmpty()) return@coroutineScope emptyList()
+        val checks = tracks.map { track ->
+            async(Dispatchers.IO) {
+                playableCheckSemaphore.withPermit {
+                    if (innerTube.isPlayable(track.name, track.artist)) track else null
+                }
+            }
+        }
+        checks.awaitAll().filterNotNull()
+    }
+
     /** Newest first — matches _plRenderSaved()'s display order (the
      *  original reverses its append-ordered array before rendering). */
     suspend fun getAll(): List<SavedPlaylist> {
@@ -92,7 +110,8 @@ class PlaylistRepository @Inject constructor(
      */
     suspend fun save(title: String, subtitle: String, mode: String, tracks: List<GeneratedTrack>, discoverSignature: String? = null): SavedPlaylist {
         val existing = getAll()
-        val firstKey = tracks.firstOrNull()?.key
+        val playableTracks = if (mode == "custom" && tracks.isEmpty()) emptyList() else filterPlayable(tracks)
+        val firstKey = playableTracks.firstOrNull()?.key
         existing.firstOrNull {
             !it.isCompleted &&
                 it.mode == mode &&
@@ -106,7 +125,7 @@ class PlaylistRepository @Inject constructor(
             title = title,
             subtitle = subtitle,
             mode = mode,
-            tracksJson = json.encodeToString(tracks.map { it.toStored() }),
+            tracksJson = json.encodeToString(playableTracks.map { it.toStored() }),
             createdAtMillis = System.currentTimeMillis(),
             discoverSignature = discoverSignature,
         )
@@ -202,6 +221,7 @@ class PlaylistRepository @Inject constructor(
         val playlist = entity.toDomain()
         if (playlist.mode != "custom") return playlist
         if (!allowDuplicate && playlist.tracks.any { it.key == track.key }) return playlist
+        if (!innerTube.isPlayable(track.name, track.artist)) return playlist
         val updatedTracksJson = json.encodeToString((playlist.tracks + track).map { it.toStored() })
         val updated = entity.copy(tracksJson = updatedTracksJson)
         dao.upsert(updated)

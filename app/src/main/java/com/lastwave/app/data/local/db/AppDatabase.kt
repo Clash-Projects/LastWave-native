@@ -4,12 +4,18 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [ArtworkCacheEntity::class, SeenTrackEntity::class, SavedPlaylistEntity::class],
-    version = 7,
+    entities = [
+        ArtworkCacheEntity::class,
+        SeenTrackEntity::class,
+        SavedPlaylistEntity::class,
+        DownloadedTrackEntity::class,
+    ],
+    version = 8,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun artworkCacheDao(): ArtworkCacheDao
     abstract fun seenTrackDao(): SeenTrackDao
     abstract fun savedPlaylistDao(): SavedPlaylistDao
+    abstract fun downloadedTrackDao(): DownloadedTrackDao
 }

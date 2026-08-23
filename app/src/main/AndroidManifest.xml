@@ -39,14 +39,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!-- Last.fm's web-auth flow redirects here after approval
-                 (see AuthRepository.authUrl's cb= param). Opened via Chrome
-                 Custom Tabs (real Chrome, not this app's own WebView), so
-                 this is what brings the app back to the foreground
-                 automatically the moment the person approves — singleTask
-                 above means it reuses this same MainActivity instance
-                 rather than creating a new one; MainActivity then passes
-                 the callback token directly to the login ViewModel. -->
+            <!-- Last.fm auth callback redirect -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -54,13 +47,41 @@
                 <data android:scheme="lastwave" android:host="auth-callback" />
             </intent-filter>
 
+            <!-- YouTube & YouTube Music deep links / Open With -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="music.youtube.com" />
+                <data android:host="www.youtube.com" />
+                <data android:host="youtube.com" />
+                <data android:host="m.youtube.com" />
+                <data android:host="youtu.be" />
+            </intent-filter>
+
+            <!-- Spotify deep links / Open With -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:host="open.spotify.com" />
+                <data android:host="spotify.link" />
+            </intent-filter>
+
+            <!-- Share target for music links & song titles -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+
         </activity>
 
-        <!-- LastWave's own local scrobbler (see service/MediaScrobbleListenerService.kt).
-             Requires the user to grant Notification Listener access from
-             Settings' Scrobbler section — the OS won't let this run without
-             it, and the app can't grant it to itself, only send the user
-             to the system screen that does. -->
+        <!-- LastWave local scrobbler listener service -->
         <service
             android:name=".service.MediaScrobbleListenerService"
             android:exported="true"
@@ -71,16 +92,14 @@
             </intent-filter>
         </service>
 
-        <!-- Owns the native player so audio and its MediaSession survive
-             Activity/background transitions. Media3 publishes the standard
-             Android now-playing notification and lock-screen controls. -->
+        <!-- Native background music player service -->
         <service
             android:name=".playback.MusicPlaybackService"
             android:exported="false"
             android:stopWithTask="false"
             android:foregroundServiceType="mediaPlayback" />
 
-        <!-- One cross-app now-playing widget using the live LastWave color scheme. -->
+        <!-- Now playing widget -->
         <receiver
             android:name=".widget.NowPlayingWidgetReceiver"
             android:exported="false"
@@ -91,6 +110,15 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/now_playing_widget_info" />
+        </receiver>
+
+        <!-- Receiver for canceling active background downloads from the notification action -->
+        <receiver
+            android:name=".data.download.DownloadCancelReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.lastwave.app.ACTION_CANCEL_DOWNLOAD" />
+            </intent-filter>
         </receiver>
 
         <!-- Retained for the Playlist module's M3U export (SAF/legacy write) -->

@@ -530,7 +530,11 @@ private fun MiniPlayer(
 }
 
 @Composable
-internal fun PlayingWaveBars(modifier: Modifier = Modifier) {
+fun PlayingWaveBars(
+    modifier: Modifier = Modifier,
+    waveColor: Color = MaterialTheme.colorScheme.primary,
+    containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+) {
     val transition = rememberInfiniteTransition(label = "miniArtworkWave")
     val first by transition.animateFloat(
         initialValue = 0.35f,
@@ -551,23 +555,24 @@ internal fun PlayingWaveBars(modifier: Modifier = Modifier) {
         label = "miniWaveThird",
     )
     Surface(
-        shape = RoundedCornerShape(9.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-        contentColor = MaterialTheme.colorScheme.primary,
-        modifier = modifier.size(width = 28.dp, height = 24.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = containerColor,
+        contentColor = waveColor,
+        shadowElevation = 2.dp,
+        modifier = modifier.size(width = 26.dp, height = 22.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 5.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.5.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
             listOf(first, second, third).forEach { level ->
                 Box(
                     Modifier
-                        .width(3.dp)
-                        .height((5f + level * 11f).dp)
+                        .width(2.5.dp)
+                        .height((4f + level * 10f).dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
+                        .background(waveColor),
                 )
             }
         }

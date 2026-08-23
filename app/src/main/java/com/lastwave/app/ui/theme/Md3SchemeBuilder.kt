@@ -86,20 +86,25 @@ object Md3SchemeBuilder {
         val sc2L = if (amoled) 8 else 16
         val sc3L = if (amoled) 12 else 20
 
+        val backgroundCol = if (amoled) Color.Black else hsl(neutralHue, cN, bgL)
+        val surfaceCol = if (amoled) Color.Black else hsl(neutralHue, cN, bgL)
+        val surfaceLowCol = if (amoled) Color.Black else hsl(neutralHue, cN, bgL)
+        val surfaceLowestCol = if (amoled) Color.Black else hsl(neutralHue, cN, (bgL - 2).coerceAtLeast(0))
+
         return darkColorScheme(
             primary = hsl(primaryHue, cP, 82),
             onPrimary = hsl(primaryHue, cP, 16),
-            primaryContainer = hsl(primaryHue, cP, 30),
+            primaryContainer = hsl(primaryHue, cP, if (amoled) 24 else 30),
             onPrimaryContainer = hsl(primaryHue, (cP - 5).coerceAtLeast(0), 90),
 
             secondary = hsl(secondaryHue, cS, 80),
             onSecondary = hsl(secondaryHue, cS, 16),
-            secondaryContainer = hsl(secondaryHue, cS, 28),
+            secondaryContainer = hsl(secondaryHue, cS, if (amoled) 22 else 28),
             onSecondaryContainer = hsl(secondaryHue, (cS - 4).coerceAtLeast(0), 90),
 
             tertiary = hsl(tertiaryHue, cT, 80),
             onTertiary = hsl(tertiaryHue, cT, 16),
-            tertiaryContainer = hsl(tertiaryHue, cT, 28),
+            tertiaryContainer = hsl(tertiaryHue, cT, if (amoled) 22 else 28),
             onTertiaryContainer = hsl(tertiaryHue, (cT - 6).coerceAtLeast(0), 90),
 
             error = hsl(0, if (monochrome) 45 else 45, 80),
@@ -107,15 +112,15 @@ object Md3SchemeBuilder {
             onErrorContainer = hsl(0, if (monochrome) 25 else 25, 88),
             onError = hsl(0, 45, 16),
 
-            background = hsl(neutralHue, cN, bgL),
+            background = backgroundCol,
             onBackground = hsl(neutralHue, cNV, 90),
-            surface = hsl(neutralHue, cN, bgL),
+            surface = surfaceCol,
             onSurface = hsl(neutralHue, cNV, 90),
             surfaceContainer = hsl(neutralHue, cN, sc1L),
             surfaceContainerHigh = hsl(neutralHue, cN, sc2L),
             surfaceContainerHighest = hsl(neutralHue, cN, sc3L),
-            surfaceContainerLow = hsl(neutralHue, cN, bgL),
-            surfaceContainerLowest = hsl(neutralHue, cN, (bgL - 2).coerceAtLeast(0)),
+            surfaceContainerLow = surfaceLowCol,
+            surfaceContainerLowest = surfaceLowestCol,
             surfaceVariant = hsl(neutralHue, cNV, sc2L + 4),
             onSurfaceVariant = hsl(neutralHue, cNV, 80),
 

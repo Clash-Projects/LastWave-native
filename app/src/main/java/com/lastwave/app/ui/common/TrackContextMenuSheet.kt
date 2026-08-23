@@ -24,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Person
@@ -40,6 +42,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -90,6 +93,15 @@ sealed interface TrackMenuTarget {
 class StartMixMenuViewModel @Inject constructor(private val mixLauncher: MixLauncher) : ViewModel() {
     fun startMix(trackName: String, artistName: String) {
         mixLauncher.startMix(trackName, artistName)
+    }
+}
+
+@HiltViewModel
+class DownloadMenuViewModel @Inject constructor(
+    private val downloadManager: com.lastwave.app.data.download.TrackDownloadManager,
+) : ViewModel() {
+    fun download(title: String, artist: String, album: String? = null, artworkUrl: String? = null) {
+        downloadManager.downloadTrack(title, artist, album, artworkUrl)
     }
 }
 
@@ -176,72 +188,80 @@ fun TrackContextMenuSheet(
     genreResolverViewModel: GenreRowViewModel = hiltViewModel(),
     startMixViewModel: StartMixMenuViewModel = hiltViewModel(),
     exploreGenreViewModel: ExploreGenreMenuViewModel = hiltViewModel(),
+    downloadViewModel: DownloadMenuViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
-    val musicPlayer = LocalMusicPlayer.current
-    val addToPlaylist = LocalAddToPlaylist.current
     val clipboard = LocalClipboardManager.current
     val sheetState = rememberModalBottomSheetState()
-    val startMix = onStartMix ?: { name: String, artist: String -> startMixViewModel.startMix(name, artist) }
-    val exploreGenre = onExploreGenre ?: { genre: String -> exploreGenreViewModel.explore(genre) }
-
-    var genre by remember(target) { mutableStateOf<String?>(null) }
+    val musicPlayer = LocalMusicPlayer.current
+    val addToPlaylist = LocalAddToPlaylist.current
+    var showDetailsSheet by remember { mutableStateOf(false) }
+    var resolvedGenre by remember(target) { mutableStateOf<String?>(null) }
     var resolvingGenre by remember(target) { mutableStateOf(false) }
 
-    val isTrack = target is TrackMenuTarget.Track
     LaunchedEffect(target) {
         if (target is TrackMenuTarget.Track) {
             resolvingGenre = true
-            genre = genreResolverViewModel.resolve(target.name, target.artist)
+            resolvedGenre = runCatching { genreResolverViewModel.resolve(target.name, target.artist) }.getOrNull()
             resolvingGenre = false
         }
     }
 
-    // Previously washed toward primaryContainer for an accent tint — on a
-    // system-derived dynamic scheme, primaryContainer can resolve to a
-    // pale, light swatch (exactly what Material You's tonal palette design
-    // calls for) that reads as jarringly bright against this app's dark
-    // theme. But setting this to the SAME surfaceContainerHigh the grouped
-    // rows below use made the sheet background and the row cards
-    // indistinguishable — the grouped-container look needs the sheet
-    // itself a shade darker than its rows for the rows to read as
-    // containers at all, same as Settings/Generator (plain screen
-    // background behind surfaceContainerHigh rows).
-    val sheetContainerColor = MaterialTheme.colorScheme.surfaceContainer
+    fun exploreGenre(genre: String) {
+        if (onExploreGenre != null) onExploreGenre(genre)
+        else exploreGenreViewModel.explore(genre)
+    }
+
+    if (showDetailsSheet && target is TrackMenuTarget.Track) {
+        val playable = playableTrack ?: PlayableTrack(title = target.name, artist = target.artist)
+        TrackDetailsSheet(
+            title = target.name,
+            artist = target.artist,
+            album = playable.album,
+            artworkUrl = playable.artworkUrl,
+            onDismiss = {
+                showDetailsSheet = false
+                onDismiss()
+            },
+            onPlayTrack = {
+                onPlayInLastWave?.invoke() ?: musicPlayer.play(playable, sourceLabel = playbackSourceLabel)
+            },
+        )
+        return
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-        containerColor = sheetContainerColor,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
     ) {
         Column(
-            Modifier.padding(horizontal = 12.dp).padding(bottom = 24.dp, top = 4.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp)
+                .padding(bottom = 24.dp + safeDrawingBottomPadding()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (isTrack) {
-                val t = target as TrackMenuTarget.Track
-
+            if (target is TrackMenuTarget.Track) {
                 StartMixCard {
-                    startMix(t.name, t.artist); onDismiss()
+                    if (onStartMix != null) onStartMix(target.name, target.artist)
+                    else startMixViewModel.startMix(target.name, target.artist)
+                    onDismiss()
                 }
 
-                // Every row below (Genre info line + all actions) is one
-                // grouped surface now — Settings/Generator's look — instead
-                // of separate transparent rows with gaps between them.
-                // Built as a list first so the first/last row (whichever
-                // ones actually render, since Genre/Refresh/Copy/Delete
-                // are each conditional) get the group's rounded top/bottom
-                // corners rather than a hardcoded index.
                 val rows = buildList<@Composable (GroupPosition) -> Unit> {
-                    if (resolvingGenre || !genre.isNullOrBlank() || genre == "") {
-                        val resolvedGenre = genre
-                        // Clickable itself now (opens that genre in the
-                        // Genres tab via GenreExplorer) instead of a plain
-                        // display-only row with a separate, redundant
-                        // "Explore this genre" action further down — one
-                        // row, one obvious tap target, same place your eye
-                        // already goes to read the genre.
+                    val t = target
+                    if (resolvingGenre || !resolvedGenre.isNullOrBlank()) {
                         add { pos ->
                             MenuInfoRow(
                                 icon = Icons.Filled.Sell,
@@ -249,7 +269,7 @@ fun TrackContextMenuSheet(
                                 loading = resolvingGenre,
                                 position = pos,
                                 onClick = if (!resolvingGenre && !resolvedGenre.isNullOrBlank()) {
-                                    { exploreGenre(resolvedGenre); onDismiss() }
+                                    { exploreGenre(resolvedGenre!!); onDismiss() }
                                 } else null,
                             )
                         }
@@ -259,6 +279,17 @@ fun TrackContextMenuSheet(
                         MenuActionRow(Icons.Filled.PlayCircle, "Play in LastWave", position = pos) {
                             onPlayInLastWave?.invoke() ?: musicPlayer.play(playable, sourceLabel = playbackSourceLabel)
                             onDismiss()
+                        }
+                    }
+                    add { pos ->
+                        MenuActionRow(Icons.Filled.Download, "Download (Max Quality)", position = pos) {
+                            downloadViewModel.download(t.name, t.artist, playable.album, playable.artworkUrl)
+                            onDismiss()
+                        }
+                    }
+                    add { pos ->
+                        MenuActionRow(Icons.Filled.Info, "Details & Audio Specs", position = pos) {
+                            showDetailsSheet = true
                         }
                     }
                     add { pos -> MenuActionRow(Icons.Filled.QueuePlayNext, "Play next", position = pos) { musicPlayer.playNext(playable); onDismiss() } }

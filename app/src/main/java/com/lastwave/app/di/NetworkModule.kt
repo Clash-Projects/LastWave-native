@@ -11,32 +11,49 @@ import retrofit2.Retrofit
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
+import okhttp3.Interceptor
+import okhttp3.Response
+import java.io.IOException
+
 @Module
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
+
+    private class NetworkResilienceInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            var attempt = 0
+            var lastException: IOException? = null
+            val isIdempotent = request.method.equals("GET", ignoreCase = true) || request.method.equals("HEAD", ignoreCase = true)
+
+            while (attempt < (if (isIdempotent) 3 else 1)) {
+                attempt++
+                try {
+                    val response = chain.proceed(request)
+                    if (isIdempotent && (response.code == 502 || response.code == 503 || response.code == 504) && attempt < 3) {
+                        response.close()
+                        val jitter = (Math.random() * 100).toLong()
+                        try { Thread.sleep(200L * attempt + jitter) } catch (_: InterruptedException) {}
+                        continue
+                    }
+                    return response
+                } catch (e: IOException) {
+                    lastException = e
+                    if (!isIdempotent || attempt >= 3) throw e
+                    val jitter = (Math.random() * 100).toLong()
+                    try { Thread.sleep(200L * attempt + jitter) } catch (_: InterruptedException) {}
+                }
+            }
+            throw lastException ?: IOException("Request failed after $attempt attempts")
+        }
+    }
 
     @Provides
     @Singleton
     fun provideOkHttpClient(): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
-            // Last.fm URLs never carry the session key or secret in the path/query
-            // for GET reads, but signed POST bodies do — keep logging headers-only
-            // in release builds; BuildConfig gating is left to the app's own logger.
             level = HttpLoggingInterceptor.Level.BASIC
         }
-        // The real reason cover art (and honestly every other Last.fm call)
-        // could feel slow: OkHttp's DEFAULT Dispatcher caps concurrent
-        // requests at just 5 per host — and every single call this app
-        // makes (artwork lookups, recent-tracks polling, search, friends,
-        // scrobbling) shares the exact same host. A list of 20-30 tracks
-        // needing artwork queues up into slow waves of 5 sequential
-        // batches, competing with everything else hitting that host at the
-        // same time, purely because of this client-side self-imposed
-        // limit — Last.fm's servers handle far more concurrency than that
-        // from a single app just fine. Matched the connection pool's max
-        // idle connections to the same number so those extra concurrent
-        // requests don't just churn through new TCP/TLS handshakes instead
-        // of reusing warm connections.
         val dispatcher = okhttp3.Dispatcher().apply {
             maxRequests = 64
             maxRequestsPerHost = 24
@@ -44,8 +61,12 @@ object NetworkModule {
         return OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .connectionPool(okhttp3.ConnectionPool(24, 5, TimeUnit.MINUTES))
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .writeTimeout(12, TimeUnit.SECONDS)
+            .pingInterval(30, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .addInterceptor(NetworkResilienceInterceptor())
             .addInterceptor(logging)
             .build()
     }

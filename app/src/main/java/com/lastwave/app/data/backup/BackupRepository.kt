@@ -94,7 +94,7 @@ class BackupRepository @Inject constructor(
     private val seenTrackDao: SeenTrackDao,
     private val playlistPublicMirror: PlaylistPublicMirror,
 ) {
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
+    private val json = Json { ignoreUnknownKeys = true; prettyPrint = true; encodeDefaults = true }
 
     fun checkBackup(content: String): BackupCheck {
         val backup = runCatching { json.decodeFromString<BackupFile>(content) }.getOrNull()
@@ -104,7 +104,7 @@ class BackupRepository @Inject constructor(
         return BackupCheck.Valid(backup.playlists.size)
     }
 
-    suspend fun buildBackup(appVersionName: String): String {
+    suspend fun buildBackup(appVersionName: String): String = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val prefs = dataStore.data.first()
         val strings = mutableMapOf<String, String>()
         val booleans = mutableMapOf<String, Boolean>()
@@ -116,6 +116,7 @@ class BackupRepository @Inject constructor(
                 is String -> strings[key] = value
                 is Boolean -> booleans[key] = value
                 is Int -> integers[key] = value
+                is Long -> integers[key] = value.toInt()
                 is Set<*> -> stringSets[key] = value.mapNotNull { it as? String }.toSet()
                 else -> Unit
             }
@@ -147,7 +148,7 @@ class BackupRepository @Inject constructor(
             playlists = playlists,
             seenTracks = seenTracks,
         )
-        return json.encodeToString(backup)
+        json.encodeToString(backup)
     }
 
     suspend fun restore(

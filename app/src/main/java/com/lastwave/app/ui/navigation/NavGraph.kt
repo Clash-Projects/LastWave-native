@@ -142,6 +142,9 @@ fun LastWaveNavHost(
                 onOpenDiscover = { navController.navigate(Screen.Discover.route) },
                 onOpenGenres = { navController.navigate(Screen.Genres.route) },
                 onOpenFriends = { navController.navigate(Screen.Friends.route) },
+                onOpenPlaylist = { playlistId ->
+                    navController.navigate(Screen.PlaylistDetail.createRoute(playlistId))
+                },
             )
         }
 
@@ -208,7 +211,26 @@ fun LastWaveNavHost(
                         }
                     },
                     onOpenChooseApps = { navController.navigate(Screen.ScrobblerApps.route) },
+                    onOpenDownloads = { navController.navigate(Screen.Downloads.route) },
+                    onOpenYouTubeImport = { navController.navigate(Screen.YouTubeImport.route) },
                 )
+            }
+        }
+
+        composable(Screen.YouTubeImport.route) {
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.settings.YouTubePlaylistImportScreen(
+                    onBack = { navController.popBackStack() },
+                    onImportSuccess = {
+                        navController.popBackStack()
+                    },
+                )
+            }
+        }
+
+        composable(Screen.Downloads.route) {
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.settings.DownloadsScreen(onBack = { navController.popBackStack() })
             }
         }
 
@@ -227,6 +249,23 @@ fun LastWaveNavHost(
         composable(Screen.Discover.route) {
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 DiscoverScreen(onBack = { navController.popBackStack() })
+            }
+        }
+
+        composable(
+            route = Screen.PlaylistDetail.route,
+            arguments = listOf(
+                androidx.navigation.navArgument("playlistId") {
+                    type = androidx.navigation.NavType.LongType
+                },
+            ),
+        ) { backStackEntry ->
+            val playlistId = backStackEntry.arguments?.getLong("playlistId") ?: return@composable
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.playlist.PlaylistDetailScreen(
+                    playlistId = playlistId,
+                    onBack = { navController.popBackStack() },
+                )
             }
         }
     }

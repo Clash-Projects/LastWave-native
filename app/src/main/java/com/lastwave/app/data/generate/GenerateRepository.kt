@@ -13,6 +13,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -37,6 +38,7 @@ class GenerateRepository @Inject constructor(
     private val tasteProfileProvider: TasteProfileProvider,
     private val playlistRepository: PlaylistRepository,
     private val viewingProfileState: com.lastwave.app.data.repository.ViewingProfileState,
+    private val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -106,6 +108,21 @@ class GenerateRepository @Inject constructor(
         }
     }
 
+    private val playableCheckSemaphore = kotlinx.coroutines.sync.Semaphore(6)
+
+    /** Filters out tracks that are not found or not playable on YouTube Music. */
+    suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> = coroutineScope {
+        if (tracks.isEmpty()) return@coroutineScope emptyList()
+        val checks = tracks.map { track ->
+            async(Dispatchers.IO) {
+                playableCheckSemaphore.withPermit {
+                    if (innerTube.isPlayable(track.name, track.artist)) track else null
+                }
+            }
+        }
+        checks.awaitAll().filterNotNull()
+    }
+
     // ── Seen-tracks freshness filter — port of _filterFresh/_markAsSeen ──
 
     suspend fun filterFresh(tracks: List<GeneratedTrack>): List<GeneratedTrack> {
@@ -113,31 +130,31 @@ class GenerateRepository @Inject constructor(
             seenTrackDao.getAll().associate { it.trackKey to it.lastSeenMillis }
         } catch (e: Exception) {
             Log.e(TAG, "Seen-tracks read failed, treating all as fresh", e)
-            emptyMap()
+            return tracks
         }
         val now = System.currentTimeMillis()
-        return tracks.filter { t ->
-            val ts = seenMap[t.key]
-            ts == null || (now - ts) > SEEN_TTL_MILLIS
+        return tracks.filter { track ->
+            val lastSeen = seenMap[track.key] ?: return@filter true
+            (now - lastSeen) > SEEN_TTL_MILLIS
         }
     }
 
     suspend fun markAsSeen(tracks: List<GeneratedTrack>) {
+        if (tracks.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val entities = tracks
+            .filter { it.name.isNotBlank() && it.artist.isNotBlank() }
+            .distinctBy { it.key }
+            .map { SeenTrackEntity(it.key, now) }
         try {
-            rememberInDiscoveryHistory(tracks)
+            seenTrackDao.upsertAll(entities)
+            seenTrackDao.trimToNewest(SEEN_MAX)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to record seen tracks", e)
         }
     }
 
-    /** Strong write used when completing a playlist: callers are notified
-     *  if history persistence fails, so the playlist is not hidden first. */
-    suspend fun rememberInDiscoveryHistory(tracks: List<GeneratedTrack>) {
-        if (tracks.isEmpty()) return
-        val now = System.currentTimeMillis()
-        seenTrackDao.upsertAll(tracks.map { SeenTrackEntity(it.key, now) })
-        seenTrackDao.trimToNewest(SEEN_MAX)
-    }
+    suspend fun rememberInDiscoveryHistory(tracks: List<GeneratedTrack>) = markAsSeen(tracks)
 
     /** Every key shown by Settings' "Clear Discovery History" action.
      *  Recommendation generation treats this as a hard blacklist, without
@@ -173,18 +190,18 @@ class GenerateRepository @Inject constructor(
     suspend fun fetchTopTracks(limit: Int, period: String = "overall"): List<GeneratedTrack> {
         val page = (1..3).random()
         val result = call(
-            mapOf("method" to "user.gettoptracks", "user" to username(), "period" to period, "limit" to limit.toString(), "page" to page.toString()),
+            mapOf("method" to "user.gettoptracks", "user" to username(), "period" to period, "limit" to (limit * 2).coerceAtLeast(limit).toString(), "page" to page.toString()),
         )
         val tracks = GenerateJson.normalise(result["toptracks"]?.jsonObject?.get("track"))
-        return shuffle(tracks)
+        return filterPlayable(shuffle(tracks)).take(limit)
     }
 
     suspend fun fetchRecentTracks(limit: Int): List<GeneratedTrack> {
-        val result = call(mapOf("method" to "user.getrecenttracks", "user" to username(), "limit" to limit.toString()))
+        val result = call(mapOf("method" to "user.getrecenttracks", "user" to username(), "limit" to (limit * 2).coerceAtLeast(limit).toString()))
         val raw = result["recenttracks"]?.jsonObject?.get("track")
         val withoutNowPlaying = GenerateJson.asObjectList(raw)
             .filterNot { it["@attr"]?.jsonObject?.get("nowplaying") != null }
-        return shuffle(GenerateJson.normalise(JsonArray(withoutNowPlaying)))
+        return filterPlayable(shuffle(GenerateJson.normalise(JsonArray(withoutNowPlaying)))).take(limit)
     }
 
     suspend fun fetchSimilarTracks(track: String, artist: String, limit: Int): List<GeneratedTrack> {
@@ -194,7 +211,7 @@ class GenerateRepository @Inject constructor(
         val all = GenerateJson.normalise(result["similartracks"]?.jsonObject?.get("track"))
         val fresh = filterFresh(all)
         val pool = if (fresh.size >= minOf(limit, 8)) fresh else all
-        return shuffle(pool).take(limit)
+        return filterPlayable(shuffle(pool)).take(limit)
     }
 
     suspend fun fetchSimilarArtistTracks(artist: String, limit: Int): List<GeneratedTrack> {
@@ -216,7 +233,7 @@ class GenerateRepository @Inject constructor(
         }
         val fresh = filterFresh(allTracks)
         val pool = if (fresh.size >= minOf(limit, 8)) fresh else allTracks
-        return shuffle(pool).take(limit)
+        return filterPlayable(shuffle(pool)).take(limit)
     }
 
     suspend fun fetchTagTracks(tag: String, limit: Int): List<GeneratedTrack> {
@@ -225,7 +242,7 @@ class GenerateRepository @Inject constructor(
         val all = GenerateJson.normalise(result["tracks"]?.jsonObject?.get("track"))
         val fresh = filterFresh(all)
         val pool = if (fresh.size >= minOf(limit, 8)) fresh else all
-        return shuffle(pool).take(limit)
+        return filterPlayable(shuffle(pool)).take(limit)
     }
 
     // ── My Mix — exact port of fetchMix(): 3-tier weighted blend ──
@@ -370,7 +387,7 @@ class GenerateRepository @Inject constructor(
             } catch (e: Exception) { Log.d(TAG, "fetchMix fallback miss", e) }
         }
 
-        return deduplicate(pool)
+        return filterPlayable(deduplicate(pool)).take(total)
     }
 
     // ── My Recommendations — delegates the heavy scoring/pipeline logic to
@@ -405,7 +422,8 @@ class GenerateRepository @Inject constructor(
             isFresh = { tracks -> filterFresh(tracks) },
             onProgress = onProgress,
         )
-        return engine.run(total, profile, blacklist)
+        val recommended = engine.run(total, profile, blacklist)
+        return filterPlayable(recommended).take(total)
     }
 
     // ── Start Mix From Track — exact port of startMixFromTrack()'s 3-source blend ──
@@ -482,7 +500,7 @@ class GenerateRepository @Inject constructor(
         val fresh = filterFresh(result)
         val finalPool = if (fresh.size >= minOf(MIX_SIZE, 10)) fresh else result
 
-        return finalPool.take(MIX_SIZE)
+        return filterPlayable(finalPool).take(MIX_SIZE)
     }
 
     // ── Seed pickers / search ──

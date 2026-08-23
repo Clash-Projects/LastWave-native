@@ -31,6 +31,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var lastFmAuthCallback: LastFmAuthCallbackCoordinator
 
+    @Inject
+    lateinit var linkPlaybackResolver: com.lastwave.app.playback.LinkPlaybackResolver
+
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,6 +41,7 @@ class MainActivity : ComponentActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         lastFmAuthCallback.capture(intent)
+        linkPlaybackResolver.handleIntent(intent)
         splashScreen.setOnExitAnimationListener { provider ->
             provider.view.animate()
                 .alpha(0f)
@@ -89,5 +93,6 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         lastFmAuthCallback.capture(intent)
+        linkPlaybackResolver.handleIntent(intent)
     }
 }

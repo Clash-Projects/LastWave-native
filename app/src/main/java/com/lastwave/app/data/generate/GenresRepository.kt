@@ -104,7 +104,8 @@ class GenresRepository @Inject constructor(
     /** Port of §5.3's Genre Detail track list: paginated tag.gettoptracks. */
     suspend fun fetchGenreTracks(genre: String, page: Int): List<GeneratedTrack> {
         val d = call(mapOf("method" to "tag.gettoptracks", "tag" to genre, "limit" to "30", "page" to page.toString()))
-        return GenerateJson.normalise(d["tracks"]?.jsonObject?.get("track"))
+        val tracks = GenerateJson.normalise(d["tracks"]?.jsonObject?.get("track"))
+        return generateRepository.filterPlayable(tracks)
     }
 
     /** Port of §5.5 Discover More: tag.gettoptracks (fresh random page) +
@@ -163,7 +164,7 @@ class GenresRepository @Inject constructor(
         val filtered = deduped.filterNot { it.key in heardKeys }
         val finalPool = if (filtered.size >= 10) filtered else deduped
 
-        return finalPool.shuffled().take(30)
+        return generateRepository.filterPlayable(finalPool.shuffled()).take(30)
     }
 
     /**
@@ -207,12 +208,13 @@ class GenresRepository @Inject constructor(
             track to score
         }
 
-        return scored.sortedByDescending { it.second }
+        val sorted = scored.sortedByDescending { it.second }
             .let { list ->
                 // Shuffle within equal-score ties.
                 list.groupBy { it.second }.entries.sortedByDescending { it.key }.flatMap { it.value.shuffled() }
             }
             .map { it.first }
-            .take(30)
+
+        return generateRepository.filterPlayable(sorted).take(30)
     }
 }

@@ -132,27 +132,65 @@ class ThemeRepository @Inject constructor(
         }
     }
 
+    private fun getSystemWallpaperColorHex(): String? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            return try {
+                androidx.compose.material3.dynamicDarkColorScheme(context).primary.toHex()
+            } catch (e: Exception) {
+                null
+            }
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) return null
+        return try {
+            val colors = WallpaperManager.getInstance(context).getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
+            colors?.primaryColor?.let {
+                "#%02X%02X%02X".format(
+                    (it.red() * 255).toInt(),
+                    (it.green() * 255).toInt(),
+                    (it.blue() * 255).toInt(),
+                )
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     val uiState: StateFlow<ThemeUiState> = combine(
         themePreferences.prefs,
         dynamicHex,
         nowPlayingHex,
         settingsPreferences.settings,
     ) { prefs: ThemePrefs, dynamic: String?, nowPlaying: String?, misc: MiscSettings ->
+        val isAmoled = prefs.amoled
         val scheme = when {
             misc.dynamicNowPlayingEnabled && nowPlaying != null ->
-                Md3SchemeBuilder.buildScheme(nowPlaying, false)
+                Md3SchemeBuilder.buildScheme(nowPlaying, isAmoled)
             prefs.accentMode == AccentMode.MONOCHROME ->
-                Md3SchemeBuilder.buildMonochromeScheme(false)
-            prefs.accentMode == AccentMode.DYNAMIC && dynamic != null ->
-                Md3SchemeBuilder.buildScheme(dynamic, false)
+                Md3SchemeBuilder.buildMonochromeScheme(isAmoled)
+            prefs.accentMode == AccentMode.DYNAMIC -> {
+                val seed = dynamic ?: getSystemWallpaperColorHex() ?: prefs.accentColor
+                Md3SchemeBuilder.buildScheme(seed, isAmoled)
+            }
             else ->
-                Md3SchemeBuilder.buildScheme(prefs.accentColor, false)
+                Md3SchemeBuilder.buildScheme(prefs.accentColor, isAmoled)
         }
-        ThemeUiState(colorScheme = scheme, amoled = false, mode = prefs.accentMode, accentColorHex = prefs.accentColor, useCustomFont = misc.useCustomFont)
+        ThemeUiState(
+            colorScheme = scheme,
+            amoled = isAmoled,
+            mode = prefs.accentMode,
+            accentColorHex = prefs.accentColor,
+            useCustomFont = misc.useCustomFont,
+        )
     }.stateIn(
         applicationScope,
         SharingStarted.Eagerly,
-        ThemeUiState(Md3SchemeBuilder.buildScheme("#E03030", false), amoled = false, mode = AccentMode.MANUAL, accentColorHex = "#E03030", useCustomFont = true),
+        ThemeUiState(
+            colorScheme = Md3SchemeBuilder.buildScheme("#E03030", false),
+            amoled = false,
+            mode = AccentMode.MANUAL,
+            accentColorHex = "#E03030",
+            useCustomFont = true,
+        ),
     )
 
     suspend fun setManualAccent(color: Color) {
@@ -190,56 +228,8 @@ class ThemeRepository @Inject constructor(
         }
     }
 
-    /**
-     * Bug fix: this used to extract the wallpaper IMAGE's literal dominant
-     * pixel color via WallpaperManager.getWallpaperColors().primaryColor.
-     * That's the photo's own dominant color, which is NOT the same thing
-     * as the system Material You accent shown in Settings > Wallpaper &
-     * style — Android lets the user override that accent color manually
-     * (e.g. picking "Green" from the Basic/Expressive color swatches)
-     * completely independent of what the wallpaper photo's pixels actually
-     * are. That's exactly the reported symptom: system accent is green,
-     * app still showed red — because it was reading the photo, not the
-     * accent the user actually chose.
-     *
-     * On API 31+, dynamicDarkColorScheme(context) reads Android's REAL
-     * resolved Material You palette (the one the user picked), so its
-     * .primary is used as the seed hue instead. This still goes through
-     * Md3SchemeBuilder.buildScheme() below exactly as before — only the
-     * seed color's SOURCE changed, not the app's own tonal/chroma
-     * relationships, so this isn't the "redesign" the class doc above
-     * warns against; it's a same-architecture bug fix.
-     *
-     * Below API 31 there's no dynamicColorScheme API to read the resolved
-     * accent from, so the wallpaper-pixel extraction remains the best
-     * available signal on those OS versions.
-     */
     fun refreshWallpaperAccent() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            dynamicHex.value = try {
-                androidx.compose.material3.dynamicDarkColorScheme(context).primary.toHex()
-            } catch (e: Exception) {
-                null
-            }
-            return
-        }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) {
-            dynamicHex.value = null
-            return
-        }
-        val colors: WallpaperColors? = try {
-            WallpaperManager.getInstance(context).getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
-        } catch (e: SecurityException) {
-            null
-        }
-        val primary = colors?.primaryColor
-        dynamicHex.value = primary?.let {
-            "#%02X%02X%02X".format(
-                (it.red() * 255).toInt(),
-                (it.green() * 255).toInt(),
-                (it.blue() * 255).toInt(),
-            )
-        }
+        dynamicHex.value = getSystemWallpaperColorHex()
     }
 
     /**

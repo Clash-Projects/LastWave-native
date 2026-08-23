@@ -60,6 +60,10 @@ class SettingsViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val fileExportHelper: FileExportHelper,
     private val scrobblerPreferences: ScrobblerPreferences,
+    private val downloadedTrackDao: com.lastwave.app.data.local.db.DownloadedTrackDao,
+    val playlistImportManager: com.lastwave.app.data.playlist.PlaylistImportManager,
+    val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
 
     val session: StateFlow<SessionData> = sessionPreferences.session
@@ -72,6 +76,12 @@ class SettingsViewModel @Inject constructor(
 
     val scrobbler: StateFlow<ScrobblerSettings> = scrobblerPreferences.settings
         .stateIn(viewModelScope, SharingStarted.Eagerly, ScrobblerSettings())
+
+    val downloadCount: StateFlow<Int> = downloadedTrackDao.count()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    val downloadTotalBytes: StateFlow<Long?> = downloadedTrackDao.totalBytes()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
 
     private val _uiState = MutableStateFlow(SettingsScreenState())
     val uiState: StateFlow<SettingsScreenState> = _uiState.asStateFlow()
@@ -150,10 +160,54 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val json = backupRepository.buildBackup(appVersionName)
-                fileExportHelper.writeTextToUri(uri, json)
-                _uiState.update { it.copy(toastMessage = "Backup saved") }
+                if (json.isBlank()) {
+                    _uiState.update { it.copy(toastMessage = "Backup creation failed: empty data") }
+                    return@launch
+                }
+                val bytesWritten = fileExportHelper.writeTextToUri(uri, json)
+                _uiState.update { it.copy(toastMessage = "Backup saved successfully (${bytesWritten / 1024} KB)") }
             } catch (e: Exception) {
-                _uiState.update { it.copy(toastMessage = "Backup failed: ${e.message}") }
+                _uiState.update { it.copy(toastMessage = "Backup failed: ${e.localizedMessage ?: e.message}") }
+            }
+        }
+    }
+
+    fun handleRestorePicked(uri: android.net.Uri) {
+        viewModelScope.launch {
+            try {
+                val content = fileExportHelper.readTextFromUri(uri)
+                if (content.isNullOrBlank()) {
+                    _uiState.update { it.copy(toastMessage = "Selected file is empty or unreadable") }
+                    return@launch
+                }
+                stagePendingRestore(content, uri)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(toastMessage = "Restore read error: ${e.localizedMessage ?: e.message}") }
+            }
+        }
+    }
+
+    fun handleCsvPicked(uri: android.net.Uri) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                _uiState.update { it.copy(toastMessage = "Matching and importing CSV songs...") }
+                val inputStream = context.contentResolver.openInputStream(uri)
+                    ?: error("Could not open selected CSV file")
+
+                // Extract filename
+                val cursor = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                val displayName = cursor?.use {
+                    if (it.moveToFirst()) it.getString(0) else null
+                } ?: "Imported Playlist"
+
+                val (saved, result) = playlistImportManager.importCsvStream(inputStream, displayName)
+                _uiState.update {
+                    it.copy(toastMessage = "Imported \"${saved.title}\" (${result.matchedCount}/${result.totalRows} verified)")
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(toastMessage = "CSV Import failed: ${e.localizedMessage ?: e.message}")
+                }
             }
         }
     }
@@ -242,6 +296,8 @@ class SettingsViewModel @Inject constructor(
             }
         }
     }
+
+    fun showToast(message: String) = _uiState.update { it.copy(toastMessage = message) }
 
     fun dismissToast() = _uiState.update { it.copy(toastMessage = null) }
 

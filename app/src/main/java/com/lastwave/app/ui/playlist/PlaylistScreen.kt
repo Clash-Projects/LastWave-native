@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PushPin
@@ -106,7 +107,10 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
+fun PlaylistScreen(
+    onOpenPlaylist: (Long) -> Unit = {},
+    viewModel: PlaylistViewModel = hiltViewModel(),
+) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
@@ -237,23 +241,20 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
                             Box(Modifier.animateItem()) {
                                 PlaylistCard(
                                     playlist = playlist,
-                                    expanded = playlist.id in state.expandedIds,
                                     isNewest = isNewest,
                                     position = com.lastwave.app.ui.common.groupPositionFor(index, state.playlists.size),
                                     isRegenerating = state.regeneratingId == playlist.id,
                                     currentTrack = playbackState.current,
                                     isPlaying = playbackState.isPlaying,
                                     playbackSource = playbackState.sourceLabel,
-                                    onToggleExpand = { viewModel.toggleExpanded(playlist.id) },
+                                    onClick = { onOpenPlaylist(playlist.id) },
                                     onExport = { viewModel.openExportSheet(playlist.id) },
-                                    onRegenerate = { viewModel.regenerate(playlist.id) },
                                     onRename = { viewModel.requestRename(playlist.id) },
                                     onEditCover = { coverEditorPlaylistId = playlist.id },
                                     onComplete = { viewModel.completePlaylist(playlist.id) },
                                     onTogglePin = { viewModel.togglePinned(playlist.id) },
                                     onDelete = { viewModel.requestDelete(playlist.id) },
-                                    onRemoveTrack = { trackIndex -> viewModel.removeTrack(playlist.id, trackIndex) },
-                                    onPlay = { startIndex ->
+                                    onPlay = {
                                         musicPlayer.playQueue(
                                             playlist.tracks.map { track ->
                                                 com.lastwave.app.playback.PlayableTrack(
@@ -263,21 +264,6 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
                                                     artworkUrl = track.artworkUrl,
                                                 )
                                             },
-                                            startIndex = startIndex,
-                                            sourceLabel = playlist.title,
-                                        )
-                                    },
-                                    onShufflePlay = {
-                                        val tracks = playlist.tracks.map { track ->
-                                            com.lastwave.app.playback.PlayableTrack(
-                                                title = track.name,
-                                                artist = track.artist,
-                                                album = track.album,
-                                                artworkUrl = track.artworkUrl,
-                                            )
-                                        }.shuffled()
-                                        musicPlayer.playQueue(
-                                            tracks,
                                             startIndex = 0,
                                             sourceLabel = playlist.title,
                                         )
@@ -496,278 +482,164 @@ private fun EmptyState() {
 @Composable
 private fun PlaylistCard(
     playlist: SavedPlaylist,
-    expanded: Boolean,
     isNewest: Boolean,
     position: com.lastwave.app.ui.common.GroupPosition,
     isRegenerating: Boolean,
     currentTrack: com.lastwave.app.playback.PlayableTrack?,
     isPlaying: Boolean,
     playbackSource: String,
-    onToggleExpand: () -> Unit,
+    onClick: () -> Unit,
     onExport: () -> Unit,
-    onRegenerate: () -> Unit,
     onRename: () -> Unit,
     onEditCover: () -> Unit,
     onComplete: () -> Unit,
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
-    onRemoveTrack: (Int) -> Unit,
-    onPlay: (Int) -> Unit,
-    onShufflePlay: () -> Unit = {},
-    onAddTrackToPlaylist: (GeneratedTrack) -> Unit = {},
-    onTrackMenu: (GeneratedTrack) -> Unit = {},
+    onPlay: () -> Unit,
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val isThisPlaylistPlaying = isPlaying && playbackSource == playlist.title
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Card(
         shape = com.lastwave.app.ui.common.groupShape(position),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .combinedClickable(
-                        onClick = onToggleExpand,
-                        onLongClick = { clipboard.setText(androidx.compose.ui.text.AnnotatedString(playlist.title)) },
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        onClick()
+                    },
+                    onLongClick = {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(playlist.title))
+                    },
+                )
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(60.dp)) {
+                PlaylistCover(playlist = playlist, modifier = Modifier.fillMaxSize(), cornerRadius = 14.dp)
+                if (isThisPlaylistPlaying) {
+                    com.lastwave.app.ui.player.PlayingWaveBars(
+                        Modifier.align(Alignment.BottomEnd).padding(4.dp),
                     )
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(60.dp)) {
-                    PlaylistCover(playlist = playlist, modifier = Modifier.fillMaxSize())
-                    if (isThisPlaylistPlaying) {
-                        com.lastwave.app.ui.player.PlayingWaveBars(
-                            Modifier.align(Alignment.BottomEnd).padding(3.dp),
-                        )
-                    }
                 }
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            playlist.title,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
-                        )
-                        if (playlist.isPinned) {
-                            Icon(
-                                Icons.Filled.PushPin,
-                                contentDescription = "Pinned",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "${playlist.tracks.size} tracks \u00b7 ${formatDate(playlist.createdAtMillis)}${if (playlist.subtitle.isNotBlank()) " \u00b7 ${playlist.subtitle}" else ""}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        playlist.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
-                }
-                Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-
-            if (expanded) {
-                androidx.compose.material3.HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 14.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
-                )
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Surface(
-                        onClick = onComplete,
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.size(38.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Filled.Check,
-                                contentDescription = "Mark playlist complete",
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
-                    Surface(
-                        onClick = { onPlay(0) },
-                        enabled = playlist.tracks.isNotEmpty(),
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        shadowElevation = 2.dp,
-                        modifier = Modifier.size(38.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Filled.PlayArrow,
-                                contentDescription = "Play playlist",
-                                modifier = Modifier.size(22.dp),
-                            )
-                        }
-                    }
-                    IconButton(
-                        onClick = onShufflePlay,
-                        enabled = playlist.tracks.isNotEmpty(),
-                        modifier = Modifier.size(38.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Shuffle,
-                            contentDescription = "Shuffle playlist",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                    IconButton(
-                        onClick = onEditCover,
-                        modifier = Modifier.size(38.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.PhotoLibrary,
-                            contentDescription = "Choose playlist cover",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                    if (playlist.mode == "custom") {
-                        IconButton(
-                            onClick = onRename,
-                            modifier = Modifier.size(38.dp),
-                        ) {
-                            Icon(
-                                Icons.Filled.Edit,
-                                contentDescription = "Rename playlist",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    } else {
-                        com.lastwave.app.ui.common.ExpressiveRefreshButton(
-                            isRefreshing = isRegenerating,
-                            onClick = onRegenerate,
-                            contentDescription = "Regenerate",
-                            modifier = Modifier.size(38.dp),
-                            iconSize = 20.dp,
-                        )
-                    }
-                    IconButton(
-                        onClick = onExport,
-                        modifier = Modifier.size(38.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Download,
-                            contentDescription = "Export",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                    IconButton(
-                        onClick = onTogglePin,
-                        modifier = Modifier.size(38.dp),
-                    ) {
+                    if (playlist.isPinned) {
+                        Spacer(Modifier.width(6.dp))
                         Icon(
                             Icons.Filled.PushPin,
-                            contentDescription = if (playlist.isPinned) "Unpin playlist" else "Pin playlist",
-                            tint = if (playlist.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(38.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Delete,
-                            contentDescription = "Delete",
-                            tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(20.dp),
+                            contentDescription = "Pinned",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
                         )
                     }
                 }
-                Column(Modifier.padding(bottom = 8.dp)) {
-                    playlist.tracks.forEachIndexed { index, track ->
-                        TrackRow(
-                            index = index + 1,
-                            track = track,
-                            isPlaying = isThisPlaylistPlaying &&
-                                currentTrack?.title?.equals(track.name, ignoreCase = true) == true &&
-                                currentTrack?.artist?.equals(track.artist, ignoreCase = true) == true,
-                            onClick = { onPlay(index) },
-                            onLongClick = { onAddTrackToPlaylist(track) },
-                            onRemove = if (playlist.mode == "custom") ({ onRemoveTrack(index) }) else null,
-                            onMenuClick = { onTrackMenu(track) },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-private fun TrackRow(
-    index: Int,
-    track: GeneratedTrack,
-    isPlaying: Boolean,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    onRemove: (() -> Unit)?,
-    onMenuClick: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("$index", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(24.dp))
-        Box(Modifier.size(40.dp)) {
-            ArtworkImage(
-                name = track.name,
-                artist = track.artist,
-                embeddedUrl = track.artworkUrl,
-                fallbackIcon = Icons.Filled.MusicNote,
-                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(8.dp)),
-            )
-            if (isPlaying) {
-                com.lastwave.app.ui.player.PlayingWaveBars(
-                    Modifier.align(Alignment.BottomEnd).padding(2.dp),
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "${playlist.tracks.size} tracks \u00b7 ${formatDate(playlist.createdAtMillis)}${if (playlist.subtitle.isNotBlank()) " \u00b7 ${playlist.subtitle}" else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(track.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(track.artist, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-        if (onRemove != null) {
-            IconButton(onClick = onRemove) {
-                Icon(Icons.Filled.Delete, contentDescription = "Remove from playlist", tint = MaterialTheme.colorScheme.error)
+
+            // Quick play button
+            if (playlist.tracks.isNotEmpty()) {
+                Surface(
+                    onClick = onPlay,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(38.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.PlayArrow,
+                            contentDescription = "Play playlist",
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(4.dp))
+            }
+
+            // More options menu
+            Box {
+                IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "Playlist options",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    shape = RoundedCornerShape(22.dp),
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 4.dp,
+                    shadowElevation = 10.dp,
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(if (playlist.isPinned) "Unpin" else "Pin") },
+                        leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                        onClick = { onTogglePin(); menuExpanded = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Change cover") },
+                        leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
+                        onClick = { onEditCover(); menuExpanded = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                        onClick = { onRename(); menuExpanded = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Export") },
+                        leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                        onClick = { onExport(); menuExpanded = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Complete") },
+                        leadingIcon = { Icon(Icons.Filled.Check, contentDescription = null) },
+                        onClick = { onComplete(); menuExpanded = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                        onClick = { onDelete(); menuExpanded = false },
+                    )
+                }
             }
         }
-        com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenuClick)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ExportBottomSheet(
+internal fun ExportBottomSheet(
     onDismiss: () -> Unit,
     onSaveCsv: () -> Unit,
     onSaveM3u: () -> Unit,

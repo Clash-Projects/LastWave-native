@@ -18,6 +18,7 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
 
     @Inject lateinit var themeRepository: ThemeRepository
     @Inject lateinit var applicationScope: CoroutineScope
+    @Inject lateinit var okHttpClient: okhttp3.OkHttpClient
 
     override fun onCreate() {
         super.onCreate()
@@ -40,11 +41,11 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
      *    cache authoritative, so each artwork downloads at most once.
      *  - Bounded, explicit memory/disk caches so scroll-bys of previously
      *    seen rows are pure in-memory hits.
-     *  - crossfade stays disabled: cached images appear instantly instead
-     *    of re-animating on every bind while flinging through the list.
+     *  - Hardware acceleration enabled for fast GPU texture uploading.
      */
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
+            .okHttpClient(okHttpClient)
             .memoryCache {
                 MemoryCache.Builder(this)
                     .maxSizePercent(0.35)
@@ -57,6 +58,6 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
                     .build()
             }
             .respectCacheHeaders(false)
-            .crossfade(false)
+            .allowHardware(true)
             .build()
 }

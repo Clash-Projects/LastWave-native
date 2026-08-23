@@ -107,6 +107,7 @@ fun MainShell(
     onOpenDiscover: () -> Unit,
     onOpenGenres: () -> Unit,
     onOpenFriends: () -> Unit,
+    onOpenPlaylist: (Long) -> Unit = {},
     mainShellViewModel: MainShellViewModel = hiltViewModel(),
 ) {
     val tabs = MainTab.entries
@@ -158,7 +159,7 @@ fun MainShell(
                             scope.launch { pagerState.animateScrollToPage(tabs.indexOf(MainTab.PLAYLISTS)) }
                         },
                     )
-                    MainTab.PLAYLISTS -> PlaylistScreen()
+                    MainTab.PLAYLISTS -> PlaylistScreen(onOpenPlaylist = onOpenPlaylist)
                 }
             }
         }

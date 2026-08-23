@@ -64,10 +64,80 @@ class FileExportHelper @Inject constructor(
      *  Restore's file picker. Writing through a SAF Uri the user chose
      *  themselves guarantees the file is somewhere they can navigate back
      *  to later. */
-    fun writeTextToUri(uri: Uri, content: String) {
+    suspend fun writeTextToUri(uri: Uri, content: String): Long = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
-        resolver.openOutputStream(uri)?.use { it.write(content.toByteArray()) }
-            ?: throw IOException("Couldn't open output stream for $uri")
+        runCatching {
+            resolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
+        val bytes = content.toByteArray(Charsets.UTF_8)
+        var writeSucceeded = false
+
+        // Attempt 1: ParcelFileDescriptor with direct hardware descriptor sync (bypasses buffered filesystem lag)
+        val pfd = runCatching {
+            resolver.openFileDescriptor(uri, "rwt")
+                ?: resolver.openFileDescriptor(uri, "wt")
+                ?: resolver.openFileDescriptor(uri, "w")
+        }.getOrNull()
+
+        if (pfd != null) {
+            try {
+                pfd.use { descriptor ->
+                    java.io.FileOutputStream(descriptor.fileDescriptor).use { fos ->
+                        fos.write(bytes)
+                        fos.flush()
+                        try {
+                            descriptor.fileDescriptor.sync()
+                        } catch (syncErr: Exception) {
+                            // Ignored if provider doesn't support direct sync
+                        }
+                    }
+                }
+                writeSucceeded = true
+            } catch (pfdError: Exception) {
+                writeSucceeded = false
+            }
+        }
+
+        // Attempt 2: Standard OutputStream fallback if PFD was rejected by DocumentProvider
+        if (!writeSucceeded) {
+            val stream = runCatching { resolver.openOutputStream(uri, "wt") }.getOrNull()
+                ?: runCatching { resolver.openOutputStream(uri, "w") }.getOrNull()
+                ?: resolver.openOutputStream(uri)
+                ?: throw IOException("Couldn't open output stream for $uri")
+
+            stream.use { output ->
+                output.write(bytes)
+                output.flush()
+            }
+        }
+
+        // Automatic secondary local safety mirror
+        runCatching {
+            val autoBackup = File(documentsDir(), "latest-lastwave-backup.json")
+            autoBackup.writeText(content, Charsets.UTF_8)
+        }
+
+        bytes.size.toLong()
+    }
+
+    /** Reads raw text content from a SAF Uri on Dispatchers.IO. */
+    suspend fun readTextFromUri(uri: Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                input.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     /** Opens the system share sheet for [filename]/[content] via
