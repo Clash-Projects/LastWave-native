@@ -852,6 +852,20 @@ private fun TrackRow(
                     fallbackIcon = if (isNowPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote,
                     modifier = Modifier.fillMaxSize(),
                 )
+                if (isNowPlaying) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.45f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        com.lastwave.app.ui.player.PlayingWaveBars(
+                            modifier = Modifier.size(20.dp),
+                            waveColor = Color.White,
+                            containerColor = Color.Transparent,
+                        )
+                    }
+                }
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
@@ -878,14 +892,6 @@ private fun TrackRow(
                     initialValue = 1.0f,
                     targetValue = 1.06f,
                     animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-                        // FastOutSlowInEasing decelerates hard into each
-                        // endpoint — reversed every cycle (RepeatMode
-                        // .Reverse), that reads as a snap/bounce at the
-                        // turnaround rather than a smooth continuous
-                        // breathing loop. Linear easing on both legs is
-                        // what actually gives a proper, uniform pulse —
-                        // only the easing changed here, same duration,
-                        // same scale range, same everything else.
                         animation = androidx.compose.animation.core.tween(1200, easing = androidx.compose.animation.core.LinearEasing),
                         repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
                     ),
@@ -901,9 +907,13 @@ private fun TrackRow(
                         scaleY = pulseScale
                     },
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)) {
-                        Spacer(Modifier.size(6.dp).background(MaterialTheme.colorScheme.onPrimary, CircleShape))
-                        Spacer(Modifier.width(6.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        com.lastwave.app.ui.player.PlayingWaveBars(
+                            modifier = Modifier.size(14.dp),
+                            waveColor = MaterialTheme.colorScheme.onPrimary,
+                            containerColor = Color.Transparent,
+                        )
+                        Spacer(Modifier.width(5.dp))
                         Text(
                             "Now Playing",
                             style = MaterialTheme.typography.labelSmall,

@@ -107,6 +107,9 @@ class HomeRepository @Inject constructor(
         val session = requireSession()
         val targetUser = username ?: session.username
         val cacheKey = "$targetUser:$page:$limit"
+        if (forceRefresh) {
+            inFlightRecent.remove(cacheKey)
+        }
 
         val deferred = inFlightRecent.getOrPut(cacheKey) {
             inFlightScope.async {
@@ -191,6 +194,9 @@ class HomeRepository @Inject constructor(
         val session = requireSession()
         val targetUser = username ?: session.username
         val cacheKey = targetUser.ifBlank { "guest" }
+        if (forceRefresh) {
+            inFlightStats.remove(cacheKey)
+        }
 
         val deferred = inFlightStats.getOrPut(cacheKey) {
             inFlightScope.async {
@@ -317,7 +323,10 @@ class HomeRepository @Inject constructor(
         val cacheKey = targetUser.ifBlank { "guest" }
 
         val now = System.currentTimeMillis()
-        if (!forceRefresh && cachedInitialData?.first == cacheKey && (now - cachedInitialDataTimestamp < 30_000L)) {
+        if (forceRefresh) {
+            inFlightInitialData.remove(cacheKey)
+            cachedInitialData = null
+        } else if (cachedInitialData?.first == cacheKey && (now - cachedInitialDataTimestamp < 30_000L)) {
             return Result.success(cachedInitialData!!.second)
         }
 
@@ -346,13 +355,30 @@ class HomeRepository @Inject constructor(
             val statsResult = statsDeferred.await()
             val topTracksResult = topTracksDeferred.await()
 
-            val recent = recentResult.getOrThrow()
+            // Degrade gracefully: one flaky sub-request (stats/top-tracks, and
+            // now recents too) used to fail the ENTIRE Home payload — a single
+            // transient socket reset emptied the whole screen. Each surface
+            // now falls back independently; only a session-level failure
+            // (handled by requireSession() inside each fetch) still fails all.
+            val recent = recentResult.getOrElse {
+                RecentTracksPage(nowPlaying = null, tracks = emptyList(), page = 1, totalPages = 1)
+            }
             val stats = statsResult.getOrElse {
                 HomeStats(scrobbles = 0L, trackCount = 0L, artistCount = 0L, albumCount = 0L, avatarUrl = null)
             }
-            val topTracks = topTracksResult.getOrElse { emptyList() }
+            val topTracks = topTracksResult.getOrElse { emptyList<HomeTrack>() }
 
-            Result.success(HomeInitialData(stats, recent, topTracks))
+            // Everything failed = genuinely offline → surface a retryable
+            // failure. Any partial success renders what we have.
+            if (recentResult.isFailure && statsResult.isFailure && topTracksResult.isFailure) {
+                Result.failure(
+                    recentResult.exceptionOrNull()
+                        ?: statsResult.exceptionOrNull()
+                        ?: IllegalStateException("Home data unavailable"),
+                )
+            } else {
+                Result.success(HomeInitialData(stats, recent, topTracks))
+            }
         }
     } catch (e: Exception) {
         Result.failure(e)

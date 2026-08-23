@@ -2,19 +2,25 @@ package com.lastwave.app.di
 
 import android.content.Context
 import com.lastwave.app.data.network.LastFmApiService
+import com.lastwave.app.data.network.LastFmRateGuard
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.io.File
+import java.util.concurrent.TimeUnit
 import okhttp3.Cache
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
-import java.io.File
-import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 @Module
@@ -27,15 +33,21 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient {
+    fun provideOkHttpClient(
+        @ApplicationContext context: Context,
+        rateGuard: LastFmRateGuard,
+    ): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
         }
 
-        // Pacing dispatcher: max 5 requests per host to safely comply with Last.fm's 5 req/s limit
+        // Pacing dispatcher: raised headroom so parallel artwork/racer/stream
+        // lookups don't queue behind parked Last.fm requests. Last.fm's own
+        // 5 req/s limit is enforced per-request by LastFmRateGuard pacing,
+        // not by this cap.
         val dispatcher = Dispatcher().apply {
-            maxRequests = 20
-            maxRequestsPerHost = 5
+            maxRequests = 64
+            maxRequestsPerHost = 20
         }
 
         val cacheDir = File(context.cacheDir, "lfm_http_cache")
@@ -45,36 +57,44 @@ object NetworkModule {
             .dispatcher(dispatcher)
             .cache(cache)
             .connectionPool(ConnectionPool(10, 5, TimeUnit.MINUTES))
-            .connectTimeout(8, TimeUnit.SECONDS)
-            .readTimeout(8, TimeUnit.SECONDS)
-            .writeTimeout(8, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
-            // 1. Browser User-Agent and headers to prevent Cloudflare bot blocking
             .addInterceptor { chain ->
                 val original = chain.request()
-                val request = original.newBuilder()
-                    .header("User-Agent", BROWSER_USER_AGENT)
-                    .header("Accept", "application/json, text/plain, */*")
-                    .header("Accept-Language", "en-US,en;q=0.9")
-                    .build()
-                chain.proceed(request)
-            }
-            // 2. Cache successful GET responses for 10 minutes (mirrors web app.js _CACHE_TTL)
-            .addNetworkInterceptor { chain ->
-                val request = chain.request()
-                val response = chain.proceed(request)
-                if (request.method.equals("GET", ignoreCase = true) && response.isSuccessful) {
-                    response.newBuilder()
-                        .removeHeader("Pragma")
-                        .removeHeader("Cache-Control")
-                        .header("Cache-Control", "public, max-age=600")
-                        .build()
+                val isLastFm = original.url.host.endsWith("audioscrobbler.com", ignoreCase = true)
+                val request = if (original.header("User-Agent") != null) {
+                    original
                 } else {
-                    response
+                    original.newBuilder()
+                        .header("User-Agent", BROWSER_USER_AGENT)
+                        .header("Accept", "application/json, text/plain, */*")
+                        .header("Accept-Language", "en-US,en;q=0.9")
+                        .build()
+                }
+
+                if (!isLastFm) {
+                    chain.proceed(request)
+                } else {
+                    val response = chain.proceed(request)
+                    if (response.code == 429 || response.code == 503) {
+                        response.closeQuietly()
+                        rateGuard.onRequestLimited()
+                        runCatching { Thread.sleep(1500L) }
+                        chain.proceed(request)
+                    } else {
+                        if (response.isSuccessful) rateGuard.onRequestSucceeded()
+                        response
+                    }
                 }
             }
             .addInterceptor(logging)
             .build()
+    }
+
+    private fun Response.closeQuietly() {
+        runCatching { close() }
     }
 
     @Provides
@@ -90,4 +110,3 @@ object NetworkModule {
     fun provideLastFmApiService(retrofit: Retrofit): LastFmApiService =
         retrofit.create(LastFmApiService::class.java)
 }
-

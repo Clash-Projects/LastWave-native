@@ -223,7 +223,7 @@ class PlaylistRepository @Inject constructor(
         awaitStartupSync()
         val entity = dao.getById(id) ?: return null
         val playlist = entity.toDomain()
-        if (playlist.mode != "custom" || index !in playlist.tracks.indices) return playlist
+        if (index !in playlist.tracks.indices) return playlist
         val updatedTracks = playlist.tracks.toMutableList().apply { removeAt(index) }
         val updated = entity.copy(tracksJson = json.encodeToString(updatedTracks.map { it.toStored() }))
         dao.upsert(updated)

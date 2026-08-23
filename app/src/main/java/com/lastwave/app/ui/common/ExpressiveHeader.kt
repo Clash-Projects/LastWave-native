@@ -30,7 +30,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -42,6 +46,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.liquidGlassChrome
 
 /** Only the bottom corners are rounded, and a modest 24dp at that (not
  *  36dp) — a short header (just a title row, no back button, minimal
@@ -82,6 +91,9 @@ fun ExpressiveHeader(
 ) {
     val glow = MaterialTheme.colorScheme.primary
     val secondaryGlow = MaterialTheme.colorScheme.tertiary
+    // Liquid Glass: the header surface turns translucent via the scheme and
+    // gets a specular sheen + hairline border. No-op when setting is off.
+    val liquidGlass = LocalLiquidGlass.current
     Box(modifier.fillMaxWidth().zIndex(1f)) {
         Surface(
             shape = HeaderShape,
@@ -92,7 +104,7 @@ fun ExpressiveHeader(
             // an odd, hard-edged band right under the header rather than a
             // soft shadow — the gradient glow above already gives the
             // header depth without it.
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().liquidGlassChrome(HeaderShape, liquidGlass),
         ) {
             Column(
                 Modifier
@@ -123,7 +135,7 @@ fun ExpressiveHeader(
                     Column(Modifier.weight(1f)) {
                         Text(
                             title,
-                            style = MaterialTheme.typography.headlineMedium,
+                            style = if (onBack != null) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -155,16 +167,37 @@ fun ExpressiveHeader(
  *  a plain gradient rather than Modifier.blur()). */
 @Composable
 private fun Modifier.drawGlowBackground(color: Color, secondaryColor: Color): Modifier {
-    val transition = rememberInfiniteTransition(label = "headerGlowDrift")
-    val drift by transition.animateFloat(
-        initialValue = -1f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 7000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "headerGlowDriftX",
-    )
+    // The drift animation only runs while the app is actually in the
+    // foreground. An always-on infinite transition forced RenderThread to
+    // repaint two full-width radial gradients every single frame — on every
+    // screen, forever, even when the app was backgrounded or the user was
+    // just reading a static screen. Leaving composition when not resumed
+    // stops that invalidation loop entirely; visually identical while the
+    // app is visible (the glow simply holds still otherwise).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var resumed by remember { mutableStateOf(true) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            resumed = event == Lifecycle.Event.ON_RESUME
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val drift: Float = if (resumed) {
+        val transition = rememberInfiniteTransition(label = "headerGlowDrift")
+        val animated by transition.animateFloat(
+            initialValue = -1f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 7000, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "headerGlowDriftX",
+        )
+        animated
+    } else {
+        0f
+    }
     return this.drawBehind {
         val cx = size.width / 2f + drift * size.width * 0.30f
         val cy = size.height * 0.46f

@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -200,6 +202,7 @@ fun TrackContextMenuSheet(
     onExploreGenre: ((genre: String) -> Unit)? = null,
     onDeleteScrobble: ((trackName: String, artistName: String) -> Unit)? = null,
     onRefreshArtwork: (() -> Unit)? = null,
+    onRemoveFromPlaylist: (() -> Unit)? = null,
     genreResolverViewModel: GenreRowViewModel = hiltViewModel(),
     startMixViewModel: StartMixMenuViewModel = hiltViewModel(),
     exploreGenreViewModel: ExploreGenreMenuViewModel = hiltViewModel(),
@@ -265,6 +268,7 @@ fun TrackContextMenuSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 14.dp)
+                .verticalScroll(rememberScrollState())
                 .padding(bottom = 24.dp + safeDrawingBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -297,6 +301,7 @@ fun TrackContextMenuSheet(
                             onDismiss()
                         }
                     }
+                    add { pos -> MenuActionRow(Icons.Filled.PlaylistAdd, "Add to playlist", position = pos) { addToPlaylist(playable); onDismiss() } }
                     add { pos ->
                         MenuActionRow(Icons.Filled.Person, "Go to Artist (${t.artist})", position = pos) {
                             artistAlbumViewModel.openArtist(t.artist)
@@ -317,20 +322,27 @@ fun TrackContextMenuSheet(
                             onDismiss()
                         }
                     }
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.Info, "Details & Audio Specs", position = pos) {
-                            showDetailsSheet = true
-                        }
-                    }
                     add { pos -> MenuActionRow(Icons.Filled.QueuePlayNext, "Play next", position = pos) { musicPlayer.playNext(playable); onDismiss() } }
                     add { pos -> MenuActionRow(Icons.Filled.QueueMusic, "Add to queue", position = pos) { musicPlayer.addToQueue(playable); onDismiss() } }
-                    add { pos -> MenuActionRow(Icons.Filled.PlaylistAdd, "Add to playlist", position = pos) { addToPlaylist(playable); onDismiss() } }
                     add { pos -> MenuActionRow(Icons.Filled.Language, "Open in Last.fm", position = pos) { openUrl(context, buildLastFmUrl(target)); onDismiss() } }
                     if (onRefreshArtwork != null) {
                         add { pos -> MenuActionRow(Icons.Filled.Refresh, "Refresh Cover Art", position = pos) { onRefreshArtwork(); onDismiss() } }
                     }
                     if (capabilities.showCopyActions) {
                         add { pos -> MenuActionRow(Icons.Filled.ContentCopy, "Copy Song", position = pos) { clipboard.setText(AnnotatedString("${t.name} \u2014 ${t.artist}")); onDismiss() } }
+                    }
+                    add { pos ->
+                        MenuActionRow(Icons.Filled.Info, "Details & Audio Specs", position = pos) {
+                            showDetailsSheet = true
+                        }
+                    }
+                    if (onRemoveFromPlaylist != null) {
+                        add { pos ->
+                            MenuActionRow(Icons.Filled.Delete, "Remove from Playlist", danger = true, position = pos) {
+                                onRemoveFromPlaylist()
+                                onDismiss()
+                            }
+                        }
                     }
                     if (capabilities.showDeleteScrobble && onDeleteScrobble != null) {
                         add { pos -> MenuActionRow(Icons.Filled.Delete, "Delete Scrobble", danger = true, position = pos) { onDeleteScrobble(t.name, t.artist); onDismiss() } }

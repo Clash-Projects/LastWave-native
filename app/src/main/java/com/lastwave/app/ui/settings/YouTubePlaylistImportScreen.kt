@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Search
@@ -144,16 +145,21 @@ fun YouTubePlaylistImportScreen(
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         ) {
             ExpressiveHeader(
-                title = "Import Playlists",
+                title = "Import Playlist",
                 subtitle = "YouTube Music, Links & CSV Files",
                 onBack = onBack,
                 actions = {
-                    if (state.selectedTab == ImportTab.SEARCH && state.searchResults.isNotEmpty()) {
+                    val activeList = when (state.selectedTab) {
+                        ImportTab.LIBRARY -> state.libraryPlaylists
+                        ImportTab.SEARCH -> state.searchResults
+                        else -> emptyList()
+                    }
+                    if (activeList.isNotEmpty()) {
+                        val allSelected = activeList.all { it.id in state.selectedPlaylistIds }
                         TextButton(onClick = {
-                            val allSelected = state.selectedPlaylistIds.size == state.searchResults.size
                             viewModel.selectAll(!allSelected)
                         }) {
-                            Text(if (state.selectedPlaylistIds.size == state.searchResults.size) "Deselect All" else "Select All")
+                            Text(if (allSelected) "Deselect All" else "Select All")
                         }
                     }
                 },
@@ -172,9 +178,17 @@ fun YouTubePlaylistImportScreen(
                     modifier = Modifier.padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    ImportTab.entries.forEach { tab ->
+                    // The account's own library leads the list once a YouTube
+                    // Music account is connected in Settings.
+                    val visibleTabs = if (state.ytConnected) {
+                        ImportTab.entries.toList()
+                    } else {
+                        ImportTab.entries.filter { it != ImportTab.LIBRARY }
+                    }
+                    visibleTabs.forEach { tab ->
                         val selected = state.selectedTab == tab
                         val icon = when (tab) {
+                            ImportTab.LIBRARY -> Icons.Filled.LibraryMusic
                             ImportTab.SEARCH -> Icons.Filled.QueueMusic
                             ImportTab.LINK -> Icons.Filled.Link
                             ImportTab.CSV -> Icons.Filled.Description
@@ -223,6 +237,97 @@ fun YouTubePlaylistImportScreen(
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
+                // TAB 0: The connected account's own library playlists —
+                // select any and import them into LastWave.
+                if (state.selectedTab == ImportTab.LIBRARY) {
+                    when {
+                        state.isLoadingLibrary -> item {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(32.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                    Text(
+                                        "Loading ${state.ytAccountName}'s playlists...",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                            }
+                        }
+
+                        state.libraryPlaylists.isEmpty() -> item {
+                            Card(
+                                shape = RoundedCornerShape(22.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(20.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.LibraryMusic,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(36.dp),
+                                    )
+                                    Text(
+                                        "No library playlists found",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Text(
+                                        "Create a playlist in YouTube Music (or refresh) and it will show up here.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = TextAlign.Center,
+                                    )
+                                    FilledTonalButton(onClick = { viewModel.loadLibrary(force = true) }) {
+                                        Text("Refresh")
+                                    }
+                                }
+                            }
+                        }
+
+                        else -> {
+                            item {
+                                Text(
+                                    "${state.libraryPlaylists.size} playlist(s) on your account — pick any to import",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+                                )
+                            }
+                            itemsIndexed(
+                                items = state.libraryPlaylists,
+                                key = { _, item -> "lib_${item.id}" },
+                            ) { index, playlist ->
+                                val isSelected = playlist.id in state.selectedPlaylistIds
+                                Box(Modifier.animateItem()) {
+                                    YouTubePlaylistCard(
+                                        playlist = playlist,
+                                        isSelected = isSelected,
+                                        position = groupPositionFor(index, state.libraryPlaylists.size),
+                                        onToggleSelect = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.togglePlaylistSelection(playlist.id)
+                                        },
+                                        onPreview = {
+                                            viewModel.loadPreview(playlist.id)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // TAB 1: YouTube Music Search
                 if (state.selectedTab == ImportTab.SEARCH) {
                     // Search & Paste Input Box
@@ -359,7 +464,7 @@ fun YouTubePlaylistImportScreen(
                                     fontWeight = FontWeight.Bold,
                                 )
                                 Text(
-                                    "Paste any YouTube, YouTube Music, or Spotify playlist URL. LastWave will resolve all tracks and save the full playlist.",
+                                    "Paste any YouTube or YouTube Music playlist URL. LastWave resolves every track — no 100-song cap, full playlists import completely.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -506,9 +611,10 @@ fun YouTubePlaylistImportScreen(
             }
         }
 
-        // Floating Bottom Import CTA (For multi-select on search tab)
+        // Floating Bottom Import CTA (for multi-select on library & search tabs)
         AnimatedVisibility(
-            visible = state.selectedTab == ImportTab.SEARCH && state.selectedPlaylistIds.isNotEmpty(),
+            visible = state.selectedTab in listOf(ImportTab.SEARCH, ImportTab.LIBRARY) &&
+                state.selectedPlaylistIds.isNotEmpty(),
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier

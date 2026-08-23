@@ -54,6 +54,8 @@ import com.lastwave.app.ui.generate.MixLauncher
 import com.lastwave.app.ui.home.HomeScreen
 import com.lastwave.app.ui.playlist.PlaylistScreen
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
+import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.liquidGlassChrome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.launch
@@ -188,6 +190,10 @@ private fun FloatingNavBar(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Liquid Glass (Settings → Experimental): the dock's fill already comes
+    // from surfaceContainerHigh, which turns translucent scheme-wide; this
+    // adds the specular sheen + hairline border on top. No-op when off.
+    val liquidGlass = LocalLiquidGlass.current
     Box(
         modifier = modifier
             .windowInsetsPadding(
@@ -201,6 +207,7 @@ private fun FloatingNavBar(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 5.dp,
             shadowElevation = 10.dp,
+            modifier = Modifier.liquidGlassChrome(DockShape, liquidGlass),
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),

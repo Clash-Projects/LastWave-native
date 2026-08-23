@@ -16,6 +16,8 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,11 +43,14 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Timer
@@ -62,6 +67,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -85,10 +91,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
@@ -96,10 +104,15 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.R
 import com.lastwave.app.data.local.AccentMode
+import com.lastwave.app.data.local.EQ_BAND_FREQS_HZ
+import com.lastwave.app.data.local.EqualizerPresets
+import com.lastwave.app.data.local.EqualizerSettings
+import com.lastwave.app.data.local.eqBandLabel
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
@@ -182,6 +195,7 @@ fun SettingsScreen(
     onOpenChooseApps: () -> Unit = {},
     onOpenDownloads: () -> Unit = {},
     onOpenYouTubeImport: () -> Unit = {},
+    onOpenYouTubeLogin: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val session by viewModel.session.collectAsState()
@@ -191,8 +205,15 @@ fun SettingsScreen(
     val state by viewModel.uiState.collectAsState()
     val downloadCount by viewModel.downloadCount.collectAsState()
     val downloadTotalBytes by viewModel.downloadTotalBytes.collectAsState()
+    val ytConnection by viewModel.ytConnection.collectAsState()
+    val ytSyncEnabled by viewModel.ytSyncEnabled.collectAsState()
+    val ytSyncState by viewModel.ytSyncState.collectAsState()
+    val ytLastSyncAt by viewModel.ytLastSyncAt.collectAsState()
+    val eq by viewModel.equalizer.collectAsState()
     val context = LocalContext.current
     var showQualityDialog by remember { mutableStateOf(false) }
+    var showEqSheet by remember { mutableStateOf(false) }
+    var showYtDisconnectConfirm by remember { mutableStateOf(false) }
 
     // Sends the user to Android's own Notification Listener access screen
     // — the one permission this feature needs that the app can never grant
@@ -252,6 +273,70 @@ fun SettingsScreen(
                     username = session.username,
                     onLogOut = { viewModel.logOut(onLoggedOut) },
                 )
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel("YouTube Music")
+                    val ytConnected = ytConnection.isConnected
+                    val syncSubtitle = when (val sync = ytSyncState) {
+                        is com.lastwave.app.data.ytmusic.YtSyncState.Running ->
+                            "Syncing ${sync.current}/${sync.total} \u2022 ${sync.label}"
+                        is com.lastwave.app.data.ytmusic.YtSyncState.Completed ->
+                            "Every playlist mirrors to your account \u2022 synced ${relativeTime(sync.atMillis)}"
+                        is com.lastwave.app.data.ytmusic.YtSyncState.Failed ->
+                            "Last pass failed \u2014 will retry automatically"
+                        else ->
+                            if (!ytConnected) "Connect an account first"
+                            else if (ytSyncEnabled) "Every playlist mirrors to your account, 24/7" + lastSyncSuffix(ytLastSyncAt)
+                            else "Keep your YT Music library identical to LastWave"
+                    }
+                    SettingsGroup(rowCount = 3) { index, position ->
+                        when (index) {
+                            0 -> if (ytConnected) {
+                                YouTubeAccountRow(
+                                    accountName = ytConnection.accountName,
+                                    channelHandle = ytConnection.channelHandle,
+                                    onDisconnect = { showYtDisconnectConfirm = true },
+                                    position = position,
+                                )
+                            } else {
+                                SettingsActionCard(
+                                    icon = Icons.Filled.CloudSync,
+                                    iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                    iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    title = "Connect YouTube Music",
+                                    subtitle = "Sign in to sync & import playlists",
+                                    onClick = onOpenYouTubeLogin,
+                                    position = position,
+                                )
+                            }
+                            1 -> SettingsToggleCard(
+                                icon = Icons.Filled.CloudSync,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Sync Playlists to YouTube Music",
+                                subtitle = syncSubtitle,
+                                checked = ytConnected && ytSyncEnabled,
+                                onCheckedChange = viewModel::setYtSyncEnabled,
+                                position = position,
+                            )
+                            2 -> SettingsActionCard(
+                                icon = Icons.Filled.QueueMusic,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = if (ytConnected) "Your Playlists on YouTube Music" else "Import from YouTube Music",
+                                subtitle = if (ytConnected) {
+                                    "Select any of your playlists and import it here"
+                                } else {
+                                    "Search, browse, or paste playlist links & IDs"
+                                },
+                                onClick = onOpenYouTubeImport,
+                                position = position,
+                            )
+                        }
+                    }
+                }
             }
 
             item {
@@ -376,6 +461,53 @@ fun SettingsScreen(
                                 onPickPreset = { hex -> viewModel.setManualAccent(Color(android.graphics.Color.parseColor(hex))) },
                                 onPickMono = { viewModel.setAccentMode(AccentMode.MONOCHROME) },
                                 onPickCustom = viewModel::openColorWheel,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel("Experimental")
+                    SettingsGroup(rowCount = 3) { index, position ->
+                        when (index) {
+                            0 -> SettingsToggleCard(
+                                icon = Icons.Filled.BubbleChart,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "Liquid Glass",
+                                subtitle = "iOS-style translucent materials across the app",
+                                checked = theme?.liquidGlass ?: false,
+                                onCheckedChange = viewModel::setLiquidGlass,
+                                position = position,
+                            )
+                            1 -> SettingsActionCard(
+                                icon = Icons.Filled.GraphicEq,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Equalizer",
+                                subtitle = if (eq.enabled) {
+                                    "On \u2022 ${eq.presetName} \u2022 15-band"
+                                } else {
+                                    "Shape your sound across 15 frequencies"
+                                },
+                                onClick = { showEqSheet = true },
+                                position = position,
+                            )
+                            2 -> SettingsToggleCard(
+                                icon = Icons.Filled.AutoAwesome,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Music Enhancer",
+                                subtitle = if (misc.musicEnhancerEnabled) {
+                                    "Fuller bass, wider stage, lifted vocals"
+                                } else {
+                                    "Subtle warmth & presence boost for any track"
+                                },
+                                checked = misc.musicEnhancerEnabled,
+                                onCheckedChange = viewModel::setMusicEnhancer,
+                                position = position,
                             )
                         }
                     }
@@ -591,9 +723,26 @@ fun SettingsScreen(
         )
     }
 
+    // -- YouTube Music disconnect confirm --
+    if (showYtDisconnectConfirm) {
+        AlertDialog(
+            onDismissRequest = { showYtDisconnectConfirm = false },
+            title = { Text("Disconnect YouTube Music?") },
+            text = { Text("Playlists already mirrored to your account stay there, but LastWave stops syncing and forgets the connection.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showYtDisconnectConfirm = false
+                    viewModel.disconnectYouTube()
+                }) { Text("Disconnect") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showYtDisconnectConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
     // -- Restore confirm --
-    if (state.showRestoreConfirm) {
-        val isPlaylistMirror = state.pendingRestoreKind == PendingRestoreKind.PLAYLIST_MIRROR
+    if (state.showRestoreConfirm) {        val isPlaylistMirror = state.pendingRestoreKind == PendingRestoreKind.PLAYLIST_MIRROR
         AlertDialog(
             onDismissRequest = viewModel::dismissRestoreConfirm,
             title = { Text(if (isPlaylistMirror) "Sync playlist JSON?" else "Restore backup?") },
@@ -649,6 +798,17 @@ fun SettingsScreen(
                 }
             },
             dismissButton = { TextButton(onClick = viewModel::dismissSessionKeyDialog) { Text("Cancel") } },
+        )
+    }
+
+    // -- Experimental 15-band equalizer --
+    if (showEqSheet) {
+        EqualizerSheet(
+            eq = eq,
+            onDismiss = { showEqSheet = false },
+            onSetEnabled = viewModel::setEqualizerEnabled,
+            onPickPreset = viewModel::applyEqPreset,
+            onBandChange = viewModel::setEqBandGain,
         )
     }
 
@@ -1012,6 +1172,81 @@ private fun SettingsActionCard(
                 tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+}
+
+@Composable
+private fun YouTubeAccountRow(
+    accountName: String,
+    channelHandle: String?,
+    onDisconnect: () -> Unit,
+    position: GroupPosition,
+) {
+    Card(
+        shape = groupShape(position),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconBadge(
+                Icons.Filled.CloudSync,
+                MaterialTheme.colorScheme.primaryContainer,
+                MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "YouTube Music Account",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    accountName.ifBlank { "Connected" },
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                if (!channelHandle.isNullOrBlank()) {
+                    Text(
+                        channelHandle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            FilledTonalIconButton(
+                onClick = onDisconnect,
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                ),
+            ) {
+                Icon(Icons.Filled.Logout, contentDescription = "Disconnect")
+            }
+        }
+    }
+}
+
+private fun lastSyncSuffix(lastSyncAtMillis: Long): String {
+    if (lastSyncAtMillis <= 0L) return ""
+    return " \u2022 synced ${relativeTime(lastSyncAtMillis)}"
+}
+
+private fun relativeTime(timestampMillis: Long): String {
+    if (timestampMillis <= 0L) return "never"
+    val delta = System.currentTimeMillis() - timestampMillis
+    val minutes = delta / 60_000L
+    return when {
+        minutes < 1 -> "just now"
+        minutes < 60 -> "${minutes}m ago"
+        minutes < 60 * 24 -> "${minutes / 60}h ago"
+        else -> "${minutes / (60 * 24)}d ago"
     }
 }
 
@@ -1414,5 +1649,244 @@ private fun ColorWheelSheet(onDismiss: () -> Unit, onApply: (Color) -> Unit) {
             }
             Spacer(Modifier.height(8.dp))
         }
+    }
+}
+
+// -- Experimental 15-band equalizer (Settings → Experimental → Equalizer) --
+
+private val EQ_MAX_DB = 12f
+/** Vertical length of each band's slider track (before rotation). */
+private val EQ_TRACK_LENGTH = 160.dp
+/** Full height of the curve area that hosts the 15 sliders. */
+private val EQ_CURVE_HEIGHT = 210.dp
+
+/**
+ * Bottom sheet hosting the Experimental equalizer: a master on/off switch,
+ * the curated preset bank as chips, and the live 15-band curve. Everything
+ * is drawn from MaterialTheme color scheme roles only, so it reads natively
+ * in both the classic opaque look and Liquid Glass mode.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun EqualizerSheet(
+    eq: EqualizerSettings,
+    onDismiss: () -> Unit,
+    onSetEnabled: (Boolean) -> Unit,
+    onPickPreset: (String) -> Unit,
+    onBandChange: (Int, Float) -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
+    // Live curve the sliders draw from — re-syncs whenever persisted settings
+    // change (preset picked elsewhere / drag commit round-trips), while
+    // dragging stays purely local so DataStore isn't hit every frame.
+    var gains by remember(eq.gainsDb) { mutableStateOf(eq.gainsDb.toFloatArray()) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        dragHandle = {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 8.dp)
+                    .size(width = 36.dp, height = 4.dp),
+            ) {}
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp + safeDrawingBottomPadding()),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.GraphicEq,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Column {
+                    Text(
+                        "Equalizer",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "Fine-tune your sound across 15 frequencies",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Enable Equalizer", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                        Text(
+                            if (eq.enabled) "Shaping your music live" else "Off \u2014 original audio passes through",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = eq.enabled,
+                        onCheckedChange = { enabled ->
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            onSetEnabled(enabled)
+                        },
+                    )
+                }
+            }
+
+            SectionLabel("Presets")
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                EqualizerPresets.ALL.forEach { preset ->
+                    FilterChip(
+                        selected = eq.presetName.equals(preset.name, ignoreCase = true),
+                        onClick = {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                            onPickPreset(preset.name)
+                        },
+                        label = { Text(preset.name) },
+                    )
+                }
+                if (eq.presetName == EqualizerPresets.CUSTOM_NAME) {
+                    FilterChip(selected = true, onClick = {}, label = { Text("Custom") })
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                val curveAlpha by animateFloatAsState(
+                    targetValue = if (eq.enabled) 1f else 0.35f,
+                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                    label = "eqCurveAlpha",
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 16.dp)
+                        .alpha(curveAlpha),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // dB scale markers along the left edge of the curve.
+                    Column(
+                        modifier = Modifier.width(26.dp).height(EQ_CURVE_HEIGHT),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("+12", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("0", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("-12", fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Spacer(Modifier.width(2.dp))
+                    Row(
+                        modifier = Modifier.weight(1f).height(EQ_CURVE_HEIGHT),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        EQ_BAND_FREQS_HZ.forEachIndexed { index, hz ->
+                            Column(
+                                modifier = Modifier.weight(1f).fillMaxHeight(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                EqBandSlider(
+                                    gainDb = gains[index],
+                                    enabled = eq.enabled,
+                                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                                    onGainChange = { value ->
+                                        gains = gains.copyOf().also { it[index] = value }
+                                    },
+                                    onChangeFinished = { onBandChange(index, gains[index]) },
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    eqBandLabel(hz),
+                                    fontSize = 8.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text(
+                text = when {
+                    !eq.enabled -> "Turn on to hear your curve applied"
+                    eq.presetName == EqualizerPresets.CUSTOM_NAME -> "Custom curve \u2014 tuned by you"
+                    else -> "${eq.presetName} preset \u2022 drag any band to customize"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+            )
+        }
+    }
+}
+
+/**
+ * One vertical EQ band: a stock Material 3 [Slider] rotated -90\u00B0 inside a
+ * fixed-height slot — keeps native M3 visuals, haptics and accessibility
+ * behavior while reading as an upright fader. Compose maps pointer events
+ * through graphicsLayer rotation, so dragging works exactly like an
+ * unrotated slider. Steps quantize to 0.5 dB for clean, confident stops.
+ */
+@Composable
+private fun EqBandSlider(
+    gainDb: Float,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onGainChange: (Float) -> Unit,
+    onChangeFinished: () -> Unit,
+) {
+    val normalized = ((gainDb + EQ_MAX_DB) / (EQ_MAX_DB * 2f)).coerceIn(0f, 1f)
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Slider(
+            value = normalized,
+            onValueChange = { fraction -> onGainChange(fraction * EQ_MAX_DB * 2f - EQ_MAX_DB) },
+            onValueChangeFinished = onChangeFinished,
+            valueRange = 0f..1f,
+            steps = 47, // 24 dB span / 48 segments = 0.5 dB per stop
+            enabled = enabled,
+            modifier = Modifier
+                .graphicsLayer { rotationZ = -90f }
+                .width(EQ_TRACK_LENGTH)
+                .height(28.dp),
+        )
     }
 }

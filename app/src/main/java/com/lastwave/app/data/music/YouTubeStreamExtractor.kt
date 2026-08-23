@@ -59,8 +59,23 @@ class YouTubeStreamExtractor @Inject constructor(
             // normalize both providers to bps for one truthful UI value.
             bitrate = if (reportedBitrate in 1..9_999) reportedBitrate * 1_000 else reportedBitrate,
         )
+        pruneStreamCache(now)
         streamCache[videoId] = Pair(now, result)
         result
+    }
+
+    /** Expired entries used to linger forever (expiry was only checked on
+     *  read), so every distinct video ever played stayed resident. Drop them
+     *  opportunistically once the cache outgrows its bound. */
+    private fun pruneStreamCache(now: Long) {
+        if (streamCache.size <= MAX_STREAM_CACHE_ENTRIES) return
+        streamCache.entries.removeIf { now - it.value.first >= CACHE_EXPIRY_MS }
+        if (streamCache.size > MAX_STREAM_CACHE_ENTRIES) {
+            streamCache.entries
+                .sortedBy { it.value.first }
+                .take(streamCache.size - MAX_STREAM_CACHE_ENTRIES)
+                .forEach { streamCache.remove(it.key) }
+        }
     }
 
     fun preWarm() {
@@ -78,6 +93,7 @@ class YouTubeStreamExtractor @Inject constructor(
 
     companion object {
         private const val CACHE_EXPIRY_MS = 4 * 60 * 60 * 1000L // 4 hours
+        private const val MAX_STREAM_CACHE_ENTRIES = 64
     }
 }
 

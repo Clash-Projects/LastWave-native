@@ -7,6 +7,7 @@ import com.lastwave.app.data.backup.BackupRepository
 import com.lastwave.app.data.backup.RestoreResult
 import com.lastwave.app.data.generate.GenerateRepository
 import com.lastwave.app.data.local.AccentMode
+import com.lastwave.app.data.local.EqualizerSettings
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.local.ScrobblerSettings
@@ -60,6 +61,10 @@ class SettingsViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val fileExportHelper: FileExportHelper,
     private val scrobblerPreferences: ScrobblerPreferences,
+    private val equalizerPreferences: com.lastwave.app.data.local.EqualizerPreferences,
+    private val ytAuthManager: com.lastwave.app.data.ytmusic.YtMusicAuthManager,
+    private val ytMusicSyncManager: com.lastwave.app.data.ytmusic.YtMusicSyncManager,
+    private val ytMusicPreferences: com.lastwave.app.data.ytmusic.YtMusicPreferences,
     private val downloadedTrackDao: com.lastwave.app.data.local.db.DownloadedTrackDao,
     val playlistImportManager: com.lastwave.app.data.playlist.PlaylistImportManager,
     val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
@@ -67,6 +72,14 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     val authState: StateFlow<com.lastwave.app.data.model.AuthState> = authRepository.authState
+
+    /** YouTube Music account connection + playlist-sync state (§ YouTube Music). */
+    val ytConnection: StateFlow<com.lastwave.app.data.ytmusic.YtConnection> = ytAuthManager.connection
+    val ytSyncState: StateFlow<com.lastwave.app.data.ytmusic.YtSyncState> = ytMusicSyncManager.state
+    val ytSyncEnabled: StateFlow<Boolean> = ytMusicPreferences.syncEnabled
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val ytLastSyncAt: StateFlow<Long> = ytMusicPreferences.lastSyncAt
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
 
     val session: StateFlow<SessionData> = kotlinx.coroutines.flow.combine(
         sessionPreferences.session,
@@ -88,6 +101,10 @@ class SettingsViewModel @Inject constructor(
 
     val scrobbler: StateFlow<ScrobblerSettings> = scrobblerPreferences.settings
         .stateIn(viewModelScope, SharingStarted.Eagerly, ScrobblerSettings())
+
+    /** Experimental 15-band equalizer state (Settings → Experimental). */
+    val equalizer: StateFlow<EqualizerSettings> = equalizerPreferences.settings
+        .stateIn(viewModelScope, SharingStarted.Eagerly, EqualizerSettings())
 
     val downloadCount: StateFlow<Int> = downloadedTrackDao.count()
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
@@ -130,6 +147,7 @@ class SettingsViewModel @Inject constructor(
     // ── Appearance (§8.2 / §8.3 / §8.4) ──
 
     fun setAmoled(enabled: Boolean) = viewModelScope.launch { themeRepository.setAmoled(enabled) }
+    fun setLiquidGlass(enabled: Boolean) = viewModelScope.launch { themeRepository.setLiquidGlass(enabled) }
     fun setAccentMode(mode: AccentMode) = viewModelScope.launch { themeRepository.setMode(mode) }
     fun setManualAccent(color: Color) = viewModelScope.launch { themeRepository.setManualAccent(color) }
     fun openColorWheel() = _uiState.update { it.copy(showColorWheel = true) }
@@ -143,6 +161,24 @@ class SettingsViewModel @Inject constructor(
     fun setUseCustomFont(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setUseCustomFont(enabled) }
     fun setPreferQobuzStreaming(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setPreferQobuzStreaming(enabled) }
     fun setQobuzQuality(quality: Int) = viewModelScope.launch { settingsPreferences.setQobuzQuality(quality) }
+    fun setMusicEnhancer(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setMusicEnhancer(enabled) }
+
+    // ── Experimental: 15-band equalizer ──
+
+    fun setEqualizerEnabled(enabled: Boolean) = viewModelScope.launch { equalizerPreferences.setEnabled(enabled) }
+
+    /** Selecting a preset also switches the EQ on — an off equalizer with a
+     *  fresh preset would read as a dead control. */
+    fun applyEqPreset(name: String) {
+        com.lastwave.app.data.local.EqualizerPresets.byName(name)?.let { preset ->
+            viewModelScope.launch { equalizerPreferences.applyPreset(preset) }
+        }
+    }
+
+    /** Manual band drag → curve becomes Custom. */
+    fun setEqBandGain(bandIndex: Int, gainDb: Float) = viewModelScope.launch {
+        equalizerPreferences.setBandGain(bandIndex, gainDb)
+    }
 
     // ── Data management (§8.5) ──
 
@@ -330,6 +366,30 @@ class SettingsViewModel @Inject constructor(
 
     fun setSubmitNowPlaying(enabled: Boolean) = viewModelScope.launch { scrobblerPreferences.setSubmitNowPlaying(enabled) }
     fun setScrobblePercent(percent: Int) = viewModelScope.launch { scrobblerPreferences.setScrobblePercent(percent) }
+
+    // ── YouTube Music account ──
+
+    /** Sync only turns on with a connected account; flipping it on triggers
+     *  an immediate first mirror pass instead of waiting for the next tick. */
+    fun setYtSyncEnabled(enabled: Boolean) {
+        if (enabled && !ytConnection.value.isConnected) return
+        viewModelScope.launch {
+            ytMusicPreferences.setSyncEnabled(enabled)
+            if (enabled) runCatching { ytMusicSyncManager.syncNow("enabled") }
+        }
+    }
+
+    fun disconnectYouTube() {
+        viewModelScope.launch {
+            ytMusicPreferences.setSyncEnabled(false)
+            ytAuthManager.signOut()
+            _uiState.update { it.copy(toastMessage = "YouTube Music disconnected") }
+        }
+    }
+
+    fun syncYouTubeNow() {
+        viewModelScope.launch { runCatching { ytMusicSyncManager.syncNow("manual") } }
+    }
 
     fun dismissSessionKeyDialog() = _uiState.update { it.copy(showSessionKeyDialog = false, sessionKeyError = null) }
 

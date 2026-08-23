@@ -198,6 +198,7 @@ class HomeViewModel @Inject constructor(
         nowPlaying: RecentTrack?,
         recent: List<RecentTrack>,
         topTracks: List<HomeTrack>,
+        previousNowPlaying: HomeTrack? = _uiState.value.nowPlaying,
     ): Pair<HomeTrack?, List<HomeTrack>> {
         val topCountByKey = topTracks.associate { "${it.name.lowercase()}|${it.artist.lowercase()}" to it.playCount }
         val recentAsHome = recent.map { t ->
@@ -212,12 +213,20 @@ class HomeViewModel @Inject constructor(
         }
         val recentKeys = recentAsHome.map { it.key }.toSet()
         val extra = topTracks.filter { it.key !in recentKeys }
-        val nowPlayingHome = nowPlaying?.let {
+        val nowPlayingHome = nowPlaying?.let { np ->
+            // Keep the previous HomeTrack instance structurally identical when
+            // the same track is still playing: stamping a fresh wall-clock
+            // timestamp on every 12s poll changed the data-class identity and
+            // forced every downstream remember/derive on Home to recompute.
+            val previous = previousNowPlaying
+            val sameTrackStillPlaying = previous != null && previous.isNowPlaying &&
+                previous.name.equals(np.name, ignoreCase = true) &&
+                previous.artist.equals(np.artist.displayName, ignoreCase = true)
             HomeTrack(
-                name = it.name,
-                artist = it.artist.displayName,
-                artworkUrl = it.artworkUrl,
-                timestampMillis = System.currentTimeMillis(),
+                name = np.name,
+                artist = np.artist.displayName,
+                artworkUrl = np.artworkUrl,
+                timestampMillis = if (sameTrackStillPlaying && previous != null) previous.timestampMillis else System.currentTimeMillis(),
                 playCount = 0,
                 isNowPlaying = true,
             )
@@ -303,21 +312,32 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    private var pageLoadInFlight = false
+
     fun loadNextPage() {
         val current = _uiState.value
         if (current.page >= current.totalPages) return
+        // One page request at a time: oscillation around the "near end"
+        // scroll threshold used to fire duplicate concurrent requests for
+        // the same page while the first fetch was still in flight.
+        if (pageLoadInFlight) return
+        pageLoadInFlight = true
         viewModelScope.launch(Dispatchers.IO) {
-            homeRepository.fetchRecentTracks(page = current.page + 1, username = current.viewingUsername).onSuccess { page ->
-                val (_, merged) = mergeRecentWithTop(null, page.tracks, cachedTopTracks)
-                _uiState.update { state ->
-                    val existingKeys = state.allTracks.map { it.key to it.timestampMillis }.toSet()
-                    val newOnes = merged.filter { (it.key to it.timestampMillis) !in existingKeys }
-                    state.copy(
-                        allTracks = state.allTracks + newOnes,
-                        page = page.page,
-                        totalPages = page.totalPages,
-                    )
+            try {
+                homeRepository.fetchRecentTracks(page = current.page + 1, username = current.viewingUsername).onSuccess { page ->
+                    val (_, merged) = mergeRecentWithTop(null, page.tracks, cachedTopTracks)
+                    _uiState.update { state ->
+                        val existingKeys = state.allTracks.map { it.key to it.timestampMillis }.toSet()
+                        val newOnes = merged.filter { (it.key to it.timestampMillis) !in existingKeys }
+                        state.copy(
+                            allTracks = state.allTracks + newOnes,
+                            page = page.page,
+                            totalPages = page.totalPages,
+                        )
+                    }
                 }
+            } finally {
+                pageLoadInFlight = false
             }
         }
     }

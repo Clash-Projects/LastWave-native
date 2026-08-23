@@ -32,6 +32,11 @@ data class MiscSettings(
     /** Preferred quality preset for Qobuz streaming (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k).
      *  If a track does not support the requested quality, the worker automatically selects the highest available. */
     val qobuzQuality: Int = 27,
+    /** Experimental "Music Enhancer" — a mastering-style effect chain (bass
+     *  warmth + stereo width + a subtle loudness lift) that makes tracks feel
+     *  fuller and more present without reshaping their tonal balance.
+     *  Separate from the equalizer; see playback/AudioEffectsEngine. */
+    val musicEnhancerEnabled: Boolean = false,
 )
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
@@ -46,6 +51,7 @@ class SettingsPreferences @Inject constructor(
         val PINNED_FRIENDS = stringSetPreferencesKey("lw_pinned_friends")
         val PREFER_QOBUZ_STREAMING = booleanPreferencesKey("lw_prefer_qobuz_streaming")
         val QOBUZ_QUALITY = androidx.datastore.preferences.core.intPreferencesKey("lw_qobuz_quality")
+        val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data.map { p ->
@@ -55,6 +61,7 @@ class SettingsPreferences @Inject constructor(
             pinnedFriends = p[Keys.PINNED_FRIENDS] ?: emptySet(),
             preferQobuzStreaming = p[Keys.PREFER_QOBUZ_STREAMING] ?: true,
             qobuzQuality = p[Keys.QOBUZ_QUALITY] ?: 27,
+            musicEnhancerEnabled = p[Keys.MUSIC_ENHANCER] ?: false,
         )
     }
 
@@ -72,6 +79,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setQobuzQuality(quality: Int) {
         dataStore.edit { it[Keys.QOBUZ_QUALITY] = quality }
+    }
+
+    suspend fun setMusicEnhancer(enabled: Boolean) {
+        dataStore.edit { it[Keys.MUSIC_ENHANCER] = enabled }
     }
 
     suspend fun toggleFriendPinned(username: String) {

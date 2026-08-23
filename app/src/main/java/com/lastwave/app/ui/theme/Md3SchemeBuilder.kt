@@ -45,7 +45,7 @@ object Md3SchemeBuilder {
     }
 
     /** Full dynamic scheme, seeded from [hex]'s hue. Matches _applyMaterialYouScheme(). */
-    fun buildScheme(hex: String, amoled: Boolean): ColorScheme {
+    fun buildScheme(hex: String, amoled: Boolean, liquidGlass: Boolean = false): ColorScheme {
         val h = hueOf(hex)
         val hT = (h + 60) % 360
         return build(
@@ -54,17 +54,19 @@ object Md3SchemeBuilder {
             tertiaryHue = hT,
             neutralHue = h,
             amoled = amoled,
+            liquidGlass = liquidGlass,
         )
     }
 
     /** Pure grayscale scheme (all chroma = 0). Matches _applyMonochromeScheme(). */
-    fun buildMonochromeScheme(amoled: Boolean): ColorScheme = build(
+    fun buildMonochromeScheme(amoled: Boolean, liquidGlass: Boolean = false): ColorScheme = build(
         primaryHue = 0,
         secondaryHue = 0,
         tertiaryHue = 0,
         neutralHue = 0,
         amoled = amoled,
         monochrome = true,
+        liquidGlass = liquidGlass,
     )
 
     private fun build(
@@ -74,6 +76,7 @@ object Md3SchemeBuilder {
         neutralHue: Int,
         amoled: Boolean,
         monochrome: Boolean = false,
+        liquidGlass: Boolean = false,
     ): ColorScheme {
         val cP = if (monochrome) 0 else CHROMA_PRIMARY
         val cS = if (monochrome) 0 else CHROMA_SECONDARY
@@ -91,7 +94,7 @@ object Md3SchemeBuilder {
         val surfaceLowCol = if (amoled) Color.Black else hsl(neutralHue, cN, bgL)
         val surfaceLowestCol = if (amoled) Color.Black else hsl(neutralHue, cN, (bgL - 2).coerceAtLeast(0))
 
-        return darkColorScheme(
+        val scheme = darkColorScheme(
             primary = hsl(primaryHue, cP, 82),
             onPrimary = hsl(primaryHue, cP, 16),
             primaryContainer = hsl(primaryHue, cP, if (amoled) 24 else 30),
@@ -132,7 +135,32 @@ object Md3SchemeBuilder {
             inversePrimary = hsl(primaryHue, cP, 40),
             scrim = Color.Black,
         )
+
+        // Experimental "liquid glass": only the CONTAINER roles go
+        // translucent — background/surface (the page itself), on* text roles,
+        // outline and scrim stay fully opaque so contrast, scrims and the
+        // window backdrop are untouched. Elevation hierarchy is preserved by
+        // making higher containers slightly MORE opaque, mirroring how iOS's
+        if (!liquidGlass) return scheme
+
+        return scheme.copy(
+            surfaceContainer = scheme.surfaceContainer.copy(alpha = GLASS_CONTAINER_ALPHA),
+            surfaceContainerHigh = scheme.surfaceContainerHigh.copy(alpha = GLASS_CONTAINER_ALPHA + 0.02f),
+            surfaceContainerHighest = scheme.surfaceContainerHighest.copy(alpha = GLASS_CONTAINER_ALPHA + 0.04f),
+            surfaceVariant = scheme.surfaceVariant.copy(alpha = 0.98f),
+            primaryContainer = scheme.primaryContainer,
+            secondaryContainer = scheme.secondaryContainer,
+            tertiaryContainer = scheme.tertiaryContainer,
+        )
     }
+
+    /** Base opacity for floating container surfaces while glass is on.
+     *  High enough that scrolling content underneath never fights with
+     *  card/label text, icons, or progress bars. */
+    private const val GLASS_CONTAINER_ALPHA = 0.94f
+
+    /** Accent containers stay fully solid for maximum contrast and legibility. */
+    private const val GLASS_ACCENT_ALPHA = 1.0f
 
     /**
      * HSL(h in 0-360, s in 0-100, l in 0-100) -> Compose Color.

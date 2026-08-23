@@ -36,6 +36,7 @@ import com.lastwave.app.service.ScrobbleDebugLog
 import com.lastwave.app.widget.ActiveMediaSessionHolder
 import com.lastwave.app.widget.WidgetUpdater
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -61,13 +62,23 @@ class MusicPlaybackService : Service() {
     @Inject lateinit var themeRepository: ThemeRepository
     @Inject lateinit var artworkRepository: com.lastwave.app.data.artwork.ArtworkRepository
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // SupervisorJob stops sibling failure propagation; the handler below
+    // additionally stops an unexpected exception in any fire-and-forget
+    // launch (scrobble, artwork, notification publish) from reaching the
+    // default handler and killing the whole process mid-playback.
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main.immediate +
+            CoroutineExceptionHandler { _, error ->
+                android.util.Log.e("MusicPlaybackService", "Suppressed playback service coroutine failure", error)
+            },
+    )
     private lateinit var mediaSession: MediaSession
     private lateinit var ownController: MediaController
     private var settings = ScrobblerSettings()
     private var detectorJob: Job? = null
     private var detectedKey = ""
     private var nowPlayingAnnouncedKey = ""
+    @Volatile private var nowPlayingInFlight = false
     private var accumulatedMs = 0L
     private var lastPositionMs = 0L
     private var startedAtEpochSec = 0L
@@ -80,6 +91,8 @@ class MusicPlaybackService : Service() {
     private var artworkBitmap: Bitmap? = null
     private var notificationSignature = ""
     private var widgetSignature = ""
+    private var systemStateSignature = ""
+    private var artworkRequestKey = ""
     private var notificationPalette = NotificationPalette.default()
 
     override fun onCreate() {
@@ -105,9 +118,15 @@ class MusicPlaybackService : Service() {
         scope.launch { scrobblerPreferences.settings.collect { settings = it } }
         scope.launch {
             themeRepository.uiState.collectLatest { theme ->
-                notificationPalette = NotificationPalette.from(theme.colorScheme)
-                notificationSignature = ""
-                publishNotification(musicPlayer.state.value, force = true)
+                val newPalette = NotificationPalette.from(theme.colorScheme)
+                // Only force a notification rebuild when the palette actually
+                // changed — unrelated DataStore settings also flow through this
+                // state and used to trigger pointless RemoteViews rebuilds.
+                if (newPalette != notificationPalette) {
+                    notificationPalette = newPalette
+                    notificationSignature = ""
+                    publishNotification(musicPlayer.state.value, force = true)
+                }
             }
         }
         scope.launch {
@@ -150,9 +169,11 @@ class MusicPlaybackService : Service() {
         artworkJob?.cancel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
         else @Suppress("DEPRECATION") stopForeground(true)
+        val releasedToken = mediaSession.sessionToken
         mediaSession.isActive = false
         mediaSession.release()
         ActiveMediaSessionHolder.clear(ownController)
+        ActiveMediaSessionHolder.clearToken(releasedToken)
         scope.cancel()
         super.onDestroy()
     }
@@ -185,12 +206,16 @@ class MusicPlaybackService : Service() {
             val (prevTitle, prevArtist) = cleanTrackMetadata(prev.title, prev.artist)
             val prevStartedAt = pendingPreviousStartedAt
             scope.launch(Dispatchers.IO) {
-                scrobbleRepository.scrobble(
-                    artist = prevArtist,
-                    track = prevTitle,
-                    album = prev.album,
-                    timestampSec = prevStartedAt,
-                )
+                runCatching {
+                    scrobbleRepository.scrobble(
+                        artist = prevArtist,
+                        track = prevTitle,
+                        album = prev.album,
+                        timestampSec = prevStartedAt,
+                    )
+                }.onFailure { error ->
+                    android.util.Log.e("MusicPlaybackService", "Deferred scrobble failed", error)
+                }
             }
         }
 
@@ -212,13 +237,39 @@ class MusicPlaybackService : Service() {
     private fun announceNowPlaying(state: MusicPlayerState) {
         val track = state.current ?: return
         if (!state.isPlaying || !settings.submitNowPlaying) return
+        // One announcement in flight at a time: during a rate-limit cooldown
+        // each write can wait seconds on the shared write mutex — without this
+        // guard the 1s detector loop would stack duplicate announcements that
+        // all fire once the cooldown clears.
+        if (nowPlayingInFlight) return
         val (cleanTitle, cleanArtist) = cleanTrackMetadata(track.title, track.artist)
         val key = "${cleanArtist.lowercase()}|${cleanTitle.lowercase()}"
         nowPlayingAnnouncedKey = key
+        nowPlayingInFlight = true
         scope.launch(Dispatchers.IO) {
-            val result = scrobbleRepository.updateNowPlaying(cleanArtist, cleanTitle, track.album)
-            if (result is ScrobbleRepository.Result.Success) {
-                debugLog.log("Now playing updated: \"$cleanTitle\" — $cleanArtist")
+            try {
+                val result = scrobbleRepository.updateNowPlaying(cleanArtist, cleanTitle, track.album)
+                when {
+                    result is ScrobbleRepository.Result.Success ->
+                        debugLog.log("Now playing updated: \"$cleanTitle\" — $cleanArtist")
+                    result is ScrobbleRepository.Result.Failed && result.retryable -> {
+                        // Transient (rate limit / network): clear the announced key so
+                        // the 1s detector loop re-attempts once the rate shield
+                        // clears, instead of leaving Now Playing silently dead for
+                        // the rest of the track.
+                        if (nowPlayingAnnouncedKey == key) nowPlayingAnnouncedKey = ""
+                    }
+                    else -> Unit
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A throw here used to escape via try/finally with no catch
+                // and (before the scope handler existed) kill the process.
+                debugLog.log("Now playing update crashed: ${e.message}")
+                android.util.Log.e("MusicPlaybackService", "updateNowPlaying failed", e)
+            } finally {
+                nowPlayingInFlight = false
             }
         }
     }
@@ -271,30 +322,34 @@ class MusicPlaybackService : Service() {
 
                 submissionAttempted = true
                 scope.launch(Dispatchers.IO) {
-                    when (val result = scrobbleRepository.scrobble(
-                        artist = cleanArtist,
-                        track = cleanTitle,
-                        album = track.album,
-                        timestampSec = startedAtEpochSec,
-                    )) {
-                        ScrobbleRepository.Result.Success -> {
-                            debugLog.log("Own player scrobbled \"$cleanTitle\" — $cleanArtist")
-                            // Re-announce now playing so Last.fm keeps active status during ongoing playback
-                            if (musicPlayer.state.value.isPlaying) {
-                                scrobbleRepository.updateNowPlaying(cleanArtist, cleanTitle, track.album)
+                    runCatching {
+                        when (val result = scrobbleRepository.scrobble(
+                            artist = cleanArtist,
+                            track = cleanTitle,
+                            album = track.album,
+                            timestampSec = startedAtEpochSec,
+                        )) {
+                            ScrobbleRepository.Result.Success -> {
+                                debugLog.log("Own player scrobbled \"$cleanTitle\" — $cleanArtist")
+                                // Re-announce now playing so Last.fm keeps active status during ongoing playback
+                                if (musicPlayer.state.value.isPlaying) {
+                                    scrobbleRepository.updateNowPlaying(cleanArtist, cleanTitle, track.album)
+                                }
+                            }
+                            ScrobbleRepository.Result.NoSessionKey -> {
+                                debugLog.log("Own play detected for \"$cleanTitle\"; connect Last.fm to submit it")
+                            }
+                            is ScrobbleRepository.Result.Failed -> {
+                                debugLog.log("Own player scrobble failed for \"$cleanTitle\": ${result.message}")
+                                // Allow up to 3 retries on network failure
+                                if (retryCount < 3) {
+                                    retryCount++
+                                    submissionAttempted = false
+                                }
                             }
                         }
-                        ScrobbleRepository.Result.NoSessionKey -> {
-                            debugLog.log("Own play detected for \"$cleanTitle\"; connect Last.fm to submit it")
-                        }
-                        is ScrobbleRepository.Result.Failed -> {
-                            debugLog.log("Own player scrobble failed for \"$cleanTitle\": ${result.message}")
-                            // Allow up to 3 retries on network failure
-                            if (retryCount < 3) {
-                                retryCount++
-                                submissionAttempted = false
-                            }
-                        }
+                    }.onFailure { error ->
+                        android.util.Log.e("MusicPlaybackService", "Scrobble submission crashed", error)
                     }
                 }
             }
@@ -303,6 +358,41 @@ class MusicPlaybackService : Service() {
 
     private fun publishSystemState(state: MusicPlayerState) {
         val track = state.current
+        // Transport-control target is cheap and must stay fresh every emission.
+        val active = ActiveMediaSessionHolder.controller
+        val otherAppIsPlaying = active?.packageName != packageName &&
+            active?.playbackState?.state == PlaybackState.STATE_PLAYING
+        if (track != null && (state.isPlaying || active == null || !otherAppIsPlaying)) {
+            ActiveMediaSessionHolder.controller = ownController
+        }
+
+        // setMetadata/setPlaybackState are binder IPC into system_server. The
+        // player state emits ~4x/second while playing; republishing on every
+        // emission meant ~240 binder transactions/minute for identical data —
+        // a constant main-thread tax that compounds into visible jank and
+        // "app stopped responding" spells. PlaybackState carries position +
+        // speed, so the system extrapolates between publishes; only actual
+        // changes (track, duration, play/buffer state, artwork, or a seek
+        // while paused) need to cross the binder.
+        val playbackState = when {
+            state.isBuffering -> PlaybackState.STATE_BUFFERING
+            state.isPlaying -> PlaybackState.STATE_PLAYING
+            track != null -> PlaybackState.STATE_PAUSED
+            else -> PlaybackState.STATE_NONE
+        }
+        val signature = buildString {
+            append(track?.title).append('|')
+            append(track?.artist).append('|')
+            append(track?.album).append('|')
+            append(state.durationMs).append('|')
+            append(playbackState).append('|')
+            append(artworkUrl).append('|')
+            append(artworkBitmap != null)
+            if (!state.isPlaying) append("|pos=").append(state.positionMs)
+        }
+        if (signature == systemStateSignature) return
+        systemStateSignature = signature
+
         mediaSession.setMetadata(
             MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, track?.title.orEmpty())
@@ -314,12 +404,6 @@ class MusicPlaybackService : Service() {
                 .apply { artworkBitmap?.let { putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it) } }
                 .build(),
         )
-        val playbackState = when {
-            state.isBuffering -> PlaybackState.STATE_BUFFERING
-            state.isPlaying -> PlaybackState.STATE_PLAYING
-            track != null -> PlaybackState.STATE_PAUSED
-            else -> PlaybackState.STATE_NONE
-        }
         mediaSession.setPlaybackState(
             PlaybackState.Builder()
                 .setActions(
@@ -331,12 +415,6 @@ class MusicPlaybackService : Service() {
                 .setState(playbackState, state.positionMs, if (state.isPlaying) state.speed else 0f)
                 .build(),
         )
-        val active = ActiveMediaSessionHolder.controller
-        val otherAppIsPlaying = active?.packageName != packageName &&
-            active?.playbackState?.state == PlaybackState.STATE_PLAYING
-        if (track != null && (state.isPlaying || active == null || !otherAppIsPlaying)) {
-            ActiveMediaSessionHolder.controller = ownController
-        }
     }
 
     private fun publishWidget(state: MusicPlayerState) {
@@ -372,10 +450,17 @@ class MusicPlaybackService : Service() {
 
     private fun requestArtwork(track: PlayableTrack?) {
         if (track == null) {
+            artworkRequestKey = ""
             artworkUrl = null
             artworkBitmap = null
             return
         }
+
+        // The player state emits ~4x/second; without this guard every emission
+        // re-launched an artwork resolution job for the same track.
+        val requestKey = "${track.title}|${track.artist}|${track.artworkUrl.orEmpty()}"
+        if (requestKey == artworkRequestKey) return
+        artworkRequestKey = requestKey
 
         val directUrl = track.artworkUrl?.takeIf(String::isNotBlank)
         if (directUrl != null) {

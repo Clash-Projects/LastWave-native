@@ -41,6 +41,10 @@ data class ThemeUiState(
     /** Settings' "Use Application Font" toggle — see ui/theme/Type.kt for
      *  what turning it off falls back to. */
     val useCustomFont: Boolean = true,
+    /** Experimental liquid-glass materials (Settings → Experimental). When
+     *  true, container roles in [colorScheme] are semi-translucent and the
+     *  chrome surfaces get specular glass dressing. */
+    val liquidGlass: Boolean = false,
 )
 
 @Singleton
@@ -162,17 +166,18 @@ class ThemeRepository @Inject constructor(
         settingsPreferences.settings,
     ) { prefs: ThemePrefs, dynamic: String?, nowPlaying: String?, misc: MiscSettings ->
         val isAmoled = prefs.amoled
+        val isGlass = prefs.liquidGlass
         val scheme = when {
             misc.dynamicNowPlayingEnabled && nowPlaying != null ->
-                Md3SchemeBuilder.buildScheme(nowPlaying, isAmoled)
+                Md3SchemeBuilder.buildScheme(nowPlaying, isAmoled, isGlass)
             prefs.accentMode == AccentMode.MONOCHROME ->
-                Md3SchemeBuilder.buildMonochromeScheme(isAmoled)
+                Md3SchemeBuilder.buildMonochromeScheme(isAmoled, isGlass)
             prefs.accentMode == AccentMode.DYNAMIC -> {
                 val seed = dynamic ?: getSystemWallpaperColorHex() ?: prefs.accentColor
-                Md3SchemeBuilder.buildScheme(seed, isAmoled)
+                Md3SchemeBuilder.buildScheme(seed, isAmoled, isGlass)
             }
             else ->
-                Md3SchemeBuilder.buildScheme(prefs.accentColor, isAmoled)
+                Md3SchemeBuilder.buildScheme(prefs.accentColor, isAmoled, isGlass)
         }
         ThemeUiState(
             colorScheme = scheme,
@@ -180,6 +185,7 @@ class ThemeRepository @Inject constructor(
             mode = prefs.accentMode,
             accentColorHex = prefs.accentColor,
             useCustomFont = misc.useCustomFont,
+            liquidGlass = isGlass,
         )
     }.stateIn(
         applicationScope,
@@ -190,6 +196,7 @@ class ThemeRepository @Inject constructor(
             mode = AccentMode.MANUAL,
             accentColorHex = "#E03030",
             useCustomFont = true,
+            liquidGlass = false,
         ),
     )
 
@@ -204,6 +211,8 @@ class ThemeRepository @Inject constructor(
     }
 
     suspend fun setAmoled(enabled: Boolean) = themePreferences.setAmoled(enabled)
+
+    suspend fun setLiquidGlass(enabled: Boolean) = themePreferences.setLiquidGlass(enabled)
 
     /** Turning this on used to just flip the DataStore flag and wait for
      *  Home's own poll loop to eventually call updateNowPlayingArtwork() —

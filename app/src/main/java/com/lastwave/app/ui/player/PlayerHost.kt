@@ -133,6 +133,8 @@ import com.lastwave.app.ui.common.PlaylistCover
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
+import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.liquidGlassChrome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -393,6 +395,9 @@ private fun MiniPlayer(
 ) {
     val context = LocalContext.current
     val track = state.current ?: return
+    // Liquid Glass dressing for the floating mini player (no-op when the
+    // experimental setting is off — see ui/theme/LiquidGlass.kt).
+    val liquidGlass = LocalLiquidGlass.current
     var dragX by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var dragY by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     val shownX by animateFloatAsState(dragX, ExpressiveMotion.spatialSpring(), label = "miniPlayerX")
@@ -448,7 +453,7 @@ private fun MiniPlayer(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = if (edgeToEdge) 0.dp else 6.dp,
             shadowElevation = if (edgeToEdge) 0.dp else 12.dp,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().liquidGlassChrome(shape, liquidGlass),
         ) {
             Column(
                 modifier = if (edgeToEdge) {

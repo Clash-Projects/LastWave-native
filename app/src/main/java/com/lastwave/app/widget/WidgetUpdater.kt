@@ -8,21 +8,17 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.updateAll
 import java.io.File
 import java.io.FileOutputStream
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 
 private const val TAG = "WidgetUpdater"
 private const val ART_FILE_NAME = "widget_now_playing_art.png"
 
 /** Writes and refreshes the shared state of the now-playing widget. */
 object WidgetUpdater {
-    private val animationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var animationJob: Job? = null
+    // The old "animation" loop re-published every placed widget every 900ms —
+    // a full Glance recomposition + RemoteViews serialization + binder IPC —
+    // while the only consumer of the frame counter never actually rendered
+    // it, so every frame produced pixel-identical widgets. That is now gone;
+    // widgets update only on real playback-state changes.
 
     @Volatile
     internal var animationFrame: Int = 0
@@ -52,12 +48,10 @@ object WidgetUpdater {
                 hasSession = true,
             ),
         )
-        if (isPlaying) startAnimation(context.applicationContext) else stopAnimation()
         updateAll(context)
     }
 
     suspend fun clear(context: Context) {
-        stopAnimation()
         val current = NowPlayingWidgetSnapshot.read(context)
         NowPlayingWidgetSnapshot.write(
             context,
@@ -67,45 +61,23 @@ object WidgetUpdater {
     }
 
     /** Immediately reflects widget-originated playback actions while the
-     * media-session callback catches up, including the animated artwork badge. */
+     * media-session callback catches up. */
     suspend fun setPlaying(context: Context, isPlaying: Boolean) {
         val current = NowPlayingWidgetSnapshot.read(context)
         if (!current.hasSession) return
+        if (current.isPlaying == isPlaying) return
         NowPlayingWidgetSnapshot.write(context, current.copy(isPlaying = isPlaying))
-        if (isPlaying) startAnimation(context.applicationContext) else stopAnimation()
         updateAll(context)
     }
 
-    /** Restores frame updates when a widget is placed while music is already playing. */
+    /** Refreshes a freshly placed widget from persisted state. */
     suspend fun sync(context: Context) {
-        val current = NowPlayingWidgetSnapshot.read(context)
-        if (current.hasSession && current.isPlaying) startAnimation(context.applicationContext)
-        else stopAnimation()
         updateAll(context)
     }
 
     /** Recompose all placed widgets after the app's live color scheme changes. */
     suspend fun refreshTheme(context: Context) {
         updateAll(context)
-    }
-
-    @Synchronized
-    private fun startAnimation(context: Context) {
-        if (animationJob?.isActive == true) return
-        animationJob = animationScope.launch {
-            while (isActive) {
-                delay(450L)
-                animationFrame = (animationFrame + 1) % 4
-                if (!updateAll(context)) break
-            }
-        }
-    }
-
-    @Synchronized
-    private fun stopAnimation() {
-        animationJob?.cancel()
-        animationJob = null
-        animationFrame = 0
     }
 
     private suspend fun updateAll(context: Context): Boolean = runCatching {

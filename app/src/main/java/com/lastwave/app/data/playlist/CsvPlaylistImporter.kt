@@ -3,6 +3,9 @@ package com.lastwave.app.data.playlist
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStream
@@ -30,14 +33,21 @@ class CsvPlaylistImporter @Inject constructor(
 ) {
 
     /**
-     * Parses raw CSV text (Spotify, Soundiiz, TuneMyMusic, Apple Music, or generic)
-     * and performs strict, anti-hallucination track matching.
+     * Parses raw CSV text (Spotify, Soundiiz, TuneMyMusic, Apple Music, or
+     * generic) and performs strict, anti-hallucination track matching.
+     *
+     * Reliability notes (the "CSV import is broken" fixes):
+     * - BOM is stripped; headers are matched fuzzily ("Track Name", "\"Title\"",
+     *   "Artist Name(s)" all resolve now) instead of exact lowercase equality.
+     * - Headerless files fall back to positional columns.
+     * - Matching runs in parallel (bounded) so a 500-row export doesn't take
+     *   10+ minutes of sequential searches.
      */
     suspend fun parseAndMatchCsv(
         inputStream: InputStream,
         filename: String = "Imported Playlist",
     ): CsvImportResult = withContext(Dispatchers.IO) {
-        val rawTracks = parseCsv(inputStream)
+        val rawTracks = runCatching { parseCsv(inputStream) }.getOrDefault(emptyList())
         if (rawTracks.isEmpty()) {
             return@withContext CsvImportResult(
                 suggestedTitle = cleanPlaylistTitle(filename),
@@ -47,99 +57,151 @@ class CsvPlaylistImporter @Inject constructor(
             )
         }
 
-        val matchedTracks = mutableListOf<GeneratedTrack>()
-        var verifiedCount = 0
+        // Bounded parallel matching; results re-ordered to match CSV order so
+        // imports preserve the original playlist sequence exactly.
+        val resolved: MutableList<GeneratedTrack?> = MutableList(rawTracks.size) { null }
+        val verified = BooleanArray(rawTracks.size)
 
-        for (raw in rawTracks) {
-            if (raw.title.isBlank()) continue
+        coroutineScope {
+            val jobs = rawTracks.mapIndexed { index, raw ->
+                async(Dispatchers.IO) {
+                    if (raw.title.isBlank()) return@async
+                    val match = runCatching { innerTube.findBestMatchOrNull(raw.title, raw.artist) }.getOrNull()
 
-            // 1. Strict match search
-            val match = runCatching { innerTube.findBestMatch(raw.title, raw.artist) }.getOrNull()
+                    val isAccurate = match != null && match.videoId.isNotBlank() && calculateMatchConfidence(
+                        sourceTitle = raw.title,
+                        sourceArtist = raw.artist,
+                        targetTitle = match.title,
+                        targetArtist = match.artist,
+                    ) >= 70
 
-            // 2. High-precision similarity scoring to avoid false positives
-            val isAccurate = if (match != null && match.videoId.isNotBlank()) {
-                val score = calculateMatchConfidence(
-                    sourceTitle = raw.title,
-                    sourceArtist = raw.artist,
-                    targetTitle = match.title,
-                    targetArtist = match.artist,
-                )
-                score >= 70
-            } else false
-
-            val finalTrack = if (isAccurate && match != null) {
-                verifiedCount++
-                GeneratedTrack(
-                    name = raw.title.trim(),
-                    artist = raw.artist.trim(),
-                    album = raw.album?.trim()?.ifBlank { match.album },
-                    artworkUrl = match.artworkUrl,
-                )
-            } else {
-                // Never attach a wrong song: retain original metadata with clean state
-                GeneratedTrack(
-                    name = raw.title.trim(),
-                    artist = raw.artist.trim().ifBlank { "Unknown Artist" },
-                    album = raw.album?.trim(),
-                    artworkUrl = null,
-                )
+                    resolved[index] = if (isAccurate && match != null) {
+                        verified[index] = true
+                        GeneratedTrack(
+                            name = raw.title.trim(),
+                            artist = raw.artist.trim(),
+                            album = raw.album?.trim()?.ifBlank { match.album },
+                            artworkUrl = match.artworkUrl,
+                        )
+                    } else {
+                        // Never attach a wrong song: retain original metadata
+                        // so playback can still attempt its own resolution.
+                        GeneratedTrack(
+                            name = raw.title.trim(),
+                            artist = raw.artist.trim().ifBlank { "Unknown Artist" },
+                            album = raw.album?.trim(),
+                            artworkUrl = null,
+                        )
+                    }
+                }
             }
-
-            matchedTracks.add(finalTrack)
+            jobs.awaitAll()
         }
+
+        val tracks = resolved.filterNotNull()
+        val verifiedCount = verified.count { it }
 
         CsvImportResult(
             suggestedTitle = cleanPlaylistTitle(filename),
             totalRows = rawTracks.size,
             matchedCount = verifiedCount,
-            tracks = matchedTracks,
+            tracks = tracks,
         )
     }
 
     private fun parseCsv(inputStream: InputStream): List<CsvRawTrack> {
         val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
-        val lines = reader.readLines().filter { it.isNotBlank() }
+        // Strip BOM — Excel/Spotify exports start with \uFEFF which otherwise
+        // corrupts the first header token ("﻿Track Name" matches nothing).
+        val lines = reader.readLines()
+            .map { it.trimStart('\uFEFF') }
+            .filter { it.isNotBlank() }
         if (lines.isEmpty()) return emptyList()
 
-        val delimiter = detectDelimiter(lines.first())
-        val headerTokens = parseCsvLine(lines.first(), delimiter).map { it.trim().lowercase() }
+        val delimiter = detectDelimiter(lines.take(5))
+        val firstTokens = parseCsvLine(lines.first(), delimiter)
+        val headerTokens = firstTokens.map { cleanHeaderToken(it) }
 
-        val titleIdx = headerTokens.indexOfFirst { it in TITLE_HEADERS }
-        val artistIdx = headerTokens.indexOfFirst { it in ARTIST_HEADERS }
-        val albumIdx = headerTokens.indexOfFirst { it in ALBUM_HEADERS }
+        val titleIdx = headerTokens.indexOfFirst { isTitleHeader(it) }
+        val artistIdx = headerTokens.indexOfFirst { isArtistHeader(it) }
+        val albumIdx = headerTokens.indexOfFirst { isAlbumHeader(it) }
+        val hasHeader = titleIdx >= 0 || artistIdx >= 0 || albumIdx >= 0
 
         val actualTitleIdx = if (titleIdx >= 0) titleIdx else 0
-        val actualArtistIdx = if (artistIdx >= 0) artistIdx else if (headerTokens.size > 1) 1 else -1
+        val actualArtistIdx = when {
+            artistIdx >= 0 -> artistIdx
+            !hasHeader && firstTokens.size > 1 -> 1
+            hasHeader && headerTokens.size > 1 -> 1
+            else -> -1
+        }
+        val actualAlbumIdx = albumIdx
+
+        // Only skip rows whose title literally equals one of THIS file's own
+        // header tokens (repeated header rows mid-export are common in
+        // concatenated exports) — never blanket-ignore real songs named
+        // "Title" or "Name".
+        val headerEchoes: Set<String> =
+            if (hasHeader) headerTokens.filter { it.isNotBlank() }.toSet() else emptySet()
+        val startRow = if (hasHeader) 1 else 0
 
         val result = mutableListOf<CsvRawTrack>()
-        val startRow = if (titleIdx >= 0 || artistIdx >= 0) 1 else 0
-
         for (i in startRow until lines.size) {
             val tokens = parseCsvLine(lines[i], delimiter)
-            if (tokens.isEmpty()) continue
+            if (tokens.isEmpty() || tokens.all { it.isBlank() }) continue
 
-            val title = tokens.getOrNull(actualTitleIdx)?.trim().orEmpty()
-            val artist = if (actualArtistIdx >= 0) tokens.getOrNull(actualArtistIdx)?.trim().orEmpty() else ""
-            val album = if (albumIdx >= 0) tokens.getOrNull(albumIdx)?.trim() else null
+            val rawTitle = tokens.getOrNull(actualTitleIdx)?.trim().orEmpty()
+            if (rawTitle.isBlank()) continue
+            if (cleanHeaderToken(rawTitle) in headerEchoes) continue
 
-            if (title.isNotBlank() && !title.equals("track name", ignoreCase = true) && !title.equals("title", ignoreCase = true)) {
-                result.add(CsvRawTrack(title = cleanTrackTitle(title), artist = cleanArtistName(artist), album = album))
-            }
+            val rawArtist = if (actualArtistIdx >= 0) tokens.getOrNull(actualArtistIdx)?.trim().orEmpty() else ""
+            val album = if (actualAlbumIdx >= 0) tokens.getOrNull(actualAlbumIdx)?.trim()?.takeIf(String::isNotBlank) else null
+
+            result.add(
+                CsvRawTrack(
+                    title = cleanTrackTitle(rawTitle),
+                    artist = cleanArtistName(rawArtist),
+                    album = album,
+                ),
+            )
         }
 
         return result
     }
 
-    private fun detectDelimiter(headerLine: String): Char {
-        val commas = headerLine.count { it == ',' }
-        val semicolons = headerLine.count { it == ';' }
-        val tabs = headerLine.count { it == '\t' }
+    /** Picks the delimiter that appears most consistently across sample lines. */
+    private fun detectDelimiter(sampleLines: List<String>): Char {
+        data class Counts(val comma: Int, val semicolon: Int, val tab: Int)
+
+        val totals = sampleLines.fold(Counts(0, 0, 0)) { acc, line ->
+            Counts(
+                acc.comma + line.count { it == ',' },
+                acc.semicolon + line.count { it == ';' },
+                acc.tab + line.count { it == '\t' },
+            )
+        }
         return when {
-            semicolons > commas && semicolons > tabs -> ';'
-            tabs > commas && tabs > semicolons -> '\t'
+            totals.semicolon > totals.comma && totals.semicolon > totals.tab -> ';'
+            totals.tab > totals.comma && totals.tab > totals.semicolon -> '\t'
             else -> ','
         }
     }
+
+    private fun cleanHeaderToken(value: String): String =
+        value.trim().lowercase().removePrefix("\"").removeSuffix("\"").trim()
+
+    private fun isTitleHeader(token: String): Boolean =
+        token in TITLE_HEADERS ||
+            token.contains("track name") || token.contains("song title") ||
+            token.contains("track title") || token == "track" || token == "title" ||
+            token == "song" || token == "name"
+
+    private fun isArtistHeader(token: String): Boolean =
+        token in ARTIST_HEADERS ||
+            token.contains("artist") || token.contains("performer") ||
+            token == "author" || token == "creator"
+
+    private fun isAlbumHeader(token: String): Boolean =
+        token in ALBUM_HEADERS || token.startsWith("album")
 
     private fun parseCsvLine(line: String, delimiter: Char): List<String> {
         val tokens = mutableListOf<String>()

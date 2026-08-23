@@ -26,6 +26,9 @@ data class ThemePrefs(
     val accentLight: String = "#FF6060",
     val accentMode: AccentMode = AccentMode.MANUAL,
     val amoled: Boolean = false,
+    /** Experimental iOS-style liquid-glass materials. Off by default — the
+     *  classic opaque look stays untouched until the user opts in. */
+    val liquidGlass: Boolean = false,
 )
 
 @Singleton
@@ -37,6 +40,7 @@ class ThemePreferences @Inject constructor(
         val ACCENT_LIGHT = stringPreferencesKey("lw_accentLight")
         val ACCENT_MODE = stringPreferencesKey("lw_accentMode")
         val AMOLED = booleanPreferencesKey("lw_amoled")
+        val LIQUID_GLASS = booleanPreferencesKey("lw_liquidGlass")
     }
 
     val prefs: Flow<ThemePrefs> = dataStore.data.map { p ->
@@ -45,6 +49,7 @@ class ThemePreferences @Inject constructor(
             accentLight = p[Keys.ACCENT_LIGHT] ?: "#FF6060",
             accentMode = AccentMode.fromStorage(p[Keys.ACCENT_MODE]),
             amoled = p[Keys.AMOLED] ?: false,
+            liquidGlass = p[Keys.LIQUID_GLASS] ?: false,
         )
     }
 
@@ -62,5 +67,9 @@ class ThemePreferences @Inject constructor(
 
     suspend fun setAmoled(enabled: Boolean) {
         dataStore.edit { it[Keys.AMOLED] = enabled }
+    }
+
+    suspend fun setLiquidGlass(enabled: Boolean) {
+        dataStore.edit { it[Keys.LIQUID_GLASS] = enabled }
     }
 }

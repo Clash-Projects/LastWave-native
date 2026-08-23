@@ -7,7 +7,9 @@ import com.lastwave.app.data.music.YouTubePlaylistResult
 import com.lastwave.app.data.music.YouTubePlaylistSummary
 import com.lastwave.app.data.playlist.PlaylistImportManager
 import com.lastwave.app.data.playlist.SavedPlaylist
+import com.lastwave.app.data.ytmusic.YtMusicAuthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +20,7 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 enum class ImportTab(val title: String) {
+    LIBRARY("Your Library"),
     SEARCH("YouTube Music"),
     LINK("Direct Link"),
     CSV("CSV File"),
@@ -29,6 +32,11 @@ data class YouTubeImportUiState(
     val directLink: String = "",
     val isSearching: Boolean = false,
     val searchResults: List<YouTubePlaylistSummary> = emptyList(),
+    /** Playlists from the connected YouTube Music account's own library. */
+    val libraryPlaylists: List<YouTubePlaylistSummary> = emptyList(),
+    val isLoadingLibrary: Boolean = false,
+    val ytConnected: Boolean = false,
+    val ytAccountName: String = "",
     val previewPlaylist: YouTubePlaylistResult? = null,
     val isPreviewLoading: Boolean = false,
     val selectedPlaylistIds: Set<String> = emptySet(),
@@ -44,18 +52,41 @@ data class YouTubeImportUiState(
 class YouTubePlaylistImportViewModel @Inject constructor(
     private val innerTube: InnerTubeMusicApi,
     private val importManager: PlaylistImportManager,
+    private val ytAuthManager: YtMusicAuthManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(YouTubeImportUiState())
     val uiState: StateFlow<YouTubeImportUiState> = _uiState.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            ytAuthManager.connection.collect { connection ->
+                val wasConnected = _uiState.value.ytConnected
+                val nowConnected = connection.isConnected
+                _uiState.update {
+                    it.copy(ytConnected = nowConnected, ytAccountName = connection.accountName)
+                }
+                if (nowConnected && !wasConnected) {
+                    // Freshly connected (or reconnected): land on the account's
+                    // own library so the "select & import" flow is front and center.
+                    if (_uiState.value.selectedTab == ImportTab.SEARCH && _uiState.value.searchResults.isEmpty()) {
+                        selectTab(ImportTab.LIBRARY)
+                    }
+                    loadLibrary()
+                }
+            }
+        }
         // Initial popular playlists search for instant inspiration
         search("Top Hits 2024")
     }
 
     fun selectTab(tab: ImportTab) {
         _uiState.update { it.copy(selectedTab = tab, errorMessage = null) }
+        if (tab == ImportTab.LIBRARY && _uiState.value.libraryPlaylists.isEmpty() &&
+            !_uiState.value.isLoadingLibrary
+        ) {
+            loadLibrary()
+        }
     }
 
     fun onQueryChange(query: String) {
@@ -64,6 +95,30 @@ class YouTubePlaylistImportViewModel @Inject constructor(
 
     fun onDirectLinkChange(link: String) {
         _uiState.update { it.copy(directLink = link, errorMessage = null) }
+    }
+
+    fun loadLibrary(force: Boolean = false) {
+        if (!_uiState.value.ytConnected) return
+        if (_uiState.value.isLoadingLibrary) return
+        if (!force && _uiState.value.libraryPlaylists.isNotEmpty()) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingLibrary = true, errorMessage = null) }
+            try {
+                val playlists = withContext(Dispatchers.IO) { innerTube.fetchLibraryPlaylists() }
+                _uiState.update { current ->
+                    current.copy(isLoadingLibrary = false, libraryPlaylists = playlists)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoadingLibrary = false,
+                        errorMessage = "Couldn't load your YouTube Music playlists: ${e.localizedMessage ?: e.message}",
+                    )
+                }
+            }
+        }
     }
 
     fun search(query: String = _uiState.value.query) {
@@ -123,7 +178,11 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             isPreviewLoading = false,
-                            errorMessage = "Couldn't load playlist songs. Ensure the link is public or unlisted.",
+                            errorMessage = if (_uiState.value.ytConnected) {
+                                "Couldn't load this playlist. If it's not yours, check that sharing is enabled."
+                            } else {
+                                "Couldn't load playlist songs. Public/unlisted links work anonymously — connect a YouTube Music account in Settings to import your own."
+                            },
                         )
                     }
                 }
@@ -150,10 +209,18 @@ class YouTubePlaylistImportViewModel @Inject constructor(
         }
     }
 
+    /** Select/deselect all across the ACTIVE tab's list (library or search). */
     fun selectAll(select: Boolean) {
-        _uiState.update {
-            val updated = if (select) it.searchResults.map { pl -> pl.id }.toSet() else emptySet()
-            it.copy(selectedPlaylistIds = updated)
+        _uiState.update { current ->
+            val activeList = when (current.selectedTab) {
+                ImportTab.LIBRARY -> current.libraryPlaylists
+                else -> current.searchResults
+            }
+            val activeIds = activeList.map { it.id }.toSet()
+            val updated =
+                if (select) current.selectedPlaylistIds + activeIds
+                else current.selectedPlaylistIds - activeIds
+            current.copy(selectedPlaylistIds = updated)
         }
     }
 
@@ -191,6 +258,8 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                     )
                 }
                 onSuccess(savedList)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(

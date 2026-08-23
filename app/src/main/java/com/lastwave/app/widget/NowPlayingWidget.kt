@@ -146,6 +146,28 @@ private data class WidgetUiState(
     val animationFrame: Int,
 )
 
+/**
+ * Glance re-runs this composable on every widget update; decoding the artwork
+ * PNG each time was constant allocation churn. A single-slot cache keyed by
+ * path + last-modified makes repeated updates pure memory hits while still
+ * picking up new art the moment the file changes.
+ */
+private val widgetArtCache = object : java.util.LinkedHashMap<String, Bitmap>(2) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>): Boolean = size > 1
+}
+
+private fun decodeWidgetArt(path: String?): Bitmap? {
+    val file = path?.let(::File)?.takeIf(File::exists) ?: return null
+    val key = "${file.absolutePath}|${file.lastModified()}"
+    synchronized(widgetArtCache) {
+        widgetArtCache[key]?.let { return it }
+        val decoded = runCatching { BitmapFactory.decodeFile(file.path) }.getOrNull() ?: return null
+        widgetArtCache.clear()
+        widgetArtCache[key] = decoded
+        return decoded
+    }
+}
+
 @Composable
 private fun NowPlayingWidgetContent(
     ownPackage: String,
@@ -156,9 +178,7 @@ private fun NowPlayingWidgetContent(
     val hasUsableSession = snapshot.hasSession &&
         (hasNotificationAccess || snapshot.sourcePackage == ownPackage)
     val artPath = snapshot.artPath
-    val art = remember(artPath) {
-        artPath?.let(::File)?.takeIf(File::exists)?.let { BitmapFactory.decodeFile(it.path) }
-    }
+    val art = remember(artPath) { decodeWidgetArt(artPath) }
     val state = WidgetUiState(
         title = snapshot.title,
         artist = snapshot.artist,
@@ -221,19 +241,19 @@ private fun PlayerWidget(state: WidgetUiState) {
     Row(
         modifier = playerSurface(GlanceModifier)
             .clickable(actionRunCallback<OpenLastWaveAction>())
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MiniArtwork(state.art, 64, state.isPlaying, state.animationFrame)
+        MiniArtwork(state.art, 68, state.isPlaying, state.animationFrame)
         Spacer(GlanceModifier.width(14.dp))
         Column(
             modifier = GlanceModifier.defaultWeight(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TrackTitle(state.title, size = 15)
-            Spacer(GlanceModifier.height(2.dp))
-            TrackArtist(state.artist, size = 12)
-            Spacer(GlanceModifier.height(6.dp))
+            TrackTitle(state.title, size = 16)
+            Spacer(GlanceModifier.height(3.dp))
+            TrackArtist(state.artist, size = 13)
+            Spacer(GlanceModifier.height(8.dp))
             PlaybackControls(state.isPlaying)
         }
     }
@@ -243,13 +263,13 @@ private fun PlayerWidget(state: WidgetUiState) {
 private fun playerSurface(modifier: GlanceModifier): GlanceModifier = modifier
     .fillMaxSize()
     .background(GlanceTheme.colors.surface)
-    .cornerRadius(26.dp)
+    .cornerRadius(28.dp)
     .appWidgetBackground()
 
 @Composable
 private fun MiniArtwork(art: Bitmap?, size: Int, isPlaying: Boolean, animationFrame: Int) {
     Box(
-        modifier = GlanceModifier.size(size.dp).background(GlanceTheme.colors.surfaceVariant).cornerRadius(16.dp),
+        modifier = GlanceModifier.size(size.dp).background(GlanceTheme.colors.surfaceVariant).cornerRadius(18.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (art != null) {

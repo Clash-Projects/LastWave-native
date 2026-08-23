@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 private const val TAG = "MediaScrobbleListener"
+private const val NOW_PLAYING_RETRY_DELAY_MS = 12_000L
 
 /**
  * LastWave's own local scrobbler, built after the reference Pano-Scrobbler
@@ -110,7 +111,13 @@ class MediaScrobbleListenerService : NotificationListenerService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var sessionsListener: MediaSessionManager.OnActiveSessionsChangedListener? = null
     private var pollJob: Job? = null
-    private val watched = mutableMapOf<android.media.session.MediaSession.Token, WatchedSession>()
+
+    // Touched from three threads concurrently: the 4s IO poll loop, the
+    // settings collector on IO, and MediaController callbacks delivered on the
+    // main looper (bindControllers is invoked from both). A plain HashMap here
+    // risked ConcurrentModificationException / corrupted state mid-music; a
+    // concurrent map makes every reader/writer safe without extra locking.
+    private val watched = java.util.concurrent.ConcurrentHashMap<android.media.session.MediaSession.Token, WatchedSession>()
     private var widgetSignature: String = ""
 
     /** The track key (artist|title) LastWave most recently told Last.fm is
@@ -633,10 +640,29 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         if (key == lastAnnouncedKey && !forceReannounce) return
         lastAnnouncedKey = key
         serviceScope.launch {
-            runCatching { scrobbleRepository.updateNowPlaying(artist, title, album) }
+            val result = runCatching { scrobbleRepository.updateNowPlaying(artist, title, album) }
                 .onFailure { Log.w(TAG, "updateNowPlaying failed", it) }
+                .getOrNull()
+            if (result is ScrobbleRepository.Result.Failed && result.retryable && lastAnnouncedKey == key) {
+                // Transient failure (rate limit / network blip): retry once
+                // after a short pause so the account's Now Playing doesn't go
+                // silently stale until the next track change.
+                delay(NOW_PLAYING_RETRY_DELAY_MS)
+                if (enabled && submitNowPlaying && lastAnnouncedKey == key &&
+                    sessionStillPlayingTrack(key)
+                ) {
+                    runCatching { scrobbleRepository.updateNowPlaying(artist, title, album) }
+                        .onFailure { Log.w(TAG, "updateNowPlaying retry failed", it) }
+                }
+            }
         }
     }
+
+    /** True if any watched session is currently playing the given track key —
+     *  guards the delayed now-playing retry against announcing a track that
+     *  already ended while we were waiting. */
+    private fun sessionStillPlayingTrack(key: String): Boolean =
+        watched.values.any { it.trackKey == key && it.playingSinceElapsed != null }
 
     private fun scheduleScrobbleCheck(session: WatchedSession, key: String, artist: String, title: String, album: String?, durationMs: Long) {
         if (!enabled || !isSelectedForScrobbling(session)) {

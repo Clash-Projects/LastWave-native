@@ -73,6 +73,10 @@ class LinkPlaybackResolver @Inject constructor(
 
                 else -> Unit
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // Never eat cancellation — it would keep a cancelled resolve
+            // "running" and mask structured shutdown.
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to resolve link for playback: $clean", e)
         }
@@ -104,19 +108,24 @@ class LinkPlaybackResolver @Inject constructor(
         // B) Direct Song / Video URL
         val videoId = extractYouTubeVideoId(url)
         if (!videoId.isNullOrBlank()) {
-            // Search or fetch track details
-            val tracks = innerTube.searchSongs(videoId, limit = 1)
-            val matched = tracks.firstOrNull { it.videoId == videoId }
-                ?: innerTube.searchSongs(url, limit = 1).firstOrNull()
-
-            val playable = if (matched != null) {
-                matched.toPlayable()
+            val songDetails = innerTube.fetchSongDetails(videoId)
+            val playable = if (songDetails != null) {
+                songDetails.toPlayable()
             } else {
-                PlayableTrack(
-                    title = "YouTube Stream",
-                    artist = "YouTube Music",
-                    videoId = videoId,
-                )
+                val tracks = innerTube.searchSongs(videoId, limit = 1)
+                val matched = tracks.firstOrNull { it.videoId == videoId }
+                    ?: innerTube.searchSongs(url, limit = 1).firstOrNull()
+
+                if (matched != null) {
+                    matched.toPlayable()
+                } else {
+                    PlayableTrack(
+                        title = "YouTube Stream",
+                        artist = "YouTube Music",
+                        artworkUrl = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
+                        videoId = videoId,
+                    )
+                }
             }
 
             withContext(Dispatchers.Main) {
@@ -151,7 +160,9 @@ class LinkPlaybackResolver @Inject constructor(
             .build()
 
         val response = runCatching { http.newCall(request).execute() }.getOrNull()
-        val jsonString = response?.body?.string().orEmpty()
+        // use{} guarantees the connection returns to the pool even when the
+        // body is abandoned; without it a failed parse leaked the socket.
+        val jsonString = response?.use { it.body?.string().orEmpty() } ?: ""
 
         var title = ""
         var artist = ""

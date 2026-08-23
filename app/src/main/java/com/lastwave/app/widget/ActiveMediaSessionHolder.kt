@@ -23,4 +23,8 @@ object ActiveMediaSessionHolder {
     fun clear(expected: MediaController) {
         if (controller?.sessionToken == expected.sessionToken) controller = null
     }
+
+    fun clearToken(expected: android.media.session.MediaSession.Token?) {
+        if (expected != null && ownToken == expected) ownToken = null
+    }
 }

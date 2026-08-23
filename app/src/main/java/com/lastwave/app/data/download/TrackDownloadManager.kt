@@ -338,16 +338,42 @@ class TrackDownloadManager @Inject constructor(
                         downloadSuccess = true
                     }
 
-                    // 3. Embed Audio Metadata & Album Art Tags directly into the downloaded audio file
+                    // 3. Fetch lyrics BEFORE tagging so they can be embedded
+                    // INTO the audio file (a sidecar alone lands in a folder
+                    // most players never associate with the track).
+                    var hasLyrics = false
+                    var syncedLyrics: String? = null
+                    var plainLyrics: String? = null
+                    var lrcPath: String? = null
+
+                    val lyricsRecord = runCatching {
+                        lrclibLyricsApi.fetchLyrics(
+                            title = title,
+                            artist = artist,
+                            album = resolvedAlbum,
+                            durationSeconds = if (durationMs > 0) (durationMs / 1000).toInt() else null,
+                        )
+                    }.getOrNull()
+
+                    if (lyricsRecord != null) {
+                        syncedLyrics = lyricsRecord.syncedLyrics
+                        plainLyrics = lyricsRecord.plainLyrics
+                        hasLyrics = !(syncedLyrics.isNullOrBlank() && plainLyrics.isNullOrBlank())
+                    }
+
+                    // 4. Embed metadata, cover art AND lyrics directly into the
+                    // downloaded audio file (container-aware: Vorbis comments +
+                    // PICTURE for FLAC, iTunes atoms for M4A, ID3v2.3 otherwise).
                     audioTagWriter.embedMetadata(
                         audioFile = tempDownloadFile,
                         title = title,
                         artist = artist,
                         album = resolvedAlbum,
                         artworkUrl = resolvedArtworkUrl,
+                        lyrics = syncedLyrics ?: plainLyrics,
                     )
 
-                    // 4. Transfer tagged file to public storage / MediaStore
+                    // 5. Transfer tagged file to public storage / MediaStore
                     val (destStream, uri, file) = openPublicOutputStream(
                         filename = safeFilename,
                         mimeType = mimeType,
@@ -368,36 +394,17 @@ class TrackDownloadManager @Inject constructor(
                         }
                     }
 
-                    // 5. Mark public MediaStore file as finished (IS_PENDING = 0)
+                    // 6. Mark public MediaStore file as finished (IS_PENDING = 0)
                     finalizePublicFile(uri)
 
                     val finalPath = file?.absolutePath ?: uri?.toString() ?: safeFilename
 
 
-                // 5. Fetch lyrics from LRCLIB and write sidecar .lrc file in Music/LastWave
-                var hasLyrics = false
-                var syncedLyrics: String? = null
-                var plainLyrics: String? = null
-                var lrcPath: String? = null
-
-                val lyricsRecord = runCatching {
-                    lrclibLyricsApi.fetchLyrics(
-                        title = title,
-                        artist = artist,
-                        album = resolvedAlbum,
-                        durationSeconds = if (durationMs > 0) (durationMs / 1000).toInt() else null,
-                    )
-                }.getOrNull()
-
-                if (lyricsRecord != null) {
-                    syncedLyrics = lyricsRecord.syncedLyrics
-                    plainLyrics = lyricsRecord.plainLyrics
-                    val lyricsText = syncedLyrics ?: plainLyrics
-                    if (!lyricsText.isNullOrBlank()) {
-                        hasLyrics = true
-                        val lrcFilename = sanitizeFilename("$artist - $title") + ".lrc"
-                        lrcPath = writePublicCompanionFile(lrcFilename, lyricsText, "text/plain")
-                    }
+                // 7. Also write the sidecar .lrc companion file for players that read them
+                val lyricsText = syncedLyrics ?: plainLyrics
+                if (!lyricsText.isNullOrBlank()) {
+                    val lrcFilename = sanitizeFilename("$artist - $title") + ".lrc"
+                    lrcPath = writePublicCompanionFile(lrcFilename, lyricsText, "text/plain")
                 }
 
                 // 6. Persist to Room database

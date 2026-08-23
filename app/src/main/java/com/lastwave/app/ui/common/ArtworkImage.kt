@@ -55,8 +55,13 @@ fun ArtworkImage(
     }
 
     val key = remember(name, artist) { ArtworkNormalizer.cacheKey(name, artist) }
-    val resolvedMap by artworkViewModel.resolved.collectAsState()
-    val resolvedUrl = resolvedMap[key]
+    // Collect ONLY this row's slot of the shared resolved-map. Collecting the
+    // whole map meant every resolution anywhere recomposed every visible
+    // artwork row; with distinctUntilChanged each row recomposes exactly once —
+    // when its own URL resolves.
+    val resolvedUrl by remember(key) {
+        artworkViewModel.resolved.map { it[key] }.distinctUntilChanged()
+    }.collectAsState(initial = null)
 
     LaunchedEffect(key, resolvedUrl) {
         if (resolvedUrl == null) {

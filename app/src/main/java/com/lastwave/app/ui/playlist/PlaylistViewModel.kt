@@ -106,12 +106,15 @@ class PlaylistViewModel @Inject constructor(
                 _uiState.value.sortMode,
             )
             val newest = justGeneratedId ?: all.maxByOrNull { it.createdAtMillis }?.id
-            _uiState.update {
-                it.copy(
+            _uiState.update { current ->
+                val currentDetailId = current.detailPlaylist?.id
+                val updatedDetail = if (currentDetailId != null) all.firstOrNull { pl -> pl.id == currentDetailId } else current.detailPlaylist
+                current.copy(
                     isLoading = false,
                     playlists = all,
+                    detailPlaylist = updatedDetail ?: current.detailPlaylist,
                     newestId = newest,
-                    expandedIds = if (justGeneratedId != null) setOf(justGeneratedId) else it.expandedIds,
+                    expandedIds = if (justGeneratedId != null) setOf(justGeneratedId) else current.expandedIds,
                     justSavedBannerVisible = justGeneratedId != null,
                 )
             }
@@ -258,8 +261,13 @@ class PlaylistViewModel @Inject constructor(
 
     fun removeTrack(playlistId: Long, index: Int) {
         viewModelScope.launch {
-            playlistRepository.removeTrack(playlistId, index)
-            _uiState.update { it.copy(toastMessage = "Song removed") }
+            val updated = playlistRepository.removeTrack(playlistId, index)
+            _uiState.update { current ->
+                current.copy(
+                    detailPlaylist = if (current.detailPlaylist?.id == playlistId) updated else current.detailPlaylist,
+                    toastMessage = "Song removed from playlist",
+                )
+            }
             load()
         }
     }

@@ -128,9 +128,17 @@ class ArtistRepository @Inject constructor(
         val body = response.body()?.string().orEmpty()
         val artistObj = json.parseToJsonElement(body).jsonObject["artist"]?.jsonObject ?: return null
 
-        val bio = artistObj["bio"]?.jsonObject?.get("summary")?.jsonPrimitive?.contentOrNull
+        val fullBio = artistObj["bio"]?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
             ?.replace(Regex("<a\\b[^>]*>.*?</a>", RegexOption.IGNORE_CASE), "")
+            ?.replace(Regex("<[^>]*>"), "")
             ?.trim()?.takeIf(String::isNotBlank)
+
+        val summaryBio = artistObj["bio"]?.jsonObject?.get("summary")?.jsonPrimitive?.contentOrNull
+            ?.replace(Regex("<a\\b[^>]*>.*?</a>", RegexOption.IGNORE_CASE), "")
+            ?.replace(Regex("<[^>]*>"), "")
+            ?.trim()?.takeIf(String::isNotBlank)
+
+        val bio = fullBio ?: summaryBio
 
         val listenersCount = artistObj["stats"]?.jsonObject?.get("listeners")?.jsonPrimitive?.contentOrNull
         val listenersFormatted = listenersCount?.toLongOrNull()?.let { count ->

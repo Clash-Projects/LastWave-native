@@ -1,10 +1,12 @@
 package com.lastwave.app.ui.theme
 
 import android.app.Activity
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
@@ -16,6 +18,11 @@ import com.lastwave.app.data.repository.ThemeUiState
  * [Md3SchemeBuilder] (accent/AMOLED-aware, dark-only — the web app never had
  * a light mode, so neither does this), never from MaterialTheme's own
  * light/dark scheme resolution.
+ *
+ * When the experimental Liquid Glass setting is on, [LocalLiquidGlass] is
+ * provided to everything below and a set of faint drifting accent glows is
+ * painted directly behind all content (pure drawBehind — no layout change)
+ * so the translucent containers have depth to show.
  */
 @Composable
 fun LastWaveTheme(
@@ -54,7 +61,22 @@ fun LastWaveTheme(
             modifier = Modifier.fillMaxSize(),
             color = MaterialTheme.colorScheme.background,
         ) {
-            content()
+            CompositionLocalProvider(LocalLiquidGlass provides themeState.liquidGlass) {
+                if (themeState.liquidGlass) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .liquidGlassAmbient(
+                                primary = MaterialTheme.colorScheme.primary,
+                                tertiary = MaterialTheme.colorScheme.tertiary,
+                            ),
+                    ) {
+                        content()
+                    }
+                } else {
+                    content()
+                }
+            }
         }
     }
 }

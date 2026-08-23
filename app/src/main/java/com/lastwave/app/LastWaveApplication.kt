@@ -10,6 +10,8 @@ import com.lastwave.app.widget.WidgetUpdater
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -20,6 +22,7 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
     @Inject lateinit var applicationScope: CoroutineScope
     @Inject lateinit var okHttpClient: okhttp3.OkHttpClient
     @Inject lateinit var streamExtractor: com.lastwave.app.data.music.YouTubeStreamExtractor
+    @Inject lateinit var ytMusicSyncManager: com.lastwave.app.data.ytmusic.YtMusicSyncManager
 
     override fun onCreate() {
         super.onCreate()
@@ -28,12 +31,21 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
             streamExtractor.preWarm()
             com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.preWarm()
         }
+        // YouTube Music playlist sync heartbeat (no-ops until an account is
+        // connected AND sync is enabled in Settings).
+        ytMusicSyncManager.start()
         // A widget is a separate RemoteViews surface, so it needs an explicit
-        // refresh whenever LastWave's live theme changes.
+        // refresh whenever LastWave's live theme changes. The widget's palette
+        // only consumes primary/onPrimary (every other role is fixed), so
+        // dedupe on those — otherwise ANY DataStore settings change (pins,
+        // toggles, font) rebuilt every placed widget.
         applicationScope.launch(Dispatchers.IO) {
-            themeRepository.uiState.collect {
-                WidgetUpdater.refreshTheme(this@LastWaveApplication)
-            }
+            themeRepository.uiState
+                .map { it.colorScheme.primary to it.colorScheme.onPrimary }
+                .distinctUntilChanged()
+                .collect {
+                    WidgetUpdater.refreshTheme(this@LastWaveApplication)
+                }
         }
     }
 

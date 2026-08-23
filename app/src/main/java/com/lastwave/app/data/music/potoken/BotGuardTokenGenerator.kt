@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -47,8 +48,14 @@ object BotGuardTokenGenerator {
     private const val REQUEST_KEY = "O43z0dpjhgX20SCx4KAo"
     private const val JS_BRIDGE = "BotGuardBridge"
 
-    private const val COLD_START_TIMEOUT_MS = 1_500L
-    private const val WARM_TIMEOUT_MS = 1_000L
+    // A cold start must fit: WebView boot + Create HTTPS call + JS BotGuard +
+    // GenerateIT call + minter creation, strictly serial. The old 1.5s budget
+    // was physically impossible on anything but a warm cache + fast network,
+    // so preWarm nearly always timed out, destroyed the freshly built engine,
+    // and forced every first play to rebuild it from scratch (constant
+    // WebView churn + wasted network + slower first-play).
+    private const val COLD_START_TIMEOUT_MS = 10_000L
+    private const val WARM_TIMEOUT_MS = 3_000L
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -183,17 +190,22 @@ object BotGuardTokenGenerator {
         private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
         private val closed = AtomicBoolean(false)
         private val pendingMints = ConcurrentHashMap<String, CompletableDeferred<String>>()
-        private var expiresAtMs: Long = System.currentTimeMillis() + 50 * 60 * 1000L
+        @Volatile private var expiresAtMs: Long = System.currentTimeMillis() + 50 * 60 * 1000L
 
         val isExpired: Boolean get() = System.currentTimeMillis() > expiresAtMs
 
         fun startBootstrap() {
             scope.launch {
-                val html = withContext(Dispatchers.IO) {
-                    webView.context.assets.open("po_token.html").bufferedReader().use { it.readText() }
+                runCatching {
+                    val html = withContext(Dispatchers.IO) {
+                        webView.context.assets.open("po_token.html").bufferedReader().use { it.readText() }
+                    }
+                    val patched = html.replaceFirst("</script>", "\n$JS_BRIDGE.onPageLoaded()</script>")
+                    webView.loadDataWithBaseURL("https://www.youtube.com", patched, "text/html", "utf-8", null)
+                }.onFailure { error ->
+                    Log.e(TAG, "BotGuard bootstrap failed", error)
+                    readyDeferred.completeExceptionally(error)
                 }
-                val patched = html.replaceFirst("</script>", "\n$JS_BRIDGE.onPageLoaded()</script>")
-                webView.loadDataWithBaseURL("https://www.youtube.com", patched, "text/html", "utf-8", null)
             }
         }
 
@@ -233,7 +245,8 @@ object BotGuardTokenGenerator {
         fun onBotGuardReady(botguardResponse: String) {
             scope.launch(Dispatchers.IO) {
                 runCatching {
-                    val requestBody = "[ \"$REQUEST_KEY\", \"$botguardResponse\" ]".toRequestBody("application/json".toMediaType())
+                    val safeResponse = botguardResponse.replace("\\", "\\\\").replace("\"", "\\\"")
+                    val requestBody = "[ \"$REQUEST_KEY\", \"$safeResponse\" ]".toRequestBody("application/json".toMediaType())
                     val request = Request.Builder().url(GENERATE_IT_URL).post(requestBody).build()
                     val response = httpClient.newCall(request).execute().use { it.body?.string().orEmpty() }
                     val (tokenU8, lifetimeSec) = parseIntegrityToken(response)
@@ -272,19 +285,21 @@ object BotGuardTokenGenerator {
         }
 
         suspend fun mint(identifier: String): String = withContext(Dispatchers.Main) {
-            val deferred = CompletableDeferred<String>()
-            pendingMints[identifier] = deferred
+            // computeIfAbsent so two concurrent mints for the same identifier
+            // share one deferred instead of the second orphaning the first
+            // (which used to leave an awaiter hanging until its outer timeout).
+            val deferred = pendingMints.computeIfAbsent(identifier) { CompletableDeferred() }
             val u8Arg = stringToJsUint8Array(identifier)
 
             webView.evaluateJavascript(
                 """
                 try {
                     obtainPoToken($u8Arg).then(function(u8) {
-                        $JS_BRIDGE.onMintOk("$identifier", Array.from(u8).join(","));
+                        $JS_BRIDGE.onMintOk(${jsStringLiteral(identifier)}, Array.from(u8).join(","));
                     }).catch(function(e) {
-                        $JS_BRIDGE.onMintErr("$identifier", e + "\n" + (e.stack || ''));
+                        $JS_BRIDGE.onMintErr(${jsStringLiteral(identifier)}, e + "\n" + (e.stack || ''));
                     });
-                } catch(e) { $JS_BRIDGE.onMintErr("$identifier", e + "\n" + e.stack); }
+                } catch(e) { $JS_BRIDGE.onMintErr(${jsStringLiteral(identifier)}, e + "\n" + e.stack); }
                 """.trimIndent(),
                 null,
             )
@@ -305,11 +320,29 @@ object BotGuardTokenGenerator {
 
         fun close() {
             if (closed.compareAndSet(false, true)) {
+                // Fail in-flight mints so their awaiters surface an error
+                // instead of hanging forever against a destroyed WebView,
+                // and stop queued engine work.
+                pendingMints.values.forEach {
+                    it.completeExceptionally(IllegalStateException("BotGuard engine closed"))
+                }
+                pendingMints.clear()
+                runCatching { scope.cancel() }
                 webView.stopLoading()
                 webView.removeJavascriptInterface(JS_BRIDGE)
                 webView.destroy()
             }
         }
+
+        /** Escapes a value interpolated into a JS string literal inside
+         *  evaluateJavascript — quotes/backslashes/newlines would otherwise
+         *  produce broken script (or inject it). */
+        private fun jsStringLiteral(value: String): String = "\"" +
+            value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r") +
+            "\""
 
         companion object {
             @SuppressLint("SetJavaScriptEnabled")
@@ -323,7 +356,17 @@ object BotGuardTokenGenerator {
                 val engine = BotGuardEngine(webView, readyDeferred)
                 webView.addJavascriptInterface(engine, JS_BRIDGE)
                 engine.startBootstrap()
-                readyDeferred.await()
+                try {
+                    readyDeferred.await()
+                } catch (t: Throwable) {
+                    // Bootstrap is wrapped in caller-side withTimeoutOrNull — on
+                    // timeout/cancellation the coroutine aborts HERE, and without
+                    // this cleanup the freshly created WebView (a full rendering
+                    // pipeline) leaked every single time. Repeated timeouts during
+                    // slow-network periods compounded into real memory pressure.
+                    engine.close()
+                    throw t
+                }
             }
         }
     }

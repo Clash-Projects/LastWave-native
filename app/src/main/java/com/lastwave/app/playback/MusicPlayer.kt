@@ -41,9 +41,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -120,6 +123,7 @@ class MusicPlayer @Inject constructor(
     private val qobuzMusicApi: QobuzMusicApi,
     private val settingsPreferences: SettingsPreferences,
     private val discoverRepository: DiscoverRepository,
+    private val audioEffects: AudioEffectsEngine,
     private val applicationScope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
@@ -167,6 +171,11 @@ class MusicPlayer @Inject constructor(
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = refresh(player)
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            // The Experimental equalizer / music-enhancer effects must follow
+            // the session id wherever the platform audio server rebinds it.
+            audioEffects.attach(audioSessionId)
+        }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             errorRetryCount = 0
             if (mediaItem != null) {
@@ -251,11 +260,17 @@ class MusicPlayer @Inject constructor(
                         )
                         else -> error("Invalid LastWave playback item")
                     }
-                    resolveTrackAudioStream(track, track.videoId).also { resolved ->
-                        applicationScope.launch(Dispatchers.Main.immediate) {
-                            publishResolvedQuality(resolved)
-                        }
+                    // Hard bound: an unbounded resolve here blocked the player's
+                    // loader thread forever on network stalls (eternal buffering).
+                    // Timing out surfaces a normal playback error that the
+                    // auto-skip path already knows how to recover from.
+                    val resolved = withTimeoutOrNull(RESOLVE_DATA_SPEC_TIMEOUT_MS) {
+                        resolveTrackAudioStream(track, track.videoId)
+                    } ?: error("Timed out resolving audio for ${track.title}")
+                    applicationScope.launch(Dispatchers.Main.immediate) {
+                        publishResolvedQuality(resolved)
                     }
+                    resolved
                 }
                 dataSpec.withUri(Uri.parse(stream.url))
             }
@@ -290,7 +305,11 @@ class MusicPlayer @Inject constructor(
     init {
         restorePlaybackSession()
         refresh(player)
+        // If a session id already exists (restored playback), effects attach
+        // right away; otherwise onAudioSessionIdChanged covers it later.
+        audioEffects.attach(player.audioSessionId)
         ticker = applicationScope.launch(Dispatchers.Main.immediate) {
+            var lastTickerPersistMs = 0L
             while (true) {
                 if (_state.value.current != null) {
                     val remaining = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())
@@ -302,15 +321,32 @@ class MusicPlayer @Inject constructor(
                     val pos = player.currentPosition.coerceAtLeast(0)
                     val buf = player.bufferedPosition.coerceAtLeast(0)
                     val dur = player.duration.takeIf { value -> value > 0 } ?: _state.value.durationMs
-                    _state.update {
-                        it.copy(
-                            positionMs = pos,
-                            bufferedPositionMs = buf,
-                            durationMs = dur,
-                            sleepTimerRemainingMs = remaining?.coerceAtLeast(0),
-                        )
+                    val sleepRemaining = remaining?.coerceAtLeast(0)
+                    val previous = _state.value
+                    val unchanged = !player.isPlaying &&
+                        previous.positionMs == pos &&
+                        previous.bufferedPositionMs == buf &&
+                        previous.durationMs == dur &&
+                        previous.sleepTimerRemainingMs == sleepRemaining
+                    if (!unchanged) {
+                        _state.update {
+                            it.copy(
+                                positionMs = pos,
+                                bufferedPositionMs = buf,
+                                durationMs = dur,
+                                sleepTimerRemainingMs = sleepRemaining,
+                            )
+                        }
+                        // Session persistence rebuilds a queue slice every call —
+                        // throttling it from every tick to 2s removes constant
+                        // main-thread allocation with zero UX difference (the
+                        // signature already buckets positions at 5s).
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastTickerPersistMs >= TICKER_PERSIST_INTERVAL_MS) {
+                            lastTickerPersistMs = now
+                            persistPlaybackSession()
+                        }
                     }
-                    persistPlaybackSession()
                 }
                 delay(if (player.isPlaying) 250L else 500L)
             }
@@ -558,13 +594,32 @@ class MusicPlayer @Inject constructor(
             val endExclusive = withContext(Dispatchers.Main.immediate) {
                 minOf(currentIndex + 4, player.mediaItemCount)
             }
-            for (index in currentIndex until endExclusive) {
+            data class PendingEnrich(val index: Int, val original: PlayableTrack, val expectedMediaId: String)
+            val pending = (currentIndex until endExclusive).mapNotNull { index ->
                 val original = withContext(Dispatchers.Main.immediate) {
                     if (index >= player.mediaItemCount) null else player.getMediaItemAt(index).toPlayableTrack()
-                } ?: continue
-                if (!original.videoId.isNullOrBlank() && !original.artworkUrl.isNullOrBlank()) continue
-                val expectedMediaId = original.videoId ?: "query:${original.artist.lowercase()}|${original.title.lowercase()}"
-                val enriched = runCatching { matchMetadata(original) }.getOrNull() ?: continue
+                } ?: return@mapNotNull null
+                if (!original.videoId.isNullOrBlank() && !original.artworkUrl.isNullOrBlank()) return@mapNotNull null
+                PendingEnrich(
+                    index = index,
+                    original = original,
+                    expectedMediaId = original.videoId ?: "query:${original.artist.lowercase()}|${original.title.lowercase()}",
+                )
+            }
+            if (pending.isEmpty()) return@launch
+            // Match all pending tracks in parallel instead of one chained
+            // network round-trip after the other.
+            val enrichedPairs = coroutineScope {
+                pending.map { item ->
+                    async {
+                        item to runCatching { matchMetadata(item.original) }.getOrNull()
+                    }
+                }.awaitAll()
+            }
+            for ((item, enriched) in enrichedPairs) {
+                if (enriched == null) continue
+                val expectedMediaId = item.expectedMediaId
+                val index = item.index
                 withContext(Dispatchers.Main.immediate) {
                     if (index < player.mediaItemCount && player.getMediaItemAt(index).mediaId == expectedMediaId) {
                         player.replaceMediaItem(index, enriched.toMediaItem())
@@ -754,7 +809,8 @@ class MusicPlayer @Inject constructor(
         }
 
         // Fallback to YouTube Music
-        val targetVideoId = videoId ?: innerTube.findBestMatch(track.title, track.artist).videoId
+        val targetVideoId = videoId
+            ?: withTimeoutOrNull(3_500L) { innerTube.findBestMatch(track.title, track.artist) }?.videoId
             ?: error("No audio stream available")
         val ytStream = innerTube.resolveAudioStream(targetVideoId)
         val trueBitrate = ytStream.bitrate.takeIf { it > 0 }?.let { (it + 500) / 1_000 }
@@ -804,8 +860,15 @@ class MusicPlayer @Inject constructor(
 
     private fun ensureForegroundService() {
         val intent = Intent(appContext, MusicPlaybackService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) appContext.startForegroundService(intent)
-        else appContext.startService(intent)
+        // Background-start restrictions (Android 12+) can reject this when
+        // playback is triggered from widget/tile paths — that must never take
+        // the app down; playback simply continues without foreground priority.
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) appContext.startForegroundService(intent)
+            else appContext.startService(intent)
+        }.onFailure {
+            android.util.Log.w("MusicPlayer", "Foreground service start rejected", it)
+        }
     }
 
     private fun restorePlaybackSession() {
@@ -955,6 +1018,10 @@ class MusicPlayer @Inject constructor(
         const val RESTORED_PREVIOUS_TRACKS = 50
         const val PLAYBACK_PREFERENCES_NAME = "lastwave_playback_session"
         const val PLAYBACK_SESSION_KEY = "active_session"
+        /** Ticker-driven session persistence cadence (explicit state changes persist immediately). */
+        const val TICKER_PERSIST_INTERVAL_MS = 2_000L
+        /** Hard ceiling for the blocking data-spec stream resolution inside ExoPlayer's loader. */
+        const val RESOLVE_DATA_SPEC_TIMEOUT_MS = 25_000L
         val SLEEP_TIMER_MINUTES = intArrayOf(0, 15, 30, 60)
     }
 }

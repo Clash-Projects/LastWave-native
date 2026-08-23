@@ -400,6 +400,7 @@ fun ArtistDetailScreen(
                                 }
 
                                 if (!data.bio.isNullOrBlank()) {
+                                    var isBioExpanded by remember { mutableStateOf(false) }
                                     Card(
                                         shape = RoundedCornerShape(20.dp),
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -418,9 +419,24 @@ fun ArtistDetailScreen(
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 lineHeight = MaterialTheme.typography.bodyMedium.lineHeight,
-                                                maxLines = 4,
+                                                maxLines = if (isBioExpanded) Int.MAX_VALUE else 4,
                                                 overflow = TextOverflow.Ellipsis,
                                             )
+                                            if (data.bio.length > 120) {
+                                                Spacer(Modifier.height(6.dp))
+                                                Text(
+                                                    text = if (isBioExpanded) "Show less" else "... Read more",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .clickable {
+                                                            isBioExpanded = !isBioExpanded
+                                                        }
+                                                        .padding(vertical = 2.dp),
+                                                )
+                                            }
                                         }
                                     }
                                 }
