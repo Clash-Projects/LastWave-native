@@ -1305,17 +1305,24 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer) 
         Surface(
             shape = RoundedCornerShape(18.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            modifier = Modifier.weight(1.25f).height(48.dp),
+            contentColor = if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1.3f).height(48.dp),
         ) {
             Row(
                 Modifier.fillMaxSize().padding(horizontal = 8.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Filled.HighQuality, null, modifier = Modifier.size(18.dp))
+                Icon(
+                    Icons.Filled.HighQuality,
+                    null,
+                    tint = if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
                 Text(
                     qualityLabel(state),
                     style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 4.dp),
@@ -1458,9 +1465,11 @@ internal fun formatTime(ms: Long): String {
 }
 
 private fun qualityLabel(state: MusicPlayerState): String = when {
+    state.audioCodec != null && (state.audioCodec == "HI-RES FLAC" || state.audioCodec == "LOSSLESS" || state.audioCodec == "MP3 320k") -> state.audioCodec
     state.bitrateKbps != null && state.audioCodec != null -> "${state.audioCodec} ${state.bitrateKbps}k"
+    state.audioCodec != null -> state.audioCodec
     state.bitrateKbps != null -> "${state.bitrateKbps} kbps"
-    else -> "Best quality"
+    else -> "LOSSLESS"
 }
 
 private fun PlayableTrack.toGeneratedTrack() = GeneratedTrack(

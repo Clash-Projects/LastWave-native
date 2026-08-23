@@ -17,6 +17,10 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "2.0.0-native"
+
+        val rawApiKey = System.getenv("QOBUZ_API_KEY") ?: (project.findProperty("QOBUZ_API_KEY") as? String) ?: ""
+        val qobuzApiKey = rawApiKey.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+        buildConfigField("String", "QOBUZ_API_KEY", "\"$qobuzApiKey\"")
     }
 
     buildTypes {
@@ -40,6 +44,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"

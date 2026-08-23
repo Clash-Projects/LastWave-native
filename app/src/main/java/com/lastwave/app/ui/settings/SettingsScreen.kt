@@ -50,6 +50,8 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -184,6 +186,7 @@ fun SettingsScreen(
     val scrobbler by viewModel.scrobbler.collectAsState()
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    var showQualityDialog by remember { mutableStateOf(false) }
 
     // Sends the user to Android's own Notification Listener access screen
     // — the one permission this feature needs that the app can never grant
@@ -287,6 +290,42 @@ fun SettingsScreen(
                                 subtitle = "A custom look across the whole app",
                                 checked = misc.useCustomFont,
                                 onCheckedChange = viewModel::setUseCustomFont,
+                                position = position,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel("Audio & Streaming")
+                    val qualitySubtitle = when (misc.qobuzQuality) {
+                        27 -> "Max (Up to 24-bit / 192 kHz)"
+                        7 -> "Hi-Res (24-bit / 96 kHz)"
+                        6 -> "CD Lossless (16-bit / 44.1 kHz FLAC)"
+                        5 -> "Standard (320 kbps MP3)"
+                        else -> "Max (Up to 24-bit / 192 kHz)"
+                    }
+                    SettingsGroup(rowCount = 2) { index, position ->
+                        when (index) {
+                            0 -> SettingsToggleCard(
+                                icon = Icons.Filled.HighQuality,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "Prefer Qobuz Audio",
+                                subtitle = if (misc.preferQobuzStreaming) "Direct Lossless/Hi-Res stream with YouTube fallback" else "YouTube Music streaming only",
+                                checked = misc.preferQobuzStreaming,
+                                onCheckedChange = viewModel::setPreferQobuzStreaming,
+                                position = position,
+                            )
+                            1 -> SettingsActionCard(
+                                icon = Icons.Filled.Tune,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Qobuz Streaming Quality",
+                                subtitle = qualitySubtitle,
+                                onClick = { showQualityDialog = true },
                                 position = position,
                             )
                         }
@@ -514,6 +553,66 @@ fun SettingsScreen(
                 }
             },
             dismissButton = { TextButton(onClick = viewModel::dismissSessionKeyDialog) { Text("Cancel") } },
+        )
+    }
+
+    if (showQualityDialog) {
+        val qualities = listOf(
+            27 to "Max (Up to 24-bit / 192 kHz)",
+            7 to "Hi-Res (24-bit / 96 kHz)",
+            6 to "CD Lossless (16-bit / 44.1 kHz FLAC)",
+            5 to "Standard (320 kbps MP3)",
+        )
+        AlertDialog(
+            onDismissRequest = { showQualityDialog = false },
+            title = { Text("Streaming Quality") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Select preferred streaming tier. If a track is not available in the selected quality, the highest available quality is streamed automatically.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    qualities.forEach { (qualityId, label) ->
+                        val selected = misc.qobuzQuality == qualityId
+                        Surface(
+                            onClick = {
+                                viewModel.setQobuzQuality(qualityId)
+                                showQualityDialog = false
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (selected) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (selected) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showQualityDialog = false }) { Text("Close") }
+            },
         )
     }
 

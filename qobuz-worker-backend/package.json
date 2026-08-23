@@ -1,0 +1,28 @@
+{
+  "name": "qobuz-worker-backend",
+  "version": "1.0.0",
+  "description": "High-performance JavaScript Cloudflare Worker backend for Qobuz API inspired by qobuz-dl",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node test/local-test.js",
+    "test:live": "node test/live-endpoint-test.js"
+  },
+  "keywords": [
+    "qobuz",
+    "qobuz-dl",
+    "cloudflare-worker",
+    "music-api",
+    "streaming",
+    "flac",
+    "hi-res"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "wrangler": "^3.114.0"
+  }
+}

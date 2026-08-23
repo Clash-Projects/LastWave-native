@@ -2,7 +2,9 @@ package com.lastwave.app.ui.player
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -220,8 +222,7 @@ private fun SyncedLyricsList(
 
     // Find active line index: the last line whose timestamp <= current playback position
     val activeIndex = remember(lines, currentPositionMs) {
-        val idx = lines.indexOfLast { it.timeMs <= currentPositionMs }
-        if (idx >= 0) idx else 0
+        lines.indexOfLast { it.timeMs <= currentPositionMs }
     }
 
     // Detect user dragging to avoid fighting user manual scroll
@@ -254,11 +255,14 @@ private fun SyncedLyricsList(
     ) {
         itemsIndexed(lines, key = { index, line -> "$index:${line.timeMs}" }) { index, line ->
             val isActive = index == activeIndex
-            val isPast = index < activeIndex
+            val isPast = activeIndex >= 0 && index < activeIndex
 
             val scale by animateFloatAsState(
-                targetValue = if (isActive) 1.03f else 1f,
-                animationSpec = ExpressiveMotion.spatialSpring(),
+                targetValue = if (isActive) 1.04f else 1f,
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMedium,
+                ),
                 label = "lyricScale_$index",
             )
             val alpha by animateFloatAsState(
@@ -267,14 +271,20 @@ private fun SyncedLyricsList(
                     isPast -> 0.45f
                     else -> 0.35f
                 },
-                animationSpec = tween(ExpressiveMotion.Standard),
+                animationSpec = tween(120),
                 label = "lyricAlpha_$index",
             )
             val textColor by animateColorAsState(
                 targetValue = if (isActive) MaterialTheme.colorScheme.onSurface
                 else MaterialTheme.colorScheme.onSurfaceVariant,
-                animationSpec = tween(ExpressiveMotion.Standard),
+                animationSpec = tween(120),
                 label = "lyricColor_$index",
+            )
+            val bgTint by animateColorAsState(
+                targetValue = if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+                else Color.Transparent,
+                animationSpec = tween(120),
+                label = "lyricBg_$index",
             )
 
             Box(
@@ -286,13 +296,14 @@ private fun SyncedLyricsList(
                         this.alpha = alpha
                     }
                     .clip(RoundedCornerShape(16.dp))
+                    .background(bgTint)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) {
                         onSeek(line.timeMs)
                     }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
             ) {
                 Text(
                     text = line.text.ifBlank { "♪" },

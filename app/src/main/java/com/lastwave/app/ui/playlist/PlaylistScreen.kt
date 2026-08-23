@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -201,11 +202,6 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
                     state.playlists.isEmpty() && !state.isGenerating -> EmptyState()
                     else -> LazyColumn(
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
-                        // GroupGap instead of a uniform 12dp — same grouped,
-                        // connected-surface language as Settings/Generator:
-                        // only the first/last playlist card in the list is
-                        // rounded on the outside, the rest are nearly square
-                        // and sit right against each other.
                         verticalArrangement = Arrangement.spacedBy(com.lastwave.app.ui.common.GroupGap),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
@@ -271,17 +267,21 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
                                             sourceLabel = playlist.title,
                                         )
                                     },
-                                    onAddTrackToPlaylist = { track ->
-                                        addToPlaylist(
+                                    onShufflePlay = {
+                                        val tracks = playlist.tracks.map { track ->
                                             com.lastwave.app.playback.PlayableTrack(
                                                 title = track.name,
                                                 artist = track.artist,
                                                 album = track.album,
                                                 artworkUrl = track.artworkUrl,
-                                            ),
+                                            )
+                                        }.shuffled()
+                                        musicPlayer.playQueue(
+                                            tracks,
+                                            startIndex = 0,
+                                            sourceLabel = playlist.title,
                                         )
                                     },
-                                    onTrackMenu = { track -> menuTarget = playlist.id to track },
                                 )
                             }
                         }
@@ -513,8 +513,9 @@ private fun PlaylistCard(
     onDelete: () -> Unit,
     onRemoveTrack: (Int) -> Unit,
     onPlay: (Int) -> Unit,
-    onAddTrackToPlaylist: (GeneratedTrack) -> Unit,
-    onTrackMenu: (GeneratedTrack) -> Unit,
+    onShufflePlay: () -> Unit = {},
+    onAddTrackToPlaylist: (GeneratedTrack) -> Unit = {},
+    onTrackMenu: (GeneratedTrack) -> Unit = {},
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val isThisPlaylistPlaying = isPlaying && playbackSource == playlist.title
@@ -583,69 +584,118 @@ private fun PlaylistCard(
                     Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                        Surface(
-                            onClick = onComplete,
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.size(44.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Filled.Check,
-                                    contentDescription = "Mark playlist complete",
-                                    modifier = Modifier.size(28.dp),
-                                )
-                            }
+                    Surface(
+                        onClick = onComplete,
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(38.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = "Mark playlist complete",
+                                modifier = Modifier.size(20.dp),
+                            )
                         }
                     }
-                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                        Surface(
-                            onClick = { onPlay(0) },
-                            enabled = playlist.tracks.isNotEmpty(),
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            shadowElevation = 4.dp,
-                            modifier = Modifier.size(44.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(Icons.Filled.PlayArrow, contentDescription = "Play playlist", modifier = Modifier.size(28.dp))
-                            }
+                    Surface(
+                        onClick = { onPlay(0) },
+                        enabled = playlist.tracks.isNotEmpty(),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        shadowElevation = 2.dp,
+                        modifier = Modifier.size(38.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = "Play playlist",
+                                modifier = Modifier.size(22.dp),
+                            )
                         }
                     }
-                    IconButton(onClick = onEditCover, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Filled.PhotoLibrary, contentDescription = "Choose playlist cover", modifier = Modifier.size(28.dp))
+                    IconButton(
+                        onClick = onShufflePlay,
+                        enabled = playlist.tracks.isNotEmpty(),
+                        modifier = Modifier.size(38.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Shuffle,
+                            contentDescription = "Shuffle playlist",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    IconButton(
+                        onClick = onEditCover,
+                        modifier = Modifier.size(38.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.PhotoLibrary,
+                            contentDescription = "Choose playlist cover",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                     if (playlist.mode == "custom") {
-                        IconButton(onClick = onRename, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Filled.Edit, contentDescription = "Rename playlist", modifier = Modifier.size(28.dp))
+                        IconButton(
+                            onClick = onRename,
+                            modifier = Modifier.size(38.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.Edit,
+                                contentDescription = "Rename playlist",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp),
+                            )
                         }
                     } else {
                         com.lastwave.app.ui.common.ExpressiveRefreshButton(
                             isRefreshing = isRegenerating,
                             onClick = onRegenerate,
                             contentDescription = "Regenerate",
-                            modifier = Modifier.size(48.dp),
+                            modifier = Modifier.size(38.dp),
+                            iconSize = 20.dp,
                         )
                     }
-                    IconButton(onClick = onExport, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Filled.Download, contentDescription = "Export", modifier = Modifier.size(28.dp))
+                    IconButton(
+                        onClick = onExport,
+                        modifier = Modifier.size(38.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Download,
+                            contentDescription = "Export",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
-                    IconButton(onClick = onTogglePin, modifier = Modifier.size(48.dp)) {
+                    IconButton(
+                        onClick = onTogglePin,
+                        modifier = Modifier.size(38.dp),
+                    ) {
                         Icon(
                             Icons.Filled.PushPin,
                             contentDescription = if (playlist.isPinned) "Unpin playlist" else "Pin playlist",
                             tint = if (playlist.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(28.dp),
+                            modifier = Modifier.size(20.dp),
                         )
                     }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(28.dp))
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(38.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "Delete",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp),
+                        )
                     }
                 }
                 Column(Modifier.padding(bottom = 8.dp)) {

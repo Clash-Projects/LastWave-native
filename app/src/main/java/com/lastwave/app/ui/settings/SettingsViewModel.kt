@@ -119,6 +119,8 @@ class SettingsViewModel @Inject constructor(
 
     fun setDynamicNowPlaying(enabled: Boolean) = viewModelScope.launch { themeRepository.setDynamicNowPlaying(enabled) }
     fun setUseCustomFont(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setUseCustomFont(enabled) }
+    fun setPreferQobuzStreaming(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setPreferQobuzStreaming(enabled) }
+    fun setQobuzQuality(quality: Int) = viewModelScope.launch { settingsPreferences.setQobuzQuality(quality) }
 
     // ── Data management (§8.5) ──
 

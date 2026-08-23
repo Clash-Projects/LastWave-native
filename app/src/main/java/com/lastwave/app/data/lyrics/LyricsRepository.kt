@@ -98,14 +98,22 @@ class LyricsRepository @Inject constructor(
 
     companion object {
         private val TIMESTAMP_REGEX = Regex("""\[(\d{1,2}):(\d{2})(?:[.:](\d{2,3}))?\]""")
+        private val OFFSET_REGEX = Regex("""\[offset:\s*([+-]?\d+)\s*\]""", RegexOption.IGNORE_CASE)
 
         fun parseLrc(lrcContent: String): List<LyricLine> {
             val result = mutableListOf<LyricLine>()
             val lines = lrcContent.lines()
+            var offsetMs = 0L
 
             for (line in lines) {
                 val trimmed = line.trim()
                 if (trimmed.isEmpty()) continue
+
+                val offsetMatch = OFFSET_REGEX.find(trimmed)
+                if (offsetMatch != null) {
+                    offsetMs = offsetMatch.groupValues[1].toLongOrNull() ?: 0L
+                    continue
+                }
 
                 // Check if line contains timestamp(s)
                 val matches = TIMESTAMP_REGEX.findAll(trimmed).toList()
@@ -125,8 +133,8 @@ class LyricsRepository @Inject constructor(
                         else -> 0L
                     }
 
-                    val totalMs = (minutes * 60 * 1000) + (seconds * 1000) + fractionMs
-                    result.add(LyricLine(timeMs = totalMs, text = text))
+                    val totalMs = (minutes * 60 * 1000) + (seconds * 1000) + fractionMs + offsetMs
+                    result.add(LyricLine(timeMs = totalMs.coerceAtLeast(0L), text = text))
                 }
             }
 

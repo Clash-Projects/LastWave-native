@@ -20,9 +20,14 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.lastwave.app.data.discover.DiscoverRepository
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.local.MiscSettings
+import com.lastwave.app.data.local.SettingsPreferences
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YOUTUBE_WEB_USER_AGENT
+import com.lastwave.app.data.qobuz.QobuzAudioStream
+import com.lastwave.app.data.qobuz.QobuzMusicApi
 import com.lastwave.app.widget.WidgetUpdater
+import kotlinx.coroutines.flow.first
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -84,6 +89,7 @@ data class MusicPlayerState(
     val speed: Float = 1f,
     val bitrateKbps: Int? = null,
     val audioCodec: String? = null,
+    val isQobuz: Boolean = false,
     val sleepTimerRemainingMs: Long? = null,
     val error: String? = null,
 )
@@ -99,6 +105,8 @@ data class MusicPlayerState(
 class MusicPlayer @Inject constructor(
     @ApplicationContext context: Context,
     private val innerTube: InnerTubeMusicApi,
+    private val qobuzMusicApi: QobuzMusicApi,
+    private val settingsPreferences: SettingsPreferences,
     private val discoverRepository: DiscoverRepository,
     private val applicationScope: CoroutineScope,
 ) {
@@ -144,23 +152,19 @@ class MusicPlayer @Inject constructor(
                 applicationScope.launch(Dispatchers.Main.immediate) {
                     _state.update { it.copy(isBuffering = true, error = null) }
                     try {
-                        val resolvedId = videoId ?: innerTube.findBestMatch(currentTrack.title, currentTrack.artist).videoId
-                        if (!resolvedId.isNullOrBlank()) {
-                            val stream = withContext(Dispatchers.IO) { innerTube.resolveAudioStream(resolvedId) }
-                            publishStreamQuality(stream)
-                            val updated = currentTrack.copy(
-                                videoId = resolvedId,
-                                playbackUrl = stream.url,
-                                playbackMimeType = stream.mimeType,
-                            )
-                            val currentIndex = player.currentMediaItemIndex
-                            if (currentIndex in 0 until player.mediaItemCount) {
-                                player.replaceMediaItem(currentIndex, updated.toMediaItem())
-                                player.seekTo(currentIndex, currentPos)
-                                player.prepare()
-                                player.play()
-                                return@launch
-                            }
+                        val stream = resolveTrackAudioStream(currentTrack, videoId)
+                        publishResolvedQuality(stream)
+                        val updated = currentTrack.copy(
+                            playbackUrl = stream.url,
+                            playbackMimeType = stream.mimeType,
+                        )
+                        val currentIndex = player.currentMediaItemIndex
+                        if (currentIndex in 0 until player.mediaItemCount) {
+                            player.replaceMediaItem(currentIndex, updated.toMediaItem())
+                            player.seekTo(currentIndex, currentPos)
+                            player.prepare()
+                            player.play()
+                            return@launch
                         }
                     } catch (e: Exception) {
                         android.util.Log.e("MusicPlayer", "Auto-retry stream failed", e)
@@ -194,17 +198,24 @@ class MusicPlayer @Inject constructor(
                 dataSpec
             } else {
                 val stream = runBlocking(Dispatchers.IO) {
-                    val videoId = when (requested.host) {
-                        "youtube" -> requested.pathSegments.firstOrNull()
-                        "search" -> innerTube.findBestMatch(
+                    val track = when (requested.host) {
+                        "youtube" -> {
+                            val videoId = requested.pathSegments.firstOrNull()
+                            PlayableTrack(
+                                title = requested.getQueryParameter("title").orEmpty(),
+                                artist = requested.getQueryParameter("artist").orEmpty(),
+                                videoId = videoId,
+                            )
+                        }
+                        "search" -> PlayableTrack(
                             title = requested.getQueryParameter("title").orEmpty(),
                             artist = requested.getQueryParameter("artist").orEmpty(),
-                        ).videoId
-                        else -> null
-                    } ?: error("Invalid LastWave playback item")
-                    innerTube.resolveAudioStream(videoId).also { stream ->
+                        )
+                        else -> error("Invalid LastWave playback item")
+                    }
+                    resolveTrackAudioStream(track, track.videoId).also { resolved ->
                         applicationScope.launch(Dispatchers.Main.immediate) {
-                            if (_state.value.current?.videoId == videoId) publishStreamQuality(stream)
+                            publishResolvedQuality(resolved)
                         }
                     }
                 }
@@ -259,7 +270,7 @@ class MusicPlayer @Inject constructor(
                     }
                     persistPlaybackSession()
                 }
-                delay(500)
+                delay(if (player.isPlaying) 50L else 500L)
             }
         }
         applicationScope.launch {
@@ -293,8 +304,8 @@ class MusicPlayer @Inject constructor(
                 withContext(Dispatchers.Main.immediate) {
                     _state.update { it.copy(current = matched, queue = listOf(matched)) }
                 }
-                val stream = innerTube.resolveAudioStream(matched.videoId!!)
-                withContext(Dispatchers.Main.immediate) { publishStreamQuality(stream) }
+                val stream = resolveTrackAudioStream(matched, matched.videoId)
+                withContext(Dispatchers.Main.immediate) { publishResolvedQuality(stream) }
                 val prepared = matched.copy(playbackUrl = stream.url, playbackMimeType = stream.mimeType)
                 withContext(Dispatchers.Main.immediate) {
                     player.setMediaItem(prepared.toMediaItem())
@@ -359,8 +370,8 @@ class MusicPlayer @Inject constructor(
                     val enrichedQueue = tracks.toMutableList().apply { this[selectedIndex] = matched }
                     _state.update { it.copy(current = matched, queue = enrichedQueue) }
                 }
-                val stream = innerTube.resolveAudioStream(matched.videoId!!)
-                withContext(Dispatchers.Main.immediate) { publishStreamQuality(stream) }
+                val stream = resolveTrackAudioStream(matched, matched.videoId)
+                withContext(Dispatchers.Main.immediate) { publishResolvedQuality(stream) }
                 val prepared = matched.copy(playbackUrl = stream.url, playbackMimeType = stream.mimeType)
                 val queue = tracks.toMutableList().apply { this[selectedIndex] = prepared }
                 withContext(Dispatchers.Main.immediate) {
@@ -413,7 +424,11 @@ class MusicPlayer @Inject constructor(
             player.play()
         }
     }
-    fun seekTo(positionMs: Long) = onMain { player.seekTo(positionMs.coerceAtLeast(0)) }
+    fun seekTo(positionMs: Long) = onMain {
+        val target = positionMs.coerceAtLeast(0)
+        player.seekTo(target)
+        _state.update { it.copy(positionMs = target) }
+    }
     fun seekToQueueItem(index: Int) = onMain {
         if (index in 0 until player.mediaItemCount) {
             ensureForegroundService()
@@ -621,11 +636,88 @@ class MusicPlayer @Inject constructor(
         applicationScope.launch(Dispatchers.Main.immediate) { action() }
     }
 
-    private fun publishStreamQuality(stream: com.lastwave.app.data.music.YouTubeAudioStream) {
+    data class ResolvedStream(
+        val url: String,
+        val mimeType: String,
+        val bitrateKbps: Int?,
+        val audioCodec: String?,
+        val isQobuz: Boolean = false,
+    )
+
+    private suspend fun resolveTrackAudioStream(
+        track: PlayableTrack,
+        videoId: String?,
+    ): ResolvedStream = withContext(Dispatchers.IO) {
+        val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
+        if (misc.preferQobuzStreaming) {
+            val qobuzStream = runCatching {
+                qobuzMusicApi.resolveStream(
+                    title = track.title,
+                    artist = track.artist,
+                    preferredQuality = misc.qobuzQuality,
+                )
+            }.getOrNull()
+
+            if (qobuzStream != null) {
+                val codec = when {
+                    qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
+                    qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS"
+                    qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "MP3 320k"
+                    else -> "LOSSLESS"
+                }
+                return@withContext ResolvedStream(
+                    url = qobuzStream.url,
+                    mimeType = qobuzStream.mimeType,
+                    bitrateKbps = qobuzStream.bitrateKbps,
+                    audioCodec = codec,
+                    isQobuz = true,
+                )
+            }
+        }
+
+        // Fallback to YouTube Music
+        val targetVideoId = videoId ?: innerTube.findBestMatch(track.title, track.artist).videoId
+            ?: error("No audio stream available")
+        val ytStream = innerTube.resolveAudioStream(targetVideoId)
+        val trueBitrate = ytStream.bitrate.takeIf { it > 0 }?.let { (it + 500) / 1_000 }
+        val rawCodec = ytStream.mimeType?.substringAfter("audio/")?.substringBefore(';')?.uppercase()?.ifBlank { "WEBM" } ?: "WEBM"
+        val codec = when {
+            rawCodec.contains("OPUS") || rawCodec == "WEBM" -> "WEBM"
+            rawCodec.contains("M4A") || rawCodec.contains("MP4") || rawCodec.contains("AAC") -> "M4A"
+            else -> rawCodec
+        }
+        ResolvedStream(
+            url = ytStream.url,
+            mimeType = ytStream.mimeType.orEmpty(),
+            bitrateKbps = trueBitrate,
+            audioCodec = codec,
+            isQobuz = false,
+        )
+    }
+
+    private fun publishResolvedQuality(resolved: ResolvedStream) {
         _state.update {
             it.copy(
-                bitrateKbps = stream.bitrate.takeIf { value -> value > 0 }?.div(1_000),
-                audioCodec = stream.mimeType?.substringAfter("audio/")?.substringBefore(';')?.uppercase(),
+                bitrateKbps = resolved.bitrateKbps,
+                audioCodec = resolved.audioCodec,
+                isQobuz = resolved.isQobuz,
+            )
+        }
+    }
+
+    private fun publishStreamQuality(stream: com.lastwave.app.data.music.YouTubeAudioStream) {
+        val trueBitrate = stream.bitrate.takeIf { value -> value > 0 }?.let { (it + 500) / 1_000 }
+        val rawCodec = stream.mimeType?.substringAfter("audio/")?.substringBefore(';')?.uppercase()?.ifBlank { "WEBM" } ?: "WEBM"
+        val codec = when {
+            rawCodec.contains("OPUS") || rawCodec == "WEBM" -> "WEBM"
+            rawCodec.contains("M4A") || rawCodec.contains("MP4") || rawCodec.contains("AAC") -> "M4A"
+            else -> rawCodec
+        }
+        _state.update {
+            it.copy(
+                bitrateKbps = trueBitrate,
+                audioCodec = codec,
+                isQobuz = false,
             )
         }
     }
@@ -761,6 +853,7 @@ class MusicPlayer @Inject constructor(
             speed = player.playbackParameters.speed,
             bitrateKbps = previous.bitrateKbps.takeIf { sameTrack },
             audioCodec = previous.audioCodec.takeIf { sameTrack },
+            isQobuz = previous.isQobuz && sameTrack,
             sleepTimerRemainingMs = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())?.coerceAtLeast(0),
             error = previous.error,
         )
@@ -784,7 +877,10 @@ private fun PlayableTrack.toMediaItem(): MediaItem {
     val playbackUri = if (playbackUrl?.isNotBlank() == true) {
         Uri.parse(playbackUrl)
     } else if (!videoId.isNullOrBlank()) {
-        Uri.Builder().scheme("lastwave").authority("youtube").appendPath(videoId).build()
+        Uri.Builder().scheme("lastwave").authority("youtube").appendPath(videoId)
+            .appendQueryParameter("title", title)
+            .appendQueryParameter("artist", artist)
+            .build()
     } else {
         Uri.Builder().scheme("lastwave").authority("search")
             .appendQueryParameter("title", title)

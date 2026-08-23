@@ -20,15 +20,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
  * The one "refresh this" trigger with an actual in-flight loading state
  * (Playlist's Regenerate button) — a filled tonal container with the
  * live accent color, spinning smoothly while refreshing and settling back
- * with a spring rather than snapping to rest. Dynamic color support is
- * inherent, not a separate branch: reading colorScheme.primaryContainer
- * already reflects whichever accent source is currently active.
+ * with a spring rather than snapping to rest.
  */
 @Composable
 fun ExpressiveRefreshButton(
@@ -36,6 +35,7 @@ fun ExpressiveRefreshButton(
     onClick: () -> Unit,
     contentDescription: String = "Refresh",
     modifier: Modifier = Modifier,
+    iconSize: Dp = 20.dp,
 ) {
     val rotation = remember { Animatable(0f) }
     LaunchedEffect(isRefreshing) {
@@ -45,10 +45,6 @@ fun ExpressiveRefreshButton(
                 animationSpec = infiniteRepeatable(animation = tween(900, easing = LinearEasing)),
             )
         } else {
-            // Settle forward to the next full turn, not back to 0 — from a
-            // mid-spin angle like 750 degrees, animating to a literal 0
-            // would spin backward almost a full turn instead of easing to
-            // a natural stop.
             val nextFullTurn = (kotlin.math.ceil(rotation.value / 360f).toInt().coerceAtLeast(1)) * 360f
             rotation.animateTo(
                 targetValue = nextFullTurn,
@@ -69,7 +65,7 @@ fun ExpressiveRefreshButton(
             Icons.Filled.Refresh,
             contentDescription = contentDescription,
             tint = MaterialTheme.colorScheme.onPrimaryContainer,
-            modifier = Modifier.size(28.dp).rotate(rotation.value),
+            modifier = Modifier.size(iconSize).rotate(rotation.value),
         )
     }
 }

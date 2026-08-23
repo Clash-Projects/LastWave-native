@@ -27,6 +27,8 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Release APK
+        env:
+          QOBUZ_API_KEY: ${{ secrets.QOBUZ_API_KEY }}
         run: ./gradlew assembleRelease --stacktrace
 
       - name: Sign Release APK
