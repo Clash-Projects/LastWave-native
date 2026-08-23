@@ -26,18 +26,12 @@ jobs:
       - name: Grant Gradle execute permission
         run: chmod +x gradlew
 
-      - name: Build APKs
+      - name: Build Release APK
         env:
           QOBUZ_API_KEY: ${{ secrets.QOBUZ_API_KEY }}
-        run: ./gradlew assembleDebug assembleRelease --stacktrace
+        run: ./gradlew assembleRelease --stacktrace
 
-      - name: Upload Debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: LastWave-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
-
-      - name: Sign Release APK
+      - name: Sign Release APK with Custom Key (Optional)
         if: ${{ env.SIGNING_KEY != '' }}
         uses: r0adkll/sign-android-release@v1
         id: sign_app
@@ -51,16 +45,11 @@ jobs:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           BUILD_TOOLS_VERSION: "34.0.0"
 
-      - name: Upload Signed Release APK
-        if: ${{ env.SIGNING_KEY != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: LastWave-Signed-Release-APK
-          path: ${{steps.sign_app.outputs.signedReleaseFile}}
-
-      - name: Upload Unsigned Release APK (Fallback)
-        if: ${{ env.SIGNING_KEY == '' }}
+      - name: Upload Single Release APK
         uses: actions/upload-artifact@v4
         with:
           name: LastWave-Release-APK
-          path: app/build/outputs/apk/release/*.apk
+          path: |
+            ${{ steps.sign_app.outputs.signedReleaseFile }}
+            app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

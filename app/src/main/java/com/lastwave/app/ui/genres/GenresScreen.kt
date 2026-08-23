@@ -225,7 +225,9 @@ private fun GenreDetailSheet(
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(bottom = 12.dp)) {
                 items(state.detailTracks, key = { it.key }) { track ->
                     GenreTrackRow(
-                        track,
+                        track = track,
+                        allTracks = state.detailTracks,
+                        genreTitle = "${genre.replaceFirstChar { it.uppercase() }}",
                         onMenu = { menuTrack = track },
                         modifier = Modifier.animateItem(),
                     )
@@ -262,13 +264,22 @@ private fun GenreDetailSheet(
 @Composable
 private fun GenreTrackRow(
     track: GeneratedTrack,
+    allTracks: List<GeneratedTrack>,
+    genreTitle: String,
     onMenu: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     Row(
-        modifier.fillMaxWidth()
-            .clickable { musicPlayer.play(com.lastwave.app.playback.PlayableTrack(track.name, track.artist, album = track.album, artworkUrl = track.artworkUrl), sourceLabel = "Genres") }
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable {
+                val queue = allTracks.map {
+                    com.lastwave.app.playback.PlayableTrack(it.name, it.artist, album = it.album, artworkUrl = it.artworkUrl)
+                }
+                val index = allTracks.indexOf(track).coerceAtLeast(0)
+                musicPlayer.playQueue(queue, startIndex = index, sourceLabel = genreTitle)
+            }
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
