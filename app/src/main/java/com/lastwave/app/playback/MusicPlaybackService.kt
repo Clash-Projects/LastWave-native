@@ -491,15 +491,7 @@ class MusicPlaybackService : Service() {
             fetchArtwork(cached)
         } else {
             scope.launch(Dispatchers.IO) {
-                val resolved = artworkRepository.resolve(track.title, track.artist)
-                if (!resolved.isNullOrBlank()) {
-                    withContext(Dispatchers.Main.immediate) {
-                        val current = musicPlayer.state.value.current
-                        if (current?.title == track.title && current?.artist == track.artist) {
-                            fetchArtwork(resolved)
-                        }
-                    }
-                }
+                artworkRepository.resolve(track.title, track.artist)
             }
         }
     }
