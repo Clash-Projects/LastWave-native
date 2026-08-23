@@ -231,6 +231,18 @@ class GenerateViewModel @Inject constructor(
                 } else {
                     repository.precheck(raw).take(targetCount)
                 }
+                if (finalTracks.isEmpty()) {
+                    val message = if (mode == GenerateMode.SIMILAR_TRACKS && state.seedTrackName.isNotBlank()) {
+                        "No similar songs found to mix for \"${state.seedTrackName}\"."
+                    } else if (mode == GenerateMode.SIMILAR_ARTISTS && state.seedArtistQuery.isNotBlank()) {
+                        "No similar artists found for \"${state.seedArtistQuery}\"."
+                    } else if (mode == GenerateMode.TAG && state.tagInput.isNotBlank()) {
+                        "No songs found for tag \"${state.tagInput}\"."
+                    } else {
+                        "No songs found to create this mix."
+                    }
+                    throw IllegalStateException(message)
+                }
                 if (mode == GenerateMode.RECOMMENDATIONS && finalTracks.size < targetCount) {
                     throw IllegalStateException(
                         "Found only ${finalTracks.size} of $targetCount fresh tracks. Please try again.",

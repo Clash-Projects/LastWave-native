@@ -315,6 +315,9 @@ class PlaylistViewModel @Inject constructor(
                 } else {
                     generateRepository.precheck(raw).take(targetCount)
                 }
+                if (finalTracks.isEmpty()) {
+                    throw IllegalStateException("No songs found to mix for this playlist.")
+                }
                 if (playlist.mode == "recommendations" && finalTracks.size < targetCount) {
                     throw IllegalStateException(
                         "Found only ${finalTracks.size} of $targetCount fresh tracks. Please try again.",

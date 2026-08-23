@@ -139,22 +139,16 @@ class ThemeRepository @Inject constructor(
         settingsPreferences.settings,
     ) { prefs: ThemePrefs, dynamic: String?, nowPlaying: String?, misc: MiscSettings ->
         val scheme = when {
-            // Dynamic Now Playing Theme takes priority over the user's
-            // regular accent mode whenever it's on and a color is actually
-            // available — that's the point of the feature (§5). The
-            // underlying selection (mode / accentColorHex below) is left
-            // untouched so the Accent screen still reflects the user's
-            // real choice once playback stops or the toggle is off again.
             misc.dynamicNowPlayingEnabled && nowPlaying != null ->
-                Md3SchemeBuilder.buildScheme(nowPlaying, prefs.amoled)
+                Md3SchemeBuilder.buildScheme(nowPlaying, false)
             prefs.accentMode == AccentMode.MONOCHROME ->
-                Md3SchemeBuilder.buildMonochromeScheme(prefs.amoled)
+                Md3SchemeBuilder.buildMonochromeScheme(false)
             prefs.accentMode == AccentMode.DYNAMIC && dynamic != null ->
-                Md3SchemeBuilder.buildScheme(dynamic, prefs.amoled)
+                Md3SchemeBuilder.buildScheme(dynamic, false)
             else ->
-                Md3SchemeBuilder.buildScheme(prefs.accentColor, prefs.amoled)
+                Md3SchemeBuilder.buildScheme(prefs.accentColor, false)
         }
-        ThemeUiState(colorScheme = scheme, amoled = prefs.amoled, mode = prefs.accentMode, accentColorHex = prefs.accentColor, useCustomFont = misc.useCustomFont)
+        ThemeUiState(colorScheme = scheme, amoled = false, mode = prefs.accentMode, accentColorHex = prefs.accentColor, useCustomFont = misc.useCustomFont)
     }.stateIn(
         applicationScope,
         SharingStarted.Eagerly,

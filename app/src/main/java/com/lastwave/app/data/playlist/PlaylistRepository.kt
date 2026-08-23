@@ -119,12 +119,11 @@ class PlaylistRepository @Inject constructor(
         // Best-effort copy to the public Downloads folder. Room is already
         // the source of truth the app reads from, so this never blocks the
         // caller — and a failure here doesn't mean the playlist was lost.
-        if (mode != "custom") {
+        if (mode != "custom" && tracks.isNotEmpty()) {
             exportScope.launch {
                 fileExportHelper.savePlaylistToPublicDownloads(saved.title, saved.tracks)
                     .onFailure { e ->
                         Log.e(TAG, "Public Downloads export failed for \"${saved.title}\"", e)
-                        exportEvents.notifyFailure("Couldn't save \"${saved.title}\" to Downloads")
                     }
             }
         }
@@ -259,7 +258,6 @@ class PlaylistRepository @Inject constructor(
     private suspend fun syncPublicMirror() {
         publicMirror.writeFromDatabase().onFailure { e ->
             Log.e(TAG, "Public playlist JSON sync failed", e)
-            exportEvents.notifyFailure("Couldn't sync playlist JSON to Downloads")
         }
     }
 

@@ -71,6 +71,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val hasAccess = androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
+            if (hasAccess) {
+                runCatching {
+                    android.service.notification.NotificationListenerService.requestRebind(
+                        android.content.ComponentName(this, com.lastwave.app.service.MediaScrobbleListenerService::class.java),
+                    )
+                }
+            }
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

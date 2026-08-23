@@ -278,7 +278,12 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         controllers.forEach { controller ->
             runCatching {
                 val token = controller.sessionToken
-                if (watched.containsKey(token)) return@forEach
+                val existing = watched[token]
+                if (existing != null) {
+                    onTrackChanged(existing, controller.metadata)
+                    onStateChanged(existing, controller.playbackState)
+                    return@forEach
+                }
                 debugLog.log("New session bound: ${controller.packageName}")
                 val session = WatchedSession(controller)
                 val callback = object : MediaController.Callback() {
@@ -495,20 +500,32 @@ class MediaScrobbleListenerService : NotificationListenerService() {
      *  the widget falls back to showing just the app icon. */
     private fun publishBestWidgetState(preferred: WatchedSession? = null) {
         val best = watched.values
-            .filter { !it.controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrBlank() }
+            .filter { session ->
+                val meta = session.controller.metadata
+                val title = meta?.getString(MediaMetadata.METADATA_KEY_TITLE)
+                    ?: meta?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+                    ?: meta?.description?.title?.toString()
+                !title.isNullOrBlank()
+            }
             .maxWithOrNull(
                 compareBy<WatchedSession> { widgetPlaybackRank(it.controller.playbackState?.state) }
                     .thenBy { if (it === preferred) 1 else 0 }
                     .thenBy { it.lastActiveElapsed },
             ) ?: return
         val metadata = best.controller.metadata ?: return
-        val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim().orEmpty()
+        val title = (metadata.getString(MediaMetadata.METADATA_KEY_TITLE)
+            ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
+            ?: metadata.description?.title?.toString())?.trim().orEmpty()
         val rawArtist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_AUTHOR)
+            ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
+            ?: metadata.description?.subtitle?.toString()
         val sourceApp = applicationLabel(best.controller.packageName)
         val artist = rawArtist?.takeIf(String::isNotBlank)?.let(::cleanArtist) ?: sourceApp
         val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)
+            ?: metadata.getString(MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION)
+            ?: metadata.description?.description?.toString()
         if (best.widgetTrackTitle != title) {
             best.widgetTrackTitle = title
             best.widgetArtworkJob?.cancel()
@@ -517,9 +534,11 @@ class MediaScrobbleListenerService : NotificationListenerService() {
         }
         val embeddedArt = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: metadata.getBitmap(MediaMetadata.METADATA_KEY_ART)
+            ?: metadata.description?.iconBitmap
         if (embeddedArt != null) best.widgetArtwork = embeddedArt
         val artUri = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI)
             ?: metadata.getString(MediaMetadata.METADATA_KEY_ART_URI)
+            ?: metadata.description?.iconUri?.toString()
         if (embeddedArt == null && !artUri.isNullOrBlank() && artUri != best.widgetArtworkUri) {
             requestWidgetArtwork(best, artUri)
         }

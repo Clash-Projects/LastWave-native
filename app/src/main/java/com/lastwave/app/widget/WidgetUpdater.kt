@@ -94,7 +94,7 @@ object WidgetUpdater {
         if (animationJob?.isActive == true) return
         animationJob = animationScope.launch {
             while (isActive) {
-                delay(650L)
+                delay(450L)
                 animationFrame = (animationFrame + 1) % 4
                 if (!updateAll(context)) break
             }

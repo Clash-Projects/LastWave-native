@@ -93,6 +93,7 @@ class MusicPlaybackService : Service() {
             isActive = true
         }
         ownController = MediaController(this, mediaSession.sessionToken)
+        ActiveMediaSessionHolder.ownToken = mediaSession.sessionToken
         notificationPalette = NotificationPalette.from(themeRepository.uiState.value.colorScheme)
         startForeground(NOTIFICATION_ID, buildNotification(musicPlayer.state.value, null))
         scope.launch { scrobblerPreferences.settings.collect { settings = it } }

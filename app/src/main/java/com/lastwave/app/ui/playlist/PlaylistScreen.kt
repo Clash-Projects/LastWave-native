@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -585,13 +586,22 @@ private fun PlaylistCard(
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    IconButton(onClick = onComplete, modifier = Modifier.size(48.dp)) {
-                        Icon(
-                            Icons.Filled.CheckCircle,
-                            contentDescription = "Mark playlist complete",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(36.dp),
-                        )
+                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                        Surface(
+                            onClick = onComplete,
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(44.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = "Mark playlist complete",
+                                    modifier = Modifier.size(28.dp),
+                                )
+                            }
+                        }
                     }
                     Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                         Surface(

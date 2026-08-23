@@ -31,7 +31,9 @@ private fun resolveController(context: Context): MediaController? {
             .maxByOrNull { controllerRank(it.playbackState?.state) }
             ?.also { ActiveMediaSessionHolder.controller = it }
     }.getOrNull()
-    return resolved ?: held
+    return resolved ?: held ?: ActiveMediaSessionHolder.ownToken?.let { token ->
+        runCatching { MediaController(context, token) }.getOrNull()
+    }
 }
 
 private fun controllerRank(state: Int?): Int = when (state) {

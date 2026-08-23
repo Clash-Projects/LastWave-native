@@ -738,6 +738,8 @@ private fun FullPlayer(
                     }
                 }
 
+                Spacer(Modifier.height(14.dp))
+
                 AnimatedContent(
                     targetState = showQueue,
                     modifier = Modifier.weight(1f),
@@ -753,70 +755,70 @@ private fun FullPlayer(
                         QueuePanel(state, player, Modifier.fillMaxSize())
                     } else {
                         Column(
-                            Modifier.fillMaxSize().padding(bottom = 18.dp),
+                            Modifier.fillMaxSize().padding(bottom = 22.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                        BoxWithConstraints(
-                            modifier = Modifier.fillMaxWidth().weight(1f),
-                            contentAlignment = Alignment.TopCenter,
-                        ) {
-                            val artworkSize = (minOf(maxWidth, maxHeight) - 20.dp)
-                                .coerceAtLeast(0.dp)
-                                .coerceAtMost(380.dp)
-                            Surface(
-                                shape = RoundedCornerShape(36.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                tonalElevation = 8.dp,
-                                shadowElevation = 18.dp,
-                                modifier = Modifier
-                                    .size(artworkSize)
-                                    .graphicsLayer {
-                                        translationX = shownArtworkX
-                                        rotationZ = shownArtworkX / 80f
-                                    }
-                                    .pointerInput(track.videoId, track.title) {
-                                        detectHorizontalDragGestures(
-                                            onDragCancel = { artworkDragX = 0f },
-                                            onDragEnd = {
-                                                when {
-                                                    artworkDragX < -swipeThreshold -> player.next()
-                                                    artworkDragX > swipeThreshold -> player.previous()
-                                                }
-                                                artworkDragX = 0f
-                                            },
-                                        ) { change, amount ->
-                                            change.consume()
-                                            artworkDragX += amount
-                                        }
-                                    },
+                            BoxWithConstraints(
+                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                contentAlignment = Alignment.Center,
                             ) {
-                                PlayerArtwork(track, Modifier.fillMaxSize(), 36.dp)
+                                val artworkSize = (minOf(maxWidth, maxHeight) - 8.dp)
+                                    .coerceAtLeast(0.dp)
+                                    .coerceAtMost(365.dp)
+                                Surface(
+                                    shape = RoundedCornerShape(32.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    tonalElevation = 8.dp,
+                                    shadowElevation = 18.dp,
+                                    modifier = Modifier
+                                        .size(artworkSize)
+                                        .graphicsLayer {
+                                            translationX = shownArtworkX
+                                            rotationZ = shownArtworkX / 80f
+                                        }
+                                        .pointerInput(track.videoId, track.title) {
+                                            detectHorizontalDragGestures(
+                                                onDragCancel = { artworkDragX = 0f },
+                                                onDragEnd = {
+                                                    when {
+                                                        artworkDragX < -swipeThreshold -> player.next()
+                                                        artworkDragX > swipeThreshold -> player.previous()
+                                                    }
+                                                    artworkDragX = 0f
+                                                },
+                                            ) { change, amount ->
+                                                change.consume()
+                                                artworkDragX += amount
+                                            }
+                                        },
+                                ) {
+                                    PlayerArtwork(track, Modifier.fillMaxSize(), 32.dp)
+                                }
                             }
-                        }
-                        Spacer(Modifier.height(16.dp))
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                            Text(
-                                track.title,
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                track.artist,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        SeekBar(state, player::seekTo)
-                        Spacer(Modifier.height(12.dp))
-                        MainControls(state, player)
-                        Spacer(Modifier.height(16.dp))
-                        PlayerUtilityControls(state, player)
+                            Spacer(Modifier.height(18.dp))
+                            Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                                Text(
+                                    track.title,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    track.artist,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            Spacer(Modifier.height(14.dp))
+                            SeekBar(state, player::seekTo)
+                            Spacer(Modifier.height(14.dp))
+                            MainControls(state, player)
+                            Spacer(Modifier.height(20.dp))
+                            PlayerUtilityControls(state, player)
                         }
                     }
                 }
@@ -895,7 +897,7 @@ private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit) {
 private fun MainControls(state: MusicPlayerState, player: MusicPlayer) {
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(
