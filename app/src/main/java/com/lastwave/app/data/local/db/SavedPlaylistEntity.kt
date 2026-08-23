@@ -31,6 +31,7 @@ data class SavedPlaylistEntity(
     val discoverSignature: String? = null,
     val customCoverUri: String? = null,
     val isCompleted: Boolean = false,
+    val isPinned: Boolean = false,
 )
 
 @Dao
@@ -55,11 +56,11 @@ interface SavedPlaylistDao {
     @Query("SELECT COUNT(*) FROM saved_playlists")
     suspend fun count(): Int
 
-    /** Port of PL_MAX_SAVED = 20 — keeps only the newest 20 rows. */
+    /** Keeps pinned/generated playlists plus the newest [max] unpinned ones. */
     @Query(
         """DELETE FROM saved_playlists
-           WHERE mode != 'custom' AND id NOT IN
-           (SELECT id FROM saved_playlists WHERE mode != 'custom'
+           WHERE mode != 'custom' AND isPinned = 0 AND id NOT IN
+           (SELECT id FROM saved_playlists WHERE mode != 'custom' AND isPinned = 0
             ORDER BY createdAtMillis DESC LIMIT :max)""",
     )
     suspend fun trimGeneratedToNewest(max: Int)

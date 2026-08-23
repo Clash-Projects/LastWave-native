@@ -1,5 +1,7 @@
 package com.lastwave.app.ui.auth
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.Button
@@ -32,6 +35,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -60,10 +67,27 @@ fun LoginScreen(
     onReturnedFromBrowser: () -> Unit,
     onCancelWebAuth: () -> Unit,
     onSignOut: () -> Unit,
-    onContinueWithoutAccount: () -> Unit,
+    onRestoreBackupAndSignIn: (String) -> Unit,
     onDismissError: () -> Unit,
 ) {
     val context = LocalContext.current
+    var restoreReadError by remember { mutableStateOf<String?>(null) }
+    val restoreBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val content = runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: error("Could not read this backup")
+            }
+            content.onSuccess {
+                restoreReadError = null
+                onRestoreBackupAndSignIn(it)
+            }.onFailure {
+                restoreReadError = it.message ?: "Could not read this backup"
+            }
+        }
+    }
 
     // The web flow returns its authorized token through the app callback.
     val awaitingUrl = (webAuthState as? WebAuthState.AwaitingApproval)?.authUrl
@@ -105,13 +129,17 @@ fun LoginScreen(
             }
             Text("LastWave", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Stream music now, with or without an account",
+                "Connect to Last.fm or restore your LastWave backup",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(32.dp))
 
-            when (val state = authState) {
+            if (webAuthState is WebAuthState.RestoringBackup) {
+                com.lastwave.app.ui.common.ExpressiveLoadingIndicator(
+                    message = "Restoring your music and settings…",
+                )
+            } else when (val state = authState) {
                 is AuthState.SignedIn -> SignedInCard(username = state.username, onSignOut = onSignOut)
 
                 AuthState.Unknown -> com.lastwave.app.ui.common.ExpressiveLoadingIndicator()
@@ -152,16 +180,21 @@ fun LoginScreen(
                             }
                             Spacer(Modifier.height(12.dp))
                             OutlinedButton(
-                                onClick = onContinueWithoutAccount,
+                                onClick = { restoreBackupLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
                                 enabled = !busy,
                                 shape = ExpressivePillShape,
                                 modifier = Modifier.fillMaxWidth().height(52.dp),
                             ) {
-                                Text("Continue without account")
+                                Icon(
+                                    Icons.Filled.CloudDownload,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                                Text("Restore backup & login")
                             }
                             Spacer(Modifier.height(12.dp))
                             Text(
-                                "A Last.fm account is optional and is only needed to sync plays to a Last.fm profile.",
+                                "Choose a LastWave backup, then approve Last.fm. Your restored data and new login are kept together.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -171,6 +204,7 @@ fun LoginScreen(
 
                     val errorMessage = (state as? AuthState.Error)?.message
                         ?: (webAuthState as? WebAuthState.Error)?.message
+                        ?: restoreReadError
                     if (errorMessage != null) {
                         Spacer(Modifier.height(16.dp))
                         Text(errorMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -178,6 +212,15 @@ fun LoginScreen(
                         TextButton(onClick = onDismissError) { Text("Dismiss") }
                     }
                 }
+            }
+            if (authState is AuthState.SignedIn && webAuthState is WebAuthState.Error) {
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    webAuthState.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                TextButton(onClick = onDismissError) { Text("Continue") }
             }
         }
     }

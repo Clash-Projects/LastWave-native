@@ -86,7 +86,7 @@ data class NowPlayingWidgetSnapshot(
     }
 }
 
-/** The single 4 x 1 artwork-and-controls widget exposed in the widget picker. */
+/** The single compact 3 x 1 artwork-and-controls widget exposed in the widget picker. */
 class NowPlayingWidget : GlanceAppWidget() {
 
     @EntryPoint
@@ -105,10 +105,11 @@ class NowPlayingWidget : GlanceAppWidget() {
             .getEnabledListenerPackages(context)
             .contains(context.packageName)
         val snapshot = NowPlayingWidgetSnapshot.read(context)
+        val animationFrame = WidgetUpdater.animationFrame
 
         provideContent {
             GlanceTheme(colors = colors) {
-                NowPlayingWidgetContent(context.packageName, hasNotificationAccess, snapshot)
+                NowPlayingWidgetContent(context.packageName, hasNotificationAccess, snapshot, animationFrame)
             }
         }
     }
@@ -119,6 +120,7 @@ private data class WidgetUiState(
     val artist: String,
     val isPlaying: Boolean,
     val art: Bitmap?,
+    val animationFrame: Int,
 )
 
 @Composable
@@ -126,6 +128,7 @@ private fun NowPlayingWidgetContent(
     ownPackage: String,
     hasNotificationAccess: Boolean,
     snapshot: NowPlayingWidgetSnapshot,
+    animationFrame: Int,
 ) {
     // Third-party metadata must not remain visible after Notification Access
     // is revoked. LastWave's own session needs no special access.
@@ -140,6 +143,7 @@ private fun NowPlayingWidgetContent(
         artist = snapshot.artist,
         isPlaying = snapshot.isPlaying,
         art = art,
+        animationFrame = animationFrame,
     )
 
     if (!hasUsableSession) {
@@ -193,17 +197,17 @@ private fun EmptyWidget(hasNotificationAccess: Boolean) {
 @Composable
 private fun PlayerWidget(state: WidgetUiState) {
     Row(
-        modifier = playerSurface(GlanceModifier).padding(12.dp),
+        modifier = playerSurface(GlanceModifier).padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MiniArtwork(state.art, 88)
-        Spacer(GlanceModifier.width(14.dp))
+        MiniArtwork(state.art, 72, state.isPlaying, state.animationFrame)
+        Spacer(GlanceModifier.width(10.dp))
         Column(modifier = GlanceModifier.defaultWeight()) {
-            TrackTitle(state.title, size = 16)
+            TrackTitle(state.title, size = 15)
             Spacer(GlanceModifier.height(2.dp))
-            TrackArtist(state.artist, size = 13)
-            Spacer(GlanceModifier.height(8.dp))
-            PlaybackControls(state.isPlaying)
+            TrackArtist(state.artist, size = 12)
+            Spacer(GlanceModifier.height(6.dp))
+            PlaybackControls(state.isPlaying, state.animationFrame)
         }
     }
 }
@@ -211,12 +215,12 @@ private fun PlayerWidget(state: WidgetUiState) {
 @Composable
 private fun playerSurface(modifier: GlanceModifier): GlanceModifier = modifier
     .fillMaxSize()
-    .background(GlanceTheme.colors.primaryContainer)
-    .cornerRadius(28.dp)
+    .background(GlanceTheme.colors.surface)
+    .cornerRadius(24.dp)
     .appWidgetBackground()
 
 @Composable
-private fun MiniArtwork(art: Bitmap?, size: Int) {
+private fun MiniArtwork(art: Bitmap?, size: Int, isPlaying: Boolean, animationFrame: Int) {
     Box(
         modifier = GlanceModifier.size(size.dp).background(GlanceTheme.colors.surfaceVariant).cornerRadius((size / 4).dp),
         contentAlignment = Alignment.Center,
@@ -235,6 +239,45 @@ private fun MiniArtwork(art: Bitmap?, size: Int) {
                 modifier = GlanceModifier.size((size * 0.6f).dp),
             )
         }
+        if (isPlaying) {
+            Box(
+                modifier = GlanceModifier.fillMaxSize().padding(5.dp),
+                contentAlignment = Alignment.BottomEnd,
+            ) {
+                PlayingWaves(animationFrame)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlayingWaves(frame: Int) {
+    val heights = when (frame % 4) {
+        0 -> intArrayOf(7, 16, 10)
+        1 -> intArrayOf(12, 8, 16)
+        2 -> intArrayOf(16, 11, 7)
+        else -> intArrayOf(9, 16, 13)
+    }
+    Row(
+        modifier = GlanceModifier
+            .width(31.dp)
+            .height(24.dp)
+            .background(GlanceTheme.colors.surface)
+            .cornerRadius(10.dp)
+            .padding(horizontal = 5.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        heights.forEachIndexed { index, height ->
+            Spacer(
+                GlanceModifier
+                    .width(4.dp)
+                    .height(height.dp)
+                    .background(GlanceTheme.colors.primary)
+                    .cornerRadius(2.dp),
+            )
+            if (index < heights.lastIndex) Spacer(GlanceModifier.width(3.dp))
+        }
     }
 }
 
@@ -244,7 +287,7 @@ private fun TrackTitle(text: String, size: Int) {
         text = text.ifBlank { "Unknown track" },
         maxLines = 1,
         style = TextStyle(
-            color = GlanceTheme.colors.onPrimaryContainer,
+            color = GlanceTheme.colors.onSurface,
             fontSize = size.sp,
             fontWeight = FontWeight.Bold,
         ),
@@ -257,7 +300,7 @@ private fun TrackArtist(text: String, size: Int) {
         text = text.ifBlank { "Unknown artist" },
         maxLines = 1,
         style = TextStyle(
-            color = GlanceTheme.colors.onPrimaryContainer,
+            color = GlanceTheme.colors.onSurfaceVariant,
             fontSize = size.sp,
             fontWeight = FontWeight.Medium,
         ),
@@ -265,42 +308,42 @@ private fun TrackArtist(text: String, size: Int) {
 }
 
 @Composable
-private fun PlaybackControls(isPlaying: Boolean) {
+private fun PlaybackControls(isPlaying: Boolean, animationFrame: Int) {
     val label = if (isPlaying) "Pause" else "Play"
     val icon = if (isPlaying) R.drawable.ic_widget_pause else R.drawable.ic_widget_play
     Row(verticalAlignment = Alignment.CenterVertically) {
         Row(
             modifier = GlanceModifier
-                .width(112.dp)
-                .height(40.dp)
-                .background(GlanceTheme.colors.primary)
-                .cornerRadius(20.dp)
+                .width(92.dp)
+                .height(38.dp)
+                .background(GlanceTheme.colors.surfaceVariant)
+                .cornerRadius(19.dp)
                 .clickable(actionRunCallback<TogglePlayPauseAction>()),
             verticalAlignment = Alignment.CenterVertically,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Image(
+            if (isPlaying) AnimatedPauseGlyph(animationFrame) else Image(
                 provider = ImageProvider(icon),
                 contentDescription = label,
                 modifier = GlanceModifier.size(18.dp),
-                colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimary),
+                colorFilter = ColorFilter.tint(GlanceTheme.colors.primary),
             )
-            Spacer(GlanceModifier.width(7.dp))
+            Spacer(GlanceModifier.width(6.dp))
             Text(
                 text = label,
                 style = TextStyle(
-                    color = GlanceTheme.colors.onPrimary,
-                    fontSize = 15.sp,
+                    color = GlanceTheme.colors.onSurface,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
         }
-        Spacer(GlanceModifier.width(8.dp))
+        Spacer(GlanceModifier.width(6.dp))
         Box(
             modifier = GlanceModifier
-                .size(40.dp)
-                .background(GlanceTheme.colors.primary)
-                .cornerRadius(20.dp)
+                .size(38.dp)
+                .background(GlanceTheme.colors.surfaceVariant)
+                .cornerRadius(19.dp)
                 .clickable(actionRunCallback<SkipNextAction>()),
             contentAlignment = Alignment.Center,
         ) {
@@ -308,8 +351,29 @@ private fun PlaybackControls(isPlaying: Boolean) {
                 provider = ImageProvider(R.drawable.ic_widget_skip_next),
                 contentDescription = "Next",
                 modifier = GlanceModifier.size(18.dp),
-                colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimary),
+                colorFilter = ColorFilter.tint(GlanceTheme.colors.onSurface),
             )
         }
+    }
+}
+
+@Composable
+private fun AnimatedPauseGlyph(frame: Int) {
+    val leftHeight = if (frame % 2 == 0) 18 else 13
+    val rightHeight = if (frame % 2 == 0) 13 else 18
+    Row(
+        modifier = GlanceModifier.size(20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Spacer(
+            GlanceModifier.width(5.dp).height(leftHeight.dp)
+                .background(GlanceTheme.colors.primary).cornerRadius(2.dp),
+        )
+        Spacer(GlanceModifier.width(4.dp))
+        Spacer(
+            GlanceModifier.width(5.dp).height(rightHeight.dp)
+                .background(GlanceTheme.colors.primary).cornerRadius(2.dp),
+        )
     }
 }

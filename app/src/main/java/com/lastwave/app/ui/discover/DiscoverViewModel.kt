@@ -42,25 +42,26 @@ class DiscoverViewModel @Inject constructor(
     val uiState: StateFlow<DiscoverUiState> = _uiState.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            repository.feed.collect { feed ->
+                if (feed.isNotEmpty()) {
+                    _uiState.update { it.copy(isLoading = false, tracks = feed) }
+                }
+            }
+        }
         loadInitial()
     }
 
     fun loadInitial() {
-        val cached = repository.getCachedFeed()
-        if (cached.isNotEmpty()) {
-            _uiState.update { it.copy(isLoading = false, tracks = cached) }
-            viewModelScope.launch {
-                artworkRepository.enrichBatch(cached.take(8).map { it.name to it.artist })
-            }
-            return
-        }
-
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                val batch = repository.nextBatch(10)
-                _uiState.update { it.copy(isLoading = false, tracks = batch) }
-                artworkRepository.enrichBatch(batch.take(8).map { it.name to it.artist })
+                val cached = repository.freshCachedFeed()
+                val needed = (INITIAL_BATCH_SIZE - cached.size).coerceAtLeast(0)
+                val batch = if (needed > 0) repository.nextBatch(needed) else emptyList()
+                val feed = repository.getCachedFeed()
+                _uiState.update { it.copy(isLoading = false, tracks = feed) }
+                artworkRepository.enrichBatch((cached + batch).take(INITIAL_BATCH_SIZE).map { it.name to it.artist })
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message ?: "Couldn't load recommendations") }
             }
@@ -72,8 +73,8 @@ class DiscoverViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMore = true) }
             try {
-                val more = repository.nextBatch(8)
-                _uiState.update { it.copy(isLoadingMore = false, tracks = it.tracks + more) }
+                val more = repository.nextBatch(PAGE_SIZE)
+                _uiState.update { it.copy(isLoadingMore = false, tracks = repository.getCachedFeed()) }
                 artworkRepository.enrichBatch(more.map { it.name to it.artist })
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoadingMore = false) }
@@ -86,8 +87,8 @@ class DiscoverViewModel @Inject constructor(
             _uiState.update { it.copy(isRefreshing = true) }
             repository.reset()
             try {
-                val batch = repository.nextBatch(10)
-                _uiState.update { it.copy(isRefreshing = false, tracks = batch) }
+                repository.nextBatch(INITIAL_BATCH_SIZE)
+                _uiState.update { it.copy(isRefreshing = false, tracks = repository.getCachedFeed()) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isRefreshing = false, error = e.message) }
             }
@@ -99,8 +100,8 @@ class DiscoverViewModel @Inject constructor(
             repository.reset()
             _uiState.update { it.copy(isLoading = true) }
             try {
-                val batch = repository.nextBatch(10)
-                _uiState.update { it.copy(isLoading = false, tracks = batch) }
+                repository.nextBatch(INITIAL_BATCH_SIZE)
+                _uiState.update { it.copy(isLoading = false, tracks = repository.getCachedFeed()) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
             }
@@ -128,4 +129,9 @@ class DiscoverViewModel @Inject constructor(
 
     fun dismissSaveResult() = _uiState.update { it.copy(saveResultMessage = null) }
     fun dismissError() = _uiState.update { it.copy(error = null) }
+
+    private companion object {
+        const val INITIAL_BATCH_SIZE = 16
+        const val PAGE_SIZE = 12
+    }
 }

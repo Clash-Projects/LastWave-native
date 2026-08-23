@@ -2,6 +2,9 @@ package com.lastwave.app.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lastwave.app.data.backup.BackupCheck
+import com.lastwave.app.data.backup.BackupRepository
+import com.lastwave.app.data.backup.RestoreResult
 import com.lastwave.app.data.model.AuthState
 import com.lastwave.app.data.repository.LastFmAuthCallbackCoordinator
 import com.lastwave.app.data.repository.AuthRepository
@@ -17,6 +20,7 @@ sealed interface WebAuthState {
     data object Idle : WebAuthState
     data class AwaitingApproval(val authUrl: String) : WebAuthState
     data object CompletingSignIn : WebAuthState
+    data object RestoringBackup : WebAuthState
     data class Error(val message: String) : WebAuthState
 }
 
@@ -24,6 +28,7 @@ sealed interface WebAuthState {
 class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val authCallback: LastFmAuthCallbackCoordinator,
+    private val backupRepository: BackupRepository,
 ) : ViewModel() {
 
     val authState: StateFlow<AuthState> = authRepository.authState
@@ -32,6 +37,7 @@ class AuthViewModel @Inject constructor(
     val webAuthState: StateFlow<WebAuthState> = _webAuthState.asStateFlow()
 
     private var completingToken: String? = null
+    private var pendingRestoreContent: String? = null
 
     init {
         viewModelScope.launch {
@@ -44,7 +50,23 @@ class AuthViewModel @Inject constructor(
 
     /** Opens Last.fm's callback-based web authorization flow. */
     fun beginSignIn() {
+        pendingRestoreContent = null
         _webAuthState.value = WebAuthState.AwaitingApproval(authRepository.authUrl())
+    }
+
+    fun beginRestoreAndSignIn(content: String) {
+        when (backupRepository.checkBackup(content)) {
+            is BackupCheck.Valid -> {
+                pendingRestoreContent = content
+                _webAuthState.value = WebAuthState.AwaitingApproval(authRepository.authUrl())
+            }
+            BackupCheck.UnsupportedSchema -> {
+                _webAuthState.value = WebAuthState.Error("This backup was created by a newer LastWave version")
+            }
+            BackupCheck.Invalid -> {
+                _webAuthState.value = WebAuthState.Error("That file is not a valid LastWave backup")
+            }
+        }
     }
 
     /** Lifecycle fallback; the deep link is normally observed in [init]. */
@@ -60,19 +82,41 @@ class AuthViewModel @Inject constructor(
         completingToken = token
         _webAuthState.value = WebAuthState.CompletingSignIn
         viewModelScope.launch {
-            authRepository.completeWebAuth(token).fold(
-                onSuccess = { _webAuthState.value = WebAuthState.Idle }, // authState (SignedIn) takes over navigation from here
-                onFailure = { e ->
-                    _webAuthState.value = WebAuthState.Error(
-                        e.message ?: "Could not complete Last.fm sign-in",
-                    )
-                },
-            )
+            val signInResult = authRepository.completeWebAuth(token)
+            if (signInResult.isSuccess) {
+                val backup = pendingRestoreContent
+                if (backup == null) {
+                    _webAuthState.value = WebAuthState.Idle
+                } else {
+                    _webAuthState.value = WebAuthState.RestoringBackup
+                    _webAuthState.value = when (
+                        val restoreResult = backupRepository.restore(
+                            content = backup,
+                            preserveSignedInSession = true,
+                        )
+                    ) {
+                        is RestoreResult.Success -> WebAuthState.Idle
+                        RestoreResult.UnsupportedSchema -> WebAuthState.Error(
+                            "This backup was created by a newer LastWave version",
+                        )
+                        RestoreResult.InvalidFile -> WebAuthState.Error(
+                            "That file is not a valid LastWave backup",
+                        )
+                        is RestoreResult.Failed -> WebAuthState.Error(restoreResult.message)
+                    }
+                    pendingRestoreContent = null
+                }
+            } else {
+                _webAuthState.value = WebAuthState.Error(
+                    signInResult.exceptionOrNull()?.message ?: "Could not complete Last.fm sign-in",
+                )
+            }
             completingToken = null
         }
     }
 
     fun cancelSignIn() {
+        pendingRestoreContent = null
         _webAuthState.value = WebAuthState.Idle
     }
 
@@ -80,11 +124,8 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch { authRepository.signOut() }
     }
 
-    fun continueAsGuest() {
-        viewModelScope.launch { authRepository.continueAsGuest() }
-    }
-
     fun dismissError() {
+        pendingRestoreContent = null
         authRepository.clearError()
         _webAuthState.value = WebAuthState.Idle
     }

@@ -56,7 +56,7 @@ private val HeaderShape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24
  * width with no side margins and no gap above it — it IS the top of the
  * screen, edge to edge, with only its bottom edge rounded.
  *
- * The depth behind it is a soft two-stop radial gradient (accent color
+ * The depth behind it is a pair of broad radial gradients (accent colors
  * fading to fully transparent) painted directly as a background, not a
  * blurred solid shape — Modifier.blur() clamps/repeats pixels at its own
  * layer bounds, which reads as a hard smear or a visible line right at the
@@ -80,6 +80,7 @@ fun ExpressiveHeader(
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val glow = MaterialTheme.colorScheme.primary
+    val secondaryGlow = MaterialTheme.colorScheme.tertiary
     Box(modifier.fillMaxWidth()) {
         Surface(
             shape = HeaderShape,
@@ -95,7 +96,7 @@ fun ExpressiveHeader(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .drawGlowBackground(glow)
+                    .drawGlowBackground(glow, secondaryGlow)
                     .windowInsetsPadding(
                         WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
                     )
@@ -146,13 +147,13 @@ fun ExpressiveHeader(
     }
 }
 
-/** Paints a soft radial glow (accent color fading to nothing) whose center
+/** Paints two soft radial glows (accent colors fading to nothing) whose centers
  *  slowly drifts side to side — a continuous, gentle infinite-transition
  *  animation, not a fixed static blob — used as [ExpressiveHeader]'s
  *  background instead of a blurred shape (see the class doc for why it's
  *  a plain gradient rather than Modifier.blur()). */
 @Composable
-private fun Modifier.drawGlowBackground(color: Color): Modifier {
+private fun Modifier.drawGlowBackground(color: Color, secondaryColor: Color): Modifier {
     val transition = rememberInfiniteTransition(label = "headerGlowDrift")
     val drift by transition.animateFloat(
         initialValue = -1f,
@@ -165,11 +166,28 @@ private fun Modifier.drawGlowBackground(color: Color): Modifier {
     )
     return this.drawBehind {
         val cx = size.width / 2f + drift * size.width * 0.30f
-        val cy = size.height * 0.4f
-        val radius = (size.width.coerceAtLeast(size.height) * 0.9f).coerceAtLeast(1f)
+        val cy = size.height * 0.46f
+        val radius = (size.width.coerceAtLeast(size.height) * 1.08f).coerceAtLeast(1f)
+        val secondaryCx = size.width / 2f - drift * size.width * 0.24f
+        val secondaryRadius = (size.width.coerceAtLeast(size.height) * 0.72f).coerceAtLeast(1f)
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(color.copy(alpha = 0.16f), color.copy(alpha = 0f)),
+                colors = listOf(
+                    secondaryColor.copy(alpha = 0.13f),
+                    secondaryColor.copy(alpha = 0.045f),
+                    secondaryColor.copy(alpha = 0f),
+                ),
+                center = Offset(secondaryCx, size.height * 0.78f),
+                radius = secondaryRadius,
+            ),
+        )
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    color.copy(alpha = 0.23f),
+                    color.copy(alpha = 0.07f),
+                    color.copy(alpha = 0f),
+                ),
                 center = Offset(cx, cy),
                 radius = radius,
             ),

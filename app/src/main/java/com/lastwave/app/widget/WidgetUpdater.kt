@@ -8,12 +8,26 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.updateAll
 import java.io.File
 import java.io.FileOutputStream
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 private const val TAG = "WidgetUpdater"
 private const val ART_FILE_NAME = "widget_now_playing_art.png"
 
 /** Writes and refreshes the shared state of the now-playing widget. */
 object WidgetUpdater {
+    private val animationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var animationJob: Job? = null
+
+    @Volatile
+    internal var animationFrame: Int = 0
+        private set
+
     suspend fun publish(
         context: Context,
         title: String,
@@ -38,10 +52,12 @@ object WidgetUpdater {
                 hasSession = true,
             ),
         )
+        if (isPlaying) startAnimation(context.applicationContext) else stopAnimation()
         updateAll(context)
     }
 
     suspend fun clear(context: Context) {
+        stopAnimation()
         val current = NowPlayingWidgetSnapshot.read(context)
         NowPlayingWidgetSnapshot.write(
             context,
@@ -55,21 +71,39 @@ object WidgetUpdater {
         updateAll(context)
     }
 
-    private suspend fun updateAll(context: Context) {
-        runCatching {
+    @Synchronized
+    private fun startAnimation(context: Context) {
+        if (animationJob?.isActive == true) return
+        animationJob = animationScope.launch {
+            while (isActive) {
+                delay(650L)
+                animationFrame = (animationFrame + 1) % 4
+                if (!updateAll(context)) break
+            }
+        }
+    }
+
+    @Synchronized
+    private fun stopAnimation() {
+        animationJob?.cancel()
+        animationJob = null
+        animationFrame = 0
+    }
+
+    private suspend fun updateAll(context: Context): Boolean = runCatching {
             val manager = GlanceAppWidgetManager(context)
             updateWidget(context, manager, NowPlayingWidget::class.java, NowPlayingWidget())
-        }.onFailure { Log.w(TAG, "widget update failed", it) }
-    }
+        }.onFailure { Log.w(TAG, "widget update failed", it) }.getOrDefault(false)
 
     private suspend fun <T : GlanceAppWidget> updateWidget(
         context: Context,
         manager: GlanceAppWidgetManager,
         widgetClass: Class<T>,
         widget: T,
-    ) {
+    ): Boolean {
         val ids = manager.getGlanceIds(widgetClass)
         if (ids.isNotEmpty()) widget.updateAll(context)
+        return ids.isNotEmpty()
     }
 
     @Synchronized

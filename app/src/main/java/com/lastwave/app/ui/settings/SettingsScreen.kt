@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Apps
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Timer
@@ -177,7 +176,6 @@ fun SettingsScreen(
     onBack: () -> Unit = {},
     onLoggedOut: () -> Unit = {},
     onOpenChooseApps: () -> Unit = {},
-    onOpenScrobblerDebugLog: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val session by viewModel.session.collectAsState()
@@ -299,7 +297,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Scrobbler")
-                    SettingsGroup(rowCount = 5) { index, position ->
+                    SettingsGroup(rowCount = 4) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.GraphicEq,
@@ -336,15 +334,6 @@ fun SettingsScreen(
                             3 -> ScrobbleThresholdRow(
                                 percent = scrobbler.scrobblePercent,
                                 onPercentChange = viewModel::setScrobblePercent,
-                                position = position,
-                            )
-                            4 -> SettingsActionCard(
-                                icon = Icons.Filled.BugReport,
-                                iconContainer = MaterialTheme.colorScheme.errorContainer,
-                                iconTint = MaterialTheme.colorScheme.onErrorContainer,
-                                title = "Scrobbler debug log",
-                                subtitle = "Watch what it's doing, live, while a track plays",
-                                onClick = onOpenScrobblerDebugLog,
                                 position = position,
                             )
                         }

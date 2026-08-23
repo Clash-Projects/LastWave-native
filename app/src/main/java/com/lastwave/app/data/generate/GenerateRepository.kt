@@ -149,6 +149,13 @@ class GenerateRepository @Inject constructor(
         throw IllegalStateException("Couldn't read Discovery History", e)
     }
 
+    /** Hard exclusion used by Discover and My Recommendation. */
+    suspend fun filterOutsideDiscoveryHistory(tracks: List<GeneratedTrack>): List<GeneratedTrack> {
+        if (tracks.isEmpty()) return emptyList()
+        val history = discoveryHistoryKeys()
+        return tracks.filterNot { it.key in history }
+    }
+
     suspend fun clearSeenTracks() = try {
         seenTrackDao.clear()
     } catch (e: Exception) {

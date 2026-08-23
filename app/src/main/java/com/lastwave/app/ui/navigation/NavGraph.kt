@@ -88,7 +88,7 @@ fun LastWaveNavHost(
 
             LaunchedEffect(authState) {
                 when (authState) {
-                    is AuthState.SignedIn, AuthState.Guest -> navController.navigate(Screen.MainShell.route) {
+                    is AuthState.SignedIn -> navController.navigate(Screen.MainShell.route) {
                         popUpTo(Screen.Splash.route) { inclusive = true }
                     }
                     AuthState.SignedOut, is AuthState.Error -> navController.navigate(Screen.Login.route) {
@@ -109,8 +109,8 @@ fun LastWaveNavHost(
             // Real one-tap sign-in now: tap Connect, approve in an
             // embedded WebView, done — see AuthViewModel/LoginScreen for
             // the full flow. No credentials form to fill in here anymore.
-            LaunchedEffect(authState) {
-                if (authState is AuthState.SignedIn || authState == AuthState.Guest) {
+            LaunchedEffect(authState, webAuthState) {
+                if (authState is AuthState.SignedIn && webAuthState == com.lastwave.app.ui.auth.WebAuthState.Idle) {
                     navController.navigate(Screen.MainShell.route) {
                         popUpTo(Screen.Login.route) { inclusive = true }
                     }
@@ -124,7 +124,7 @@ fun LastWaveNavHost(
                 onReturnedFromBrowser = authViewModel::onReturnedFromBrowser,
                 onCancelWebAuth = authViewModel::cancelSignIn,
                 onSignOut = authViewModel::signOut,
-                onContinueWithoutAccount = authViewModel::continueAsGuest,
+                onRestoreBackupAndSignIn = authViewModel::beginRestoreAndSignIn,
                 onDismissError = authViewModel::dismissError,
             )
         }
@@ -208,7 +208,6 @@ fun LastWaveNavHost(
                         }
                     },
                     onOpenChooseApps = { navController.navigate(Screen.ScrobblerApps.route) },
-                    onOpenScrobblerDebugLog = { navController.navigate(Screen.ScrobblerDebugLog.route) },
                 )
             }
         }
@@ -216,12 +215,6 @@ fun LastWaveNavHost(
         composable(Screen.ScrobblerApps.route) {
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 com.lastwave.app.ui.settings.ScrobblerAppsScreen(onBack = { navController.popBackStack() })
-            }
-        }
-
-        composable(Screen.ScrobblerDebugLog.route) {
-            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
-                com.lastwave.app.ui.settings.ScrobblerDebugLogScreen(onBack = { navController.popBackStack() })
             }
         }
 

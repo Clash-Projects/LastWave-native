@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.FilledTonalIconButton
@@ -68,7 +69,7 @@ fun ExpressiveRefreshButton(
             Icons.Filled.Refresh,
             contentDescription = contentDescription,
             tint = MaterialTheme.colorScheme.onPrimaryContainer,
-            modifier = Modifier.rotate(rotation.value),
+            modifier = Modifier.size(28.dp).rotate(rotation.value),
         )
     }
 }

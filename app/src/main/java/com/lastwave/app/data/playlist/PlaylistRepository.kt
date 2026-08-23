@@ -37,6 +37,7 @@ data class SavedPlaylist(
     val discoverSignature: String? = null,
     val customCoverUri: String? = null,
     val isCompleted: Boolean = false,
+    val isPinned: Boolean = false,
 )
 
 private const val MAX_SAVED_PLAYLISTS = 20
@@ -181,6 +182,17 @@ class PlaylistRepository @Inject constructor(
         return updated.toDomain()
     }
 
+    suspend fun setPinned(id: Long, pinned: Boolean): SavedPlaylist? {
+        awaitStartupSync()
+        val entity = dao.getById(id) ?: return null
+        if (entity.isPinned == pinned) return entity.toDomain()
+        val updated = entity.copy(isPinned = pinned)
+        dao.upsert(updated)
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
+        return updated.toDomain()
+    }
+
     suspend fun addTrack(
         id: Long,
         track: GeneratedTrack,
@@ -267,6 +279,7 @@ class PlaylistRepository @Inject constructor(
             discoverSignature = discoverSignature,
             customCoverUri = customCoverUri,
             isCompleted = isCompleted,
+            isPinned = isPinned,
         )
     }
 }

@@ -7,6 +7,7 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -40,6 +41,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -187,37 +190,48 @@ private fun FloatingNavBar(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        shape = DockShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 5.dp,
-        shadowElevation = 10.dp,
+    Box(
         modifier = modifier
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
             )
             .padding(horizontal = 24.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            Modifier
+                .matchParentSize()
+                .padding(horizontal = 6.dp, vertical = 3.dp)
+                .blur(30.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f), DockShape),
+        )
+        Surface(
+            shape = DockShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.93f),
+            tonalElevation = 5.dp,
+            shadowElevation = 10.dp,
         ) {
-            tabs.forEachIndexed { index, tab ->
-                // Stable per-index lambda: without remembering this, a new
-                // lambda instance is created for every tab whenever this
-                // row of tabs recomposes (i.e. on every tab switch),
-                // which makes Compose treat all three FloatingNavItems as
-                // "changed" even the ones whose selected state didn't
-                // change, forcing unnecessary recomposition of all of them
-                // instead of just the two whose selection actually flipped.
-                val onClick = remember(index) { { onSelect(index) } }
-                FloatingNavItem(
-                    label = tab.label,
-                    icon = tab.icon(),
-                    selected = selectedIndex == index,
-                    onClick = onClick,
-                )
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                tabs.forEachIndexed { index, tab ->
+                    // Stable per-index lambda: without remembering this, a new
+                    // lambda instance is created for every tab whenever this
+                    // row of tabs recomposes (i.e. on every tab switch),
+                    // which makes Compose treat all three FloatingNavItems as
+                    // "changed" even the ones whose selected state didn't
+                    // change, forcing unnecessary recomposition of all of them
+                    // instead of just the two whose selection actually flipped.
+                    val onClick = remember(index) { { onSelect(index) } }
+                    FloatingNavItem(
+                        label = tab.label,
+                        icon = tab.icon(),
+                        selected = selectedIndex == index,
+                        onClick = onClick,
+                    )
+                }
             }
         }
     }

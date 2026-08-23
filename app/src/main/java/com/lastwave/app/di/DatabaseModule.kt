@@ -32,6 +32,14 @@ object DatabaseModule {
         }
     }
 
+    private val migration6To7 = object : Migration(6, 7) {
+        override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+            database.execSQL(
+                "ALTER TABLE saved_playlists ADD COLUMN isPinned INTEGER NOT NULL DEFAULT 0",
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
@@ -40,7 +48,7 @@ object DatabaseModule {
             // future schema changes can rebuild Room, then restores that
             // mirror if the database opens empty. Artwork/history are cache.
             .fallbackToDestructiveMigration()
-            .addMigrations(migration4To5, migration5To6)
+            .addMigrations(migration4To5, migration5To6, migration6To7)
             .build()
 
     @Provides

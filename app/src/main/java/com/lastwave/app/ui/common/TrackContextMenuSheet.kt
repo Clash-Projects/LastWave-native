@@ -165,6 +165,7 @@ private fun buildLastFmUrl(target: TrackMenuTarget): String {
 fun TrackContextMenuSheet(
     target: TrackMenuTarget,
     capabilities: TrackMenuCapabilities,
+    playableTrack: PlayableTrack? = null,
     onDismiss: () -> Unit,
     onPlayInLastWave: (() -> Unit)? = null,
     onStartMix: ((trackName: String, artistName: String) -> Unit)? = null,
@@ -252,7 +253,7 @@ fun TrackContextMenuSheet(
                             )
                         }
                     }
-                    val playable = PlayableTrack(title = t.name, artist = t.artist)
+                    val playable = playableTrack ?: PlayableTrack(title = t.name, artist = t.artist)
                     add { pos ->
                         MenuActionRow(Icons.Filled.PlayCircle, "Play in LastWave", position = pos) {
                             onPlayInLastWave?.invoke() ?: musicPlayer.play(playable)

@@ -35,7 +35,6 @@ data class PlaylistUiState(
     val justSavedBannerVisible: Boolean = false,
     val exportSheetForPlaylistId: Long? = null,
     val deleteConfirmForPlaylistId: Long? = null,
-    val isGeneratingSimilarFor: Long? = null,
     val regeneratingId: Long? = null,
     val toastMessage: String? = null,
     val deleteScrobbleAuthRequired: Boolean = false,
@@ -131,12 +130,19 @@ class PlaylistViewModel @Inject constructor(
         }
     }
 
-    private fun sortPlaylists(playlists: List<SavedPlaylist>, mode: PlaylistSortMode): List<SavedPlaylist> = when (mode) {
-        PlaylistSortMode.DATE_DESC -> playlists.sortedByDescending { it.createdAtMillis }
-        PlaylistSortMode.DATE_ASC -> playlists.sortedBy { it.createdAtMillis }
-        PlaylistSortMode.NAME -> playlists.sortedBy { it.title.lowercase() }
-        PlaylistSortMode.TRACK_COUNT -> playlists.sortedByDescending { it.tracks.size }
-    }
+    private fun sortPlaylists(playlists: List<SavedPlaylist>, mode: PlaylistSortMode): List<SavedPlaylist> =
+        playlists.sortedWith(
+            when (mode) {
+                PlaylistSortMode.DATE_DESC -> compareByDescending<SavedPlaylist> { it.isPinned }
+                    .thenByDescending { it.createdAtMillis }
+                PlaylistSortMode.DATE_ASC -> compareByDescending<SavedPlaylist> { it.isPinned }
+                    .thenBy { it.createdAtMillis }
+                PlaylistSortMode.NAME -> compareByDescending<SavedPlaylist> { it.isPinned }
+                    .thenBy { it.title.lowercase() }
+                PlaylistSortMode.TRACK_COUNT -> compareByDescending<SavedPlaylist> { it.isPinned }
+                    .thenByDescending { it.tracks.size }
+            },
+        )
 
     fun regenerateLatest() {
         val newest = _uiState.value.playlists.firstOrNull() ?: return
@@ -214,6 +220,17 @@ class PlaylistViewModel @Inject constructor(
                     it.copy(toastMessage = e.message ?: "Couldn't complete playlist")
                 }
             }
+        }
+    }
+
+    fun togglePinned(id: Long) {
+        val playlist = _uiState.value.playlists.firstOrNull { it.id == id } ?: return
+        viewModelScope.launch {
+            playlistRepository.setPinned(id, !playlist.isPinned)
+            _uiState.update {
+                it.copy(toastMessage = if (playlist.isPinned) "Playlist unpinned" else "Playlist pinned")
+            }
+            load()
         }
     }
 
@@ -312,59 +329,6 @@ class PlaylistViewModel @Inject constructor(
                 _uiState.update { it.copy(regeneratingId = null, toastMessage = e.message ?: "Couldn't regenerate") }
             }
         }
-    }
-
-    /** Port of §4.7's Generate Similar: seeds from up to 5 evenly-spread
-     *  tracks in the source playlist + top tracks from up to 4 of its
-     *  artists' similar artists. */
-    fun generateSimilar(id: Long) {
-        val playlist = _uiState.value.playlists.firstOrNull { it.id == id } ?: return
-        viewModelScope.launch {
-            _uiState.update { it.copy(isGeneratingSimilarFor = id) }
-            try {
-                val targetCount = maxOf(playlist.tracks.size, 15)
-                val seeds = evenlySpread(playlist.tracks, 5)
-                val candidates = mutableListOf<GeneratedTrack>()
-                for (seed in seeds) {
-                    try {
-                        candidates += generateRepository.fetchSimilarTracks(seed.name, seed.artist, 20)
-                    } catch (e: Exception) { /* best-effort per seed */ }
-                }
-                val artists = playlist.tracks.map { it.artist }.distinct().take(4)
-                for (artist in artists) {
-                    try {
-                        candidates += generateRepository.fetchSimilarArtistTracks(artist, 8)
-                    } catch (e: Exception) { /* best-effort per artist */ }
-                }
-                val sourceKeys = playlist.tracks.map { it.key }.toSet()
-                val deduped = LinkedHashMap<String, GeneratedTrack>()
-                val artistCap = mutableMapOf<String, Int>()
-                for (c in candidates) {
-                    if (c.key in sourceKeys || c.key in deduped) continue
-                    val ak = c.artist.lowercase()
-                    val count = (artistCap[ak] ?: 0)
-                    if (count >= 2) continue
-                    artistCap[ak] = count + 1
-                    deduped[c.key] = c
-                }
-                val finalTracks = deduped.values.take(targetCount).toList()
-                artworkRepository.enrichBatch(finalTracks.take(4).map { it.name to it.artist })
-
-                val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())
-                val subtitle = "Similar to \"${playlist.title}\""
-                val saved = playlistRepository.save(title, subtitle, playlist.mode, finalTracks)
-                _uiState.update { it.copy(isGeneratingSimilarFor = null) }
-                load(justGeneratedId = saved.id)
-            } catch (e: Exception) {
-                _uiState.update { it.copy(isGeneratingSimilarFor = null, toastMessage = e.message ?: "Couldn't generate similar playlist") }
-            }
-        }
-    }
-
-    private fun evenlySpread(tracks: List<GeneratedTrack>, count: Int): List<GeneratedTrack> {
-        if (tracks.size <= count) return tracks
-        val step = tracks.size.toDouble() / count
-        return (0 until count).map { i -> tracks[(i * step).toInt().coerceIn(0, tracks.size - 1)] }
     }
 
     fun deleteScrobble(trackName: String, artistName: String) {

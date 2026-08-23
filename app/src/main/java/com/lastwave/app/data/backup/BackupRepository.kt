@@ -18,7 +18,7 @@ import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val SCHEMA_VERSION = 4
+private const val SCHEMA_VERSION = 5
 private const val BACKUP_TYPE = "lastwave-backup"
 
 @Serializable
@@ -35,6 +35,7 @@ data class BackupPlaylistSnapshot(
     val discoverSignature: String? = null,
     val customCoverUri: String? = null,
     val isCompleted: Boolean = false,
+    val isPinned: Boolean = false,
 )
 
 /** Added in schema v2. Absent/empty on older backup files — restoring one
@@ -60,6 +61,12 @@ sealed interface RestoreResult {
     data class Failed(val message: String) : RestoreResult
 }
 
+sealed interface BackupCheck {
+    data class Valid(val playlistCount: Int) : BackupCheck
+    data object UnsupportedSchema : BackupCheck
+    data object Invalid : BackupCheck
+}
+
 /**
  * Faithful port of settings.js's Backup & Restore (§8.6): serializes the
  * entire local storage (all DataStore prefs, all saved playlists, and
@@ -81,6 +88,14 @@ class BackupRepository @Inject constructor(
     private val playlistPublicMirror: PlaylistPublicMirror,
 ) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
+
+    fun checkBackup(content: String): BackupCheck {
+        val backup = runCatching { json.decodeFromString<BackupFile>(content) }.getOrNull()
+            ?: return BackupCheck.Invalid
+        if (backup.type != BACKUP_TYPE) return BackupCheck.Invalid
+        if (backup.schemaVersion > SCHEMA_VERSION) return BackupCheck.UnsupportedSchema
+        return BackupCheck.Valid(backup.playlists.size)
+    }
 
     suspend fun buildBackup(appVersionName: String): String {
         val prefs = dataStore.data.first()
@@ -105,6 +120,7 @@ class BackupRepository @Inject constructor(
                 discoverSignature = it.discoverSignature,
                 customCoverUri = it.customCoverUri,
                 isCompleted = it.isCompleted,
+                isPinned = it.isPinned,
             )
         }
         val seenTracks = seenTrackDao.getAll().map { BackupSeenTrackSnapshot(it.trackKey, it.lastSeenMillis) }
@@ -118,7 +134,10 @@ class BackupRepository @Inject constructor(
         return json.encodeToString(backup)
     }
 
-    suspend fun restore(content: String): RestoreResult {
+    suspend fun restore(
+        content: String,
+        preserveSignedInSession: Boolean = false,
+    ): RestoreResult {
         val backup = try {
             json.decodeFromString<BackupFile>(content)
         } catch (e: Exception) {
@@ -126,6 +145,15 @@ class BackupRepository @Inject constructor(
         }
         if (backup.type != BACKUP_TYPE) return RestoreResult.InvalidFile
         if (backup.schemaVersion > SCHEMA_VERSION) return RestoreResult.UnsupportedSchema
+
+        val currentPrefs = dataStore.data.first()
+        val preservedAuthStrings = if (preserveSignedInSession) {
+            AUTH_PREFERENCE_NAMES.mapNotNull { name ->
+                currentPrefs[stringPreferencesKey(name)]?.let { value -> name to value }
+            }.toMap()
+        } else {
+            emptyMap()
+        }
 
         val previousPrefsSnapshot = try { buildBackup("rollback") } catch (e: Exception) { null }
         val previousPlaylists = try { playlistDao.getAll() } catch (e: Exception) { emptyList() }
@@ -136,6 +164,12 @@ class BackupRepository @Inject constructor(
                 mutablePrefs.clear()
                 backup.prefs.strings.forEach { (k, v) -> mutablePrefs[stringPreferencesKey(k)] = v }
                 backup.prefs.booleans.forEach { (k, v) -> mutablePrefs[booleanPreferencesKey(k)] = v }
+                if (preserveSignedInSession) {
+                    preservedAuthStrings.forEach { (name, value) ->
+                        mutablePrefs[stringPreferencesKey(name)] = value
+                    }
+                    mutablePrefs[booleanPreferencesKey(GUEST_MODE_PREFERENCE)] = false
+                }
             }
             playlistDao.replaceAll(backup.playlists.map { p ->
                 SavedPlaylistEntity(
@@ -148,6 +182,7 @@ class BackupRepository @Inject constructor(
                     discoverSignature = p.discoverSignature,
                     customCoverUri = p.customCoverUri,
                     isCompleted = p.isCompleted,
+                    isPinned = p.isPinned,
                 )
             })
             if (backup.seenTracks.isNotEmpty()) {
@@ -176,5 +211,15 @@ class BackupRepository @Inject constructor(
             snapshot.prefs.strings.forEach { (k, v) -> mutablePrefs[stringPreferencesKey(k)] = v }
             snapshot.prefs.booleans.forEach { (k, v) -> mutablePrefs[booleanPreferencesKey(k)] = v }
         }
+    }
+
+    private companion object {
+        const val GUEST_MODE_PREFERENCE = "lw_guest_mode"
+        val AUTH_PREFERENCE_NAMES = listOf(
+            "lw_apikey",
+            "lw_apisecret",
+            "lw_sessionkey",
+            "lw_username",
+        )
     }
 }

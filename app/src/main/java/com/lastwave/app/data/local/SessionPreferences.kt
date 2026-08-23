@@ -22,7 +22,6 @@ data class SessionData(
      *  Discover, Generate, stats) only needs api_key + username. */
     val sessionKey: String = "",
     val username: String = "",
-    val guestMode: Boolean = false,
 ) {
     val isAuthenticated: Boolean get() = username.isNotBlank() && apiKey.isNotBlank()
 }
@@ -45,7 +44,6 @@ class SessionPreferences @Inject constructor(
             apiSecret = p[Keys.API_SECRET] ?: "",
             sessionKey = p[Keys.SESSION_KEY] ?: "",
             username = p[Keys.USERNAME] ?: "",
-            guestMode = p[Keys.GUEST_MODE] ?: false,
         )
     }
 
@@ -63,10 +61,6 @@ class SessionPreferences @Inject constructor(
             it[Keys.USERNAME] = username
             it[Keys.GUEST_MODE] = false
         }
-    }
-
-    suspend fun setGuestMode(enabled: Boolean) {
-        dataStore.edit { it[Keys.GUEST_MODE] = enabled }
     }
 
     /** Stores a real Last.fm session key (`sk`) obtained via
