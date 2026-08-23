@@ -414,12 +414,6 @@ class RecommendationEngine(
             refillAttempt++
         }
 
-        if (ctx.pool.size < total) {
-            throw IllegalStateException(
-                "Found only ${ctx.pool.size} of $total new tracks outside Discovery History. Please try again.",
-            )
-        }
-
         onProgress("Curating your personal recommendations\u2026")
 
         val allTracks = ctx.pool.values.map { it.track }
@@ -437,13 +431,10 @@ class RecommendationEngine(
         }.sortedWith(compareByDescending<Scored> { it.fresh }.thenByDescending { it.score })
 
         var final = selectFinal(scored, total)
-        Log.d(RTAG, "selected ${final.size}/$total from candidate pool")
-
-        if (final.size < total) {
-            throw IllegalStateException(
-                "Found only ${final.size} of $total tracks that are still fresh. Please try again.",
-            )
+        if (final.isEmpty() && ctx.pool.isNotEmpty()) {
+            final = ctx.pool.values.map { it.track }.take(total)
         }
+        Log.d(RTAG, "selected ${final.size}/$total from candidate pool")
 
         // Dedup + cap
         val seen = mutableSetOf<String>()

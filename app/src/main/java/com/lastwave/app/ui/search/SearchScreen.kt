@@ -107,7 +107,12 @@ private val EXPLORE_GENRES = listOf(
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewModel()) {
+fun SearchScreen(
+    onBack: () -> Unit = {},
+    onOpenArtist: (name: String, browseId: String?) -> Unit = { _, _ -> },
+    onOpenAlbum: (title: String, artist: String, browseId: String?) -> Unit = { _, _, _ -> },
+    viewModel: SearchViewModel = hiltViewModel(),
+) {
     val state by viewModel.uiState.collectAsState()
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     val playbackState by musicPlayer.state.collectAsState()
@@ -193,7 +198,6 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
             when {
                 // 1. Live Auto-Complete Suggestions (while actively typing)
                 state.isShowingSuggestions && state.suggestions.isNotEmpty() -> {
-                    // Match recent searches that contain the typed query to show on top
                     val matchingRecent = remember(state.query, state.recentSearches) {
                         val q = state.query.trim().lowercase()
                         if (q.isEmpty()) emptyList()
@@ -208,20 +212,21 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         if (matchingRecent.isNotEmpty()) {
-                            items(matchingRecent, key = { "recent_sug_$it" }) { recent ->
+                            items(matchingRecent, key = { "recent_match_$it" }) { recentText ->
                                 SuggestionRow(
-                                    fullText = recent,
+                                    fullText = recentText,
                                     query = state.query,
                                     isHistory = true,
                                     onClick = {
                                         focusManager.clearFocus()
-                                        viewModel.executeSearch(recent)
+                                        viewModel.executeSearch(recentText)
                                     },
-                                    onInsert = { viewModel.setQuery(recent) },
+                                    onInsert = { viewModel.setQuery(recentText) },
                                 )
                             }
                         }
-                        items(state.suggestions, key = { "sug_$it" }) { suggestion ->
+
+                        items(state.suggestions.filter { !matchingRecent.contains(it) }, key = { "sugg_$it" }) { suggestion ->
                             SuggestionRow(
                                 fullText = suggestion,
                                 query = state.query,
@@ -280,7 +285,6 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                             }
                         }
 
-                        // Explore Genres & Trends Section
                         item(key = "explore_section") {
                             Column(
                                 modifier = Modifier
@@ -374,7 +378,13 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                                                 item = topResult,
                                                 tab = state.tab,
                                                 isPlaying = isTopPlaying,
-                                                onPlay = { viewModel.playResult(topResult) },
+                                                onPlay = {
+                                                    when (state.tab) {
+                                                        SearchTab.ARTISTS -> onOpenArtist(topResult.name, topResult.entityId)
+                                                        SearchTab.ALBUMS -> onOpenAlbum(topResult.name, topResult.artist.orEmpty(), topResult.entityId)
+                                                        else -> viewModel.playResult(topResult)
+                                                    }
+                                                },
                                                 onMenu = {
                                                     menuTarget = when (state.tab) {
                                                         SearchTab.TRACKS -> TrackMenuTarget.Track(topResult.name, topResult.artist.orEmpty(), topResult.url)
@@ -398,7 +408,13 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
                                             tab = state.tab,
                                             isPlaying = isItemPlaying,
                                             modifier = Modifier.animateItem(),
-                                            onClick = { viewModel.playResult(item) },
+                                            onClick = {
+                                                when (state.tab) {
+                                                    SearchTab.ARTISTS -> onOpenArtist(item.name, item.entityId)
+                                                    SearchTab.ALBUMS -> onOpenAlbum(item.name, item.artist.orEmpty(), item.entityId)
+                                                    else -> viewModel.playResult(item)
+                                                }
+                                            },
                                             onLongClick = {
                                                 if (state.tab == SearchTab.TRACKS) {
                                                     addToPlaylist(

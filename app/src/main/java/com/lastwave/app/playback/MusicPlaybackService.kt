@@ -66,9 +66,14 @@ class MusicPlaybackService : Service() {
     private var settings = ScrobblerSettings()
     private var detectorJob: Job? = null
     private var detectedKey = ""
+    private var nowPlayingAnnouncedKey = ""
     private var accumulatedMs = 0L
+    private var lastPositionMs = 0L
     private var startedAtEpochSec = 0L
     private var submissionAttempted = false
+    private var retryCount = 0
+    private var pendingPreviousTrack: PlayableTrack? = null
+    private var pendingPreviousStartedAt: Long = 0L
     private var artworkJob: Job? = null
     private var artworkUrl: String? = null
     private var artworkBitmap: Bitmap? = null
@@ -140,23 +145,69 @@ class MusicPlaybackService : Service() {
         super.onDestroy()
     }
 
+    private fun cleanTrackMetadata(title: String, artist: String): Pair<String, String> {
+        val cleanArtist = artist.trim()
+            .replace(Regex("""(?i)\s*-\s*topic$"""), "")
+            .replace(Regex("""(?i)\s*vevo$"""), "")
+            .trim()
+        val cleanTitle = title.trim()
+            .replace(Regex("""(?i)\s*[\(\[](official\s*(music\s*)?video|official\s*audio|visualizer|audio|lyric\s*video|lyrics|hd|4k|remastered|hq)[\)\]]"""), "")
+            .trim()
+        return Pair(cleanTitle.ifBlank { title }, cleanArtist.ifBlank { artist })
+    }
+
     private fun detectTransition(state: MusicPlayerState) {
         val track = state.current ?: return
-        val key = "${track.artist.lowercase()}|${track.title.lowercase()}"
-        if (key == detectedKey) return
+        val (cleanTitle, cleanArtist) = cleanTrackMetadata(track.title, track.artist)
+        val key = "${cleanArtist.lowercase()}|${cleanTitle.lowercase()}"
+        if (key == detectedKey) {
+            if (state.isPlaying && key != nowPlayingAnnouncedKey) {
+                announceNowPlaying(state)
+            }
+            return
+        }
+
+        // If previous track reached threshold before transition but wasn't submitted yet, submit now
+        if (pendingPreviousTrack != null && !submissionAttempted && accumulatedMs >= 30_000L) {
+            val prev = pendingPreviousTrack!!
+            val (prevTitle, prevArtist) = cleanTrackMetadata(prev.title, prev.artist)
+            val prevStartedAt = pendingPreviousStartedAt
+            scope.launch(Dispatchers.IO) {
+                scrobbleRepository.scrobble(
+                    artist = prevArtist,
+                    track = prevTitle,
+                    album = prev.album,
+                    timestampSec = prevStartedAt,
+                )
+            }
+        }
+
         detectedKey = key
+        pendingPreviousTrack = track
+        pendingPreviousStartedAt = System.currentTimeMillis() / 1000
+        nowPlayingAnnouncedKey = ""
         accumulatedMs = 0
+        lastPositionMs = 0
+        retryCount = 0
         startedAtEpochSec = System.currentTimeMillis() / 1000
         submissionAttempted = false
-        debugLog.log("Own player detected: \"${track.title}\" — ${track.artist} (account not required for detection)")
-        announceNowPlaying(state)
+        debugLog.log("Own player detected: \"$cleanTitle\" — $cleanArtist")
+        if (state.isPlaying) {
+            announceNowPlaying(state)
+        }
     }
 
     private fun announceNowPlaying(state: MusicPlayerState) {
         val track = state.current ?: return
         if (!state.isPlaying || !settings.submitNowPlaying) return
+        val (cleanTitle, cleanArtist) = cleanTrackMetadata(track.title, track.artist)
+        val key = "${cleanArtist.lowercase()}|${cleanTitle.lowercase()}"
+        nowPlayingAnnouncedKey = key
         scope.launch(Dispatchers.IO) {
-            scrobbleRepository.updateNowPlaying(track.artist, track.title, track.album)
+            val result = scrobbleRepository.updateNowPlaying(cleanArtist, cleanTitle, track.album)
+            if (result is ScrobbleRepository.Result.Success) {
+                debugLog.log("Now playing updated: \"$cleanTitle\" — $cleanArtist")
+            }
         }
     }
 
@@ -167,29 +218,71 @@ class MusicPlaybackService : Service() {
             while (true) {
                 delay(1_000)
                 val state = musicPlayer.state.value
-                if (state.isPlaying && !wasPlaying) announceNowPlaying(state)
-                wasPlaying = state.isPlaying
-                val track = state.current ?: continue
-                if (!state.isPlaying) continue
-                accumulatedMs += 1_000
-                if (submissionAttempted || state.durationMs <= 0) continue
-                if (state.durationMs <= 30_000) {
-                    submissionAttempted = true
+                val track = state.current
+
+                if (track == null) {
+                    wasPlaying = false
                     continue
                 }
-                val threshold = minOf(state.durationMs * settings.scrobblePercent / 100, 4 * 60_000L)
+
+                val (cleanTitle, cleanArtist) = cleanTrackMetadata(track.title, track.artist)
+                val key = "${cleanArtist.lowercase()}|${cleanTitle.lowercase()}"
+
+                // Announce Now Playing when transitioning to playing or if not yet announced
+                if (state.isPlaying && (!wasPlaying || key != nowPlayingAnnouncedKey)) {
+                    announceNowPlaying(state)
+                }
+                wasPlaying = state.isPlaying
+
+                if (!state.isPlaying) continue
+
+                // Check for track replay / restart
+                if (state.positionMs in 1..4_000 && lastPositionMs > 20_000L && accumulatedMs > 15_000L) {
+                    accumulatedMs = 0L
+                    startedAtEpochSec = System.currentTimeMillis() / 1000
+                    submissionAttempted = false
+                    retryCount = 0
+                    announceNowPlaying(state)
+                }
+                lastPositionMs = state.positionMs
+
+                accumulatedMs += 1_000
+
+                if (submissionAttempted) continue
+
+                // Calculate threshold with fallback for streaming tracks where duration is not yet reported
+                val effectiveDuration = if (state.durationMs > 0) state.durationMs else 180_000L
+                val percent = if (settings.scrobblePercent in 25..90) settings.scrobblePercent else 50
+                val threshold = minOf(effectiveDuration * percent / 100, 4 * 60_000L).coerceAtLeast(30_000L)
+
                 if (accumulatedMs < threshold) continue
+
                 submissionAttempted = true
                 scope.launch(Dispatchers.IO) {
                     when (val result = scrobbleRepository.scrobble(
-                        artist = track.artist,
-                        track = track.title,
+                        artist = cleanArtist,
+                        track = cleanTitle,
                         album = track.album,
                         timestampSec = startedAtEpochSec,
                     )) {
-                        ScrobbleRepository.Result.Success -> debugLog.log("Own player scrobbled \"${track.title}\"")
-                        ScrobbleRepository.Result.NoSessionKey -> debugLog.log("Own play detected for \"${track.title}\"; connect Last.fm to submit it")
-                        is ScrobbleRepository.Result.Failed -> debugLog.log("Own player scrobble failed for \"${track.title}\": ${result.message}")
+                        ScrobbleRepository.Result.Success -> {
+                            debugLog.log("Own player scrobbled \"$cleanTitle\" — $cleanArtist")
+                            // Re-announce now playing so Last.fm keeps active status during ongoing playback
+                            if (musicPlayer.state.value.isPlaying) {
+                                scrobbleRepository.updateNowPlaying(cleanArtist, cleanTitle, track.album)
+                            }
+                        }
+                        ScrobbleRepository.Result.NoSessionKey -> {
+                            debugLog.log("Own play detected for \"$cleanTitle\"; connect Last.fm to submit it")
+                        }
+                        is ScrobbleRepository.Result.Failed -> {
+                            debugLog.log("Own player scrobble failed for \"$cleanTitle\": ${result.message}")
+                            // Allow up to 3 retries on network failure
+                            if (retryCount < 3) {
+                                retryCount++
+                                submissionAttempted = false
+                            }
+                        }
                     }
                 }
             }

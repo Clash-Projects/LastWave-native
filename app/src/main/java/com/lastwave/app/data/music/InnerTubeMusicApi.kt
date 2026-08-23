@@ -200,6 +200,254 @@ class InnerTubeMusicApi @Inject constructor(
     suspend fun searchAlbums(query: String, limit: Int = 30): List<YouTubeMusicEntity> =
         searchEntities(query, YouTubeMusicEntityKind.ALBUM, ALBUM_SEARCH_FILTER, limit)
 
+    /** Loads and parses full artist details including top songs, albums, singles, and similar artists. */
+    suspend fun fetchArtistPage(browseId: String, artistNameFallback: String = ""): com.lastwave.app.data.model.ArtistPageData? = withContext(Dispatchers.IO) {
+        if (browseId.isBlank()) return@withContext null
+        val config = getWebConfig()
+        val root = runCatching {
+            post(
+                url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
+                body = buildJsonObject {
+                    put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
+                    put("browseId", browseId)
+                },
+                clientName = "WEB_REMIX",
+                clientVersion = config.clientVersion,
+                userAgent = WEB_USER_AGENT,
+            )
+        }.getOrNull() ?: return@withContext null
+
+        val header = root.obj("header")?.obj("musicVisualHeaderRenderer")
+            ?: root.obj("header")?.obj("musicImmersiveHeaderRenderer")
+            ?: root.obj("header")?.obj("musicHeaderRenderer")
+
+        val title = header?.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+            ?.ifBlank { null }
+            ?: header?.string("title")
+            ?: artistNameFallback.ifBlank { "Artist" }
+
+        val subscriberText = header?.obj("subscriptionButton")?.obj("subscribeButtonRenderer")?.obj("subscriberCountText")?.array("runs")
+            ?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+            ?: header?.obj("subtitle")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+            ?: header?.obj("straplineTextOne")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+
+        val descRuns = header?.obj("description")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+
+        val bannerThumbs = header?.obj("thumbnail")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+            ?: header?.obj("thumbnail")?.array("thumbnails")
+        val avatarThumbs = header?.obj("foregroundThumbnail")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+            ?: bannerThumbs
+
+        val artworkUrl = avatarThumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
+        val bannerUrl = bannerThumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
+
+        val shelves = mutableListOf<JsonObject>()
+        collectObjects(root, "musicShelfRenderer", shelves)
+        collectObjects(root, "musicCarouselShelfRenderer", shelves)
+
+        var topSongs = emptyList<com.lastwave.app.playback.PlayableTrack>()
+        val albums = mutableListOf<com.lastwave.app.data.model.ArtistAlbumItem>()
+        val singles = mutableListOf<com.lastwave.app.data.model.ArtistAlbumItem>()
+        val similarArtists = mutableListOf<com.lastwave.app.data.model.ArtistSummaryItem>()
+
+        for (shelf in shelves) {
+            val heading = shelf.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+                ?: shelf.obj("header")?.obj("musicCarouselShelfBasicHeaderRenderer")?.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+                ?: ""
+
+            when {
+                heading.contains("song", ignoreCase = true) || heading.contains("track", ignoreCase = true) -> {
+                    if (topSongs.isEmpty()) {
+                        val parsed = parseSongRenderers(shelf)
+                        topSongs = parsed.map { track ->
+                            com.lastwave.app.playback.PlayableTrack(
+                                title = track.title,
+                                artist = track.artist.takeUnless { it == "Unknown artist" } ?: title,
+                                album = track.album,
+                                artworkUrl = track.artworkUrl ?: artworkUrl,
+                                videoId = track.videoId,
+                            )
+                        }
+                    }
+                }
+                heading.contains("album", ignoreCase = true) -> {
+                    albums.addAll(parseAlbumTwoRowItems(shelf, defaultType = "Album"))
+                }
+                heading.contains("single", ignoreCase = true) || heading.contains("ep", ignoreCase = true) -> {
+                    singles.addAll(parseAlbumTwoRowItems(shelf, defaultType = "Single"))
+                }
+                heading.contains("similar", ignoreCase = true) || heading.contains("fans", ignoreCase = true) || heading.contains("like", ignoreCase = true) -> {
+                    similarArtists.addAll(parseArtistTwoRowItems(shelf))
+                }
+            }
+        }
+
+        // Fallback: If no top songs shelf was explicitly labelled, try parsing songs from whole root
+        if (topSongs.isEmpty()) {
+            val parsed = parseSongRenderers(root)
+            topSongs = parsed.map { track ->
+                com.lastwave.app.playback.PlayableTrack(
+                    title = track.title,
+                    artist = track.artist.takeUnless { it == "Unknown artist" } ?: title,
+                    album = track.album,
+                    artworkUrl = track.artworkUrl ?: artworkUrl,
+                    videoId = track.videoId,
+                )
+            }
+        }
+
+        // Prefetch first few tracks for instant playback
+        topSongs.take(3).forEach { it.videoId?.let { id -> prefetchStream(id) } }
+
+        com.lastwave.app.data.model.ArtistPageData(
+            name = title,
+            browseId = browseId,
+            artworkUrl = artworkUrl,
+            bannerUrl = bannerUrl,
+            subscribers = subscriberText?.takeIf(String::isNotBlank),
+            bio = descRuns?.takeIf(String::isNotBlank),
+            topSongs = topSongs,
+            albums = albums.distinctBy { it.browseId.ifBlank { it.title } },
+            singles = singles.distinctBy { it.browseId.ifBlank { it.title } },
+            similarArtists = similarArtists.distinctBy { it.browseId.ifBlank { it.name } },
+        )
+    }
+
+    /** Loads and parses complete album details including ordered tracklist and metadata. */
+    suspend fun fetchAlbumPage(browseId: String, albumTitleFallback: String = "", artistFallback: String = ""): com.lastwave.app.data.model.AlbumPageData? = withContext(Dispatchers.IO) {
+        if (browseId.isBlank()) return@withContext null
+        val config = getWebConfig()
+        val root = runCatching {
+            post(
+                url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
+                body = buildJsonObject {
+                    put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
+                    put("browseId", browseId)
+                },
+                clientName = "WEB_REMIX",
+                clientVersion = config.clientVersion,
+                userAgent = WEB_USER_AGENT,
+            )
+        }.getOrNull() ?: return@withContext null
+
+        val header = root.obj("header")?.obj("musicDetailHeaderRenderer")
+            ?: root.obj("header")?.obj("musicResponsiveHeaderRenderer")
+            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicResponsiveHeaderRenderer")
+
+        val title = header?.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+            ?.ifBlank { null }
+            ?: header?.string("title")
+            ?: albumTitleFallback.ifBlank { "Album" }
+
+        val subRuns = header?.obj("subtitle")?.array("runs")?.mapNotNull { it.asObject() }.orEmpty()
+        val artistRun = subRuns.firstOrNull { it.obj("navigationEndpoint")?.obj("browseEndpoint")?.string("browseId")?.startsWith("UC") == true }
+        val artist = artistRun?.string("text") ?: header?.obj("straplineTextOne")?.array("runs")?.firstOrNull()?.asObject()?.string("text") ?: artistFallback.ifBlank { "Various Artists" }
+        val artistBrowseId = artistRun?.obj("navigationEndpoint")?.obj("browseEndpoint")?.string("browseId")
+
+        val releaseYear = subRuns.mapNotNull { it.string("text") }.firstOrNull { it.trim().matches(Regex("^(19|20)\\d{2}$")) }
+
+        val secondSubtitleRuns = header?.obj("secondSubtitle")?.array("runs")?.mapNotNull { it.asObject()?.string("text") }.orEmpty()
+        val trackCountText = secondSubtitleRuns.firstOrNull { "song" in it.lowercase() || "track" in it.lowercase() }
+        val durationText = secondSubtitleRuns.firstOrNull { "min" in it.lowercase() || "hour" in it.lowercase() || "sec" in it.lowercase() }
+
+        val descRuns = header?.obj("description")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+
+        val thumbs = header?.obj("thumbnail")?.obj("croppedSquareThumbnailRenderer")?.array("thumbnails")
+            ?: header?.obj("thumbnail")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+            ?: header?.obj("thumbnail")?.array("thumbnails")
+        val artworkUrl = thumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
+
+        val parsedSongs = parseSongRenderers(root)
+        val tracks = parsedSongs.map { track ->
+            com.lastwave.app.playback.PlayableTrack(
+                title = track.title,
+                artist = track.artist.takeUnless { it == "Unknown artist" } ?: artist,
+                album = title,
+                artworkUrl = track.artworkUrl ?: artworkUrl,
+                videoId = track.videoId,
+            )
+        }
+
+        // Prefetch first few tracks for instant playback
+        tracks.take(3).forEach { it.videoId?.let { id -> prefetchStream(id) } }
+
+        val otherAlbums = mutableListOf<com.lastwave.app.data.model.ArtistAlbumItem>()
+        val shelves = mutableListOf<JsonObject>()
+        collectObjects(root, "musicCarouselShelfRenderer", shelves)
+        for (shelf in shelves) {
+            val heading = shelf.obj("header")?.obj("musicCarouselShelfBasicHeaderRenderer")?.obj("title")?.array("runs")
+                ?.joinToString("") { it.asObject()?.string("text").orEmpty() } ?: ""
+            if (heading.contains("album", ignoreCase = true) || heading.contains("more by", ignoreCase = true)) {
+                otherAlbums.addAll(parseAlbumTwoRowItems(shelf, defaultType = "Album"))
+            }
+        }
+
+        com.lastwave.app.data.model.AlbumPageData(
+            title = title,
+            artist = artist,
+            artistBrowseId = artistBrowseId,
+            browseId = browseId,
+            artworkUrl = artworkUrl,
+            releaseYear = releaseYear,
+            trackCountText = trackCountText ?: "${tracks.size} songs",
+            durationText = durationText,
+            description = descRuns?.takeIf(String::isNotBlank),
+            tracks = tracks,
+            otherAlbums = otherAlbums.distinctBy { it.browseId.ifBlank { it.title } },
+        )
+    }
+
+    private fun parseAlbumTwoRowItems(container: JsonObject, defaultType: String): List<com.lastwave.app.data.model.ArtistAlbumItem> {
+        val items = mutableListOf<JsonObject>()
+        collectObjects(container, "musicTwoRowItemRenderer", items)
+        return items.mapNotNull { item ->
+            val title = item.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+                ?: item.obj("title")?.string("simpleText")
+                ?: return@mapNotNull null
+            val nav = item.obj("navigationEndpoint")?.obj("browseEndpoint")
+                ?: item.obj("title")?.array("runs")?.firstOrNull()?.asObject()?.obj("navigationEndpoint")?.obj("browseEndpoint")
+            val browseId = nav?.string("browseId") ?: ""
+            val subtitleRuns = item.obj("subtitle")?.array("runs")?.mapNotNull { it.asObject()?.string("text") }.orEmpty()
+            val year = subtitleRuns.firstOrNull { it.trim().matches(Regex("^(19|20)\\d{2}$")) }
+            val type = subtitleRuns.firstOrNull { it.equals("Single", true) || it.equals("EP", true) || it.equals("Album", true) } ?: defaultType
+            val thumbs = item.obj("thumbnailRenderer")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+                ?: item.obj("thumbnail")?.array("thumbnails")
+            val artworkUrl = thumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
+
+            com.lastwave.app.data.model.ArtistAlbumItem(
+                title = title.trim(),
+                browseId = browseId,
+                year = year,
+                type = type,
+                artworkUrl = artworkUrl,
+            )
+        }
+    }
+
+    private fun parseArtistTwoRowItems(container: JsonObject): List<com.lastwave.app.data.model.ArtistSummaryItem> {
+        val items = mutableListOf<JsonObject>()
+        collectObjects(container, "musicTwoRowItemRenderer", items)
+        return items.mapNotNull { item ->
+            val title = item.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+                ?: item.obj("title")?.string("simpleText")
+                ?: return@mapNotNull null
+            val nav = item.obj("navigationEndpoint")?.obj("browseEndpoint")
+                ?: item.obj("title")?.array("runs")?.firstOrNull()?.asObject()?.obj("navigationEndpoint")?.obj("browseEndpoint")
+            val browseId = nav?.string("browseId") ?: ""
+            val subtitle = item.obj("subtitle")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+            val thumbs = item.obj("thumbnailRenderer")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+                ?: item.obj("thumbnail")?.array("thumbnails")
+            val artworkUrl = thumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
+
+            com.lastwave.app.data.model.ArtistSummaryItem(
+                name = title.trim(),
+                browseId = browseId,
+                artworkUrl = artworkUrl,
+                subtitle = subtitle?.takeIf { it.isNotBlank() },
+            )
+        }
+    }
+
     /** Loads playable songs for an artist or album without opening YouTube. */
     suspend fun browseSongs(browseId: String, limit: Int = 50): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
         require(browseId.isNotBlank()) { "Missing YouTube Music browse id" }

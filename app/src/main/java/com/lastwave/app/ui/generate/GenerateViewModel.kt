@@ -243,11 +243,6 @@ class GenerateViewModel @Inject constructor(
                     }
                     throw IllegalStateException(message)
                 }
-                if (mode == GenerateMode.RECOMMENDATIONS && finalTracks.size < targetCount) {
-                    throw IllegalStateException(
-                        "Found only ${finalTracks.size} of $targetCount fresh tracks. Please try again.",
-                    )
-                }
                 repository.markAsSeen(finalTracks)
 
                 onProgress("Saving playlist\u2026")

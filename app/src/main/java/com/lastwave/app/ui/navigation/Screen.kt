@@ -28,4 +28,20 @@ sealed class Screen(val route: String) {
     data object PlaylistDetail : Screen("playlist_detail/{playlistId}") {
         fun createRoute(playlistId: Long) = "playlist_detail/$playlistId"
     }
+    data object ArtistDetail : Screen("artist_detail/{artistName}?browseId={browseId}") {
+        fun createRoute(artistName: String, browseId: String? = null): String {
+            val encName = android.net.Uri.encode(artistName)
+            val encBrowseId = if (!browseId.isNullOrBlank()) android.net.Uri.encode(browseId) else ""
+            return "artist_detail/$encName?browseId=$encBrowseId"
+        }
+    }
+    data object AlbumDetail : Screen("album_detail/{albumTitle}?artistName={artistName}&browseId={browseId}") {
+        fun createRoute(albumTitle: String, artistName: String = "", browseId: String? = null): String {
+            val encTitle = android.net.Uri.encode(albumTitle)
+            val encArtist = android.net.Uri.encode(artistName)
+            val encBrowseId = if (!browseId.isNullOrBlank()) android.net.Uri.encode(browseId) else ""
+            return "album_detail/$encTitle?artistName=$encArtist&browseId=$encBrowseId"
+        }
+    }
 }
+

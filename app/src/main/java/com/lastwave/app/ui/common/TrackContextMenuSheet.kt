@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -66,6 +67,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import com.lastwave.app.ui.generate.MixLauncher
 import com.lastwave.app.playback.PlayableTrack
+import com.lastwave.app.ui.navigation.ArtistAlbumNavigator
 import com.lastwave.app.ui.player.LocalMusicPlayer
 import com.lastwave.app.ui.player.LocalAddToPlaylist
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -84,6 +86,19 @@ sealed interface TrackMenuTarget {
     data class Track(val name: String, val artist: String, val url: String) : TrackMenuTarget
     data class Artist(val name: String, val url: String) : TrackMenuTarget
     data class Album(val name: String, val artist: String, val url: String) : TrackMenuTarget
+}
+
+@HiltViewModel
+class ArtistAlbumMenuViewModel @Inject constructor(
+    private val navigator: ArtistAlbumNavigator,
+) : ViewModel() {
+    fun openArtist(name: String, browseId: String? = null) {
+        navigator.openArtist(name, browseId)
+    }
+
+    fun openAlbum(title: String, artist: String = "", browseId: String? = null) {
+        navigator.openAlbum(title, artist, browseId)
+    }
 }
 
 /** Thin bridge so TrackContextMenuSheet can reach the MixLauncher singleton
@@ -189,6 +204,7 @@ fun TrackContextMenuSheet(
     startMixViewModel: StartMixMenuViewModel = hiltViewModel(),
     exploreGenreViewModel: ExploreGenreMenuViewModel = hiltViewModel(),
     downloadViewModel: DownloadMenuViewModel = hiltViewModel(),
+    artistAlbumViewModel: ArtistAlbumMenuViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -282,6 +298,20 @@ fun TrackContextMenuSheet(
                         }
                     }
                     add { pos ->
+                        MenuActionRow(Icons.Filled.Person, "Go to Artist (${t.artist})", position = pos) {
+                            artistAlbumViewModel.openArtist(t.artist)
+                            onDismiss()
+                        }
+                    }
+                    if (!playable.album.isNullOrBlank()) {
+                        add { pos ->
+                            MenuActionRow(Icons.Filled.Album, "Go to Album (${playable.album})", position = pos) {
+                                artistAlbumViewModel.openAlbum(playable.album!!, t.artist)
+                                onDismiss()
+                            }
+                        }
+                    }
+                    add { pos ->
                         MenuActionRow(Icons.Filled.Download, "Download (Max Quality)", position = pos) {
                             downloadViewModel.download(t.name, t.artist, playable.album, playable.artworkUrl)
                             onDismiss()
@@ -308,13 +338,45 @@ fun TrackContextMenuSheet(
                 }
                 ExpressiveGroup(rowCount = rows.size) { index, position -> rows[index](position) }
             } else if (target is TrackMenuTarget.Artist) {
-                ExpressiveGroup(rowCount = 1) { _, position ->
-                    MenuActionRow(Icons.Filled.Person, "Open in Last.fm", position = position) { openUrl(context, buildLastFmUrl(target)); onDismiss() }
+                val rows = buildList<@Composable (GroupPosition) -> Unit> {
+                    add { pos ->
+                        MenuActionRow(Icons.Filled.Person, "View Artist Page", position = pos) {
+                            artistAlbumViewModel.openArtist(target.name)
+                            onDismiss()
+                        }
+                    }
+                    add { pos ->
+                        MenuActionRow(Icons.Filled.Language, "Open in Last.fm", position = pos) {
+                            openUrl(context, buildLastFmUrl(target))
+                            onDismiss()
+                        }
+                    }
                 }
+                ExpressiveGroup(rowCount = rows.size) { index, position -> rows[index](position) }
             } else if (target is TrackMenuTarget.Album) {
-                ExpressiveGroup(rowCount = 1) { _, position ->
-                    MenuActionRow(Icons.Filled.OpenInNew, "Open in Last.fm", position = position) { openUrl(context, buildLastFmUrl(target)); onDismiss() }
+                val rows = buildList<@Composable (GroupPosition) -> Unit> {
+                    add { pos ->
+                        MenuActionRow(Icons.Filled.Album, "View Album Page", position = pos) {
+                            artistAlbumViewModel.openAlbum(target.name, target.artist)
+                            onDismiss()
+                        }
+                    }
+                    if (target.artist.isNotBlank()) {
+                        add { pos ->
+                            MenuActionRow(Icons.Filled.Person, "View Artist (${target.artist})", position = pos) {
+                                artistAlbumViewModel.openArtist(target.artist)
+                                onDismiss()
+                            }
+                        }
+                    }
+                    add { pos ->
+                        MenuActionRow(Icons.Filled.Language, "Open in Last.fm", position = pos) {
+                            openUrl(context, buildLastFmUrl(target))
+                            onDismiss()
+                        }
+                    }
                 }
+                ExpressiveGroup(rowCount = rows.size) { index, position -> rows[index](position) }
             }
         }
     }

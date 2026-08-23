@@ -166,10 +166,19 @@ class PlayerViewModel @Inject constructor(
     val player: MusicPlayer,
     private val playlistRepository: PlaylistRepository,
     private val lyricsRepository: LyricsRepository,
+    private val navigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator,
 ) : ViewModel() {
     val state = player.state
     private val _customPlaylists = MutableStateFlow<List<SavedPlaylist>>(emptyList())
     val customPlaylists = _customPlaylists.asStateFlow()
+
+    fun openArtist(name: String, browseId: String? = null) {
+        navigator.openArtist(name, browseId)
+    }
+
+    fun openAlbum(title: String, artist: String = "", browseId: String? = null) {
+        navigator.openAlbum(title, artist, browseId)
+    }
 
     private val _lyricsState = MutableStateFlow<LyricsUiState>(LyricsUiState.Idle)
     val lyricsState = _lyricsState.asStateFlow()
@@ -324,6 +333,10 @@ fun PlayerHost(
                     onTabChange = { currentTab = it },
                     onRetryLyrics = viewModel::retryLyrics,
                     onCollapse = { expanded = false },
+                    onOpenArtist = { artist ->
+                        expanded = false
+                        viewModel.openArtist(artist)
+                    },
                 )
             }
         }
@@ -475,11 +488,6 @@ private fun MiniPlayer(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable {
-                                    openArtistPage(context, track.artist)
-                                },
                         )
                     }
                     Surface(
@@ -719,6 +727,7 @@ private fun FullPlayer(
     onTabChange: (FullPlayerTab) -> Unit,
     onRetryLyrics: () -> Unit,
     onCollapse: () -> Unit,
+    onOpenArtist: (String) -> Unit = {},
 ) {
     val track = state.current ?: return
     var showTrackMenu by remember(track.videoId, track.title) { mutableStateOf(false) }
@@ -1120,22 +1129,22 @@ private fun FullPlayer(
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
                                         )
-                                        Spacer(Modifier.height(3.dp))
-                                        val context = LocalContext.current
-                                        Text(
-                                            track.artist,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.SemiBold,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable {
-                                                    openArtistPage(context, track.artist)
-                                                }
-                                                .padding(vertical = 2.dp),
-                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Surface(
+                                            onClick = { onOpenArtist(track.artist) },
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                                        ) {
+                                            Text(
+                                                track.artist,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                            )
+                                        }
                                     }
 
                                     Spacer(Modifier.width(12.dp))
@@ -1501,17 +1510,6 @@ private fun qualityLabel(state: MusicPlayerState): String = when {
     state.audioCodec != null -> state.audioCodec
     state.bitrateKbps != null -> "${state.bitrateKbps} kbps"
     else -> "AUDIO"
-}
-
-private fun openArtistPage(context: Context, artist: String) {
-    if (artist.isBlank()) return
-    try {
-        val encoded = Uri.encode(artist.trim())
-        val url = "https://www.last.fm/music/$encoded"
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-    } catch (_: Exception) {
-    }
 }
 
 private fun PlayableTrack.toGeneratedTrack() = com.lastwave.app.data.generate.GeneratedTrack(

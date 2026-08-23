@@ -48,6 +48,9 @@ class GenreExplorerNavBridge @Inject constructor(genreExplorer: GenreExplorer) :
     val pendingGenre = genreExplorer.pendingGenre
 }
 
+@HiltViewModel
+class ArtistAlbumNavBridge @Inject constructor(val navigator: ArtistAlbumNavigator) : androidx.lifecycle.ViewModel()
+
 @Composable
 fun LastWaveNavHost(
     navController: NavHostController = rememberNavController(),
@@ -61,6 +64,20 @@ fun LastWaveNavHost(
     LaunchedEffect(pendingGenre) {
         if (pendingGenre != null) {
             navController.navigate(Screen.Genres.route)
+        }
+    }
+
+    val navBridge: ArtistAlbumNavBridge = hiltViewModel()
+    LaunchedEffect(Unit) {
+        navBridge.navigator.events.collect { target ->
+            when (target) {
+                is ArtistAlbumNavTarget.Artist -> {
+                    navController.navigate(Screen.ArtistDetail.createRoute(target.name, target.browseId))
+                }
+                is ArtistAlbumNavTarget.Album -> {
+                    navController.navigate(Screen.AlbumDetail.createRoute(target.title, target.artist, target.browseId))
+                }
+            }
         }
     }
 
@@ -242,7 +259,15 @@ fun LastWaveNavHost(
 
         composable(Screen.Search.route) {
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
-                SearchScreen(onBack = { navController.popBackStack() })
+                SearchScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenArtist = { name, browseId ->
+                        navController.navigate(Screen.ArtistDetail.createRoute(name, browseId))
+                    },
+                    onOpenAlbum = { title, artist, browseId ->
+                        navController.navigate(Screen.AlbumDetail.createRoute(title, artist, browseId))
+                    },
+                )
             }
         }
 
@@ -265,6 +290,66 @@ fun LastWaveNavHost(
                 com.lastwave.app.ui.playlist.PlaylistDetailScreen(
                     playlistId = playlistId,
                     onBack = { navController.popBackStack() },
+                )
+            }
+        }
+
+        composable(
+            route = Screen.ArtistDetail.route,
+            arguments = listOf(
+                androidx.navigation.navArgument("artistName") { type = androidx.navigation.NavType.StringType },
+                androidx.navigation.navArgument("browseId") {
+                    type = androidx.navigation.NavType.StringType
+                    defaultValue = ""
+                },
+            ),
+        ) { backStackEntry ->
+            val artistName = backStackEntry.arguments?.getString("artistName").orEmpty()
+            val browseId = backStackEntry.arguments?.getString("browseId")?.takeIf(String::isNotBlank)
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.artist.ArtistDetailScreen(
+                    artistName = artistName,
+                    browseId = browseId,
+                    onBack = { navController.popBackStack() },
+                    onOpenAlbum = { title, artist, id ->
+                        navController.navigate(Screen.AlbumDetail.createRoute(title, artist, id))
+                    },
+                    onOpenArtist = { name, id ->
+                        navController.navigate(Screen.ArtistDetail.createRoute(name, id))
+                    },
+                )
+            }
+        }
+
+        composable(
+            route = Screen.AlbumDetail.route,
+            arguments = listOf(
+                androidx.navigation.navArgument("albumTitle") { type = androidx.navigation.NavType.StringType },
+                androidx.navigation.navArgument("artistName") {
+                    type = androidx.navigation.NavType.StringType
+                    defaultValue = ""
+                },
+                androidx.navigation.navArgument("browseId") {
+                    type = androidx.navigation.NavType.StringType
+                    defaultValue = ""
+                },
+            ),
+        ) { backStackEntry ->
+            val albumTitle = backStackEntry.arguments?.getString("albumTitle").orEmpty()
+            val artistName = backStackEntry.arguments?.getString("artistName").orEmpty()
+            val browseId = backStackEntry.arguments?.getString("browseId")?.takeIf(String::isNotBlank)
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.album.AlbumDetailScreen(
+                    albumTitle = albumTitle,
+                    artistName = artistName,
+                    browseId = browseId,
+                    onBack = { navController.popBackStack() },
+                    onOpenArtist = { name, id ->
+                        navController.navigate(Screen.ArtistDetail.createRoute(name, id))
+                    },
+                    onOpenAlbum = { title, artist, id ->
+                        navController.navigate(Screen.AlbumDetail.createRoute(title, artist, id))
+                    },
                 )
             }
         }
