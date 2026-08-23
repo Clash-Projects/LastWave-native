@@ -33,6 +33,7 @@
 -keep class hilt_aggregated_deps.** { *; }
 
 # Glance app widgets and action callbacks
+-keep class * implements androidx.glance.appwidget.action.ActionCallback { *; }
 -keep class * extends androidx.glance.appwidget.action.ActionCallback { *; }
 -keep class * extends androidx.glance.appwidget.GlanceAppWidget { *; }
 -keep class * extends androidx.glance.appwidget.GlanceAppWidgetReceiver { *; }

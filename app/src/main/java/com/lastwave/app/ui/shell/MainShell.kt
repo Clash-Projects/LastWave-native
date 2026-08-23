@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -198,16 +199,20 @@ private fun FloatingNavBar(
             .padding(horizontal = 24.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
+        // A compact, downward-offset accent bloom like Nothing OS: it
+        // softens only the area directly beneath the dock instead of
+        // fogging the full navigation/gesture region.
         Box(
             Modifier
                 .matchParentSize()
-                .padding(horizontal = 6.dp, vertical = 3.dp)
-                .blur(30.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f), DockShape),
+                .padding(horizontal = 12.dp, vertical = 5.dp)
+                .offset(y = 7.dp)
+                .blur(16.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f), DockShape),
         )
         Surface(
             shape = DockShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.93f),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 5.dp,
             shadowElevation = 10.dp,
         ) {

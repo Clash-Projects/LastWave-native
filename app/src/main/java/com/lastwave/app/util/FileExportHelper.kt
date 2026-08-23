@@ -212,7 +212,21 @@ class FileExportHelper @Inject constructor(
 
     private fun writeMirrorViaMediaStore(filename: String, content: String) {
         val resolver = context.contentResolver
-        val uri = publicDownloadUri(filename) ?: resolver.insert(
+        // A mirror left by an older install can still be visible through
+        // MediaStore but no longer writable by this install. Try updating
+        // it first; if Android rejects that URI, create a fresh app-owned
+        // row instead of failing every later playlist edit.
+        val existing = runCatching { publicDownloadUri(filename) }.getOrNull()
+        if (existing != null) {
+            val updated = runCatching {
+                resolver.openOutputStream(existing, "wt")?.use {
+                    it.write(content.toByteArray())
+                } ?: throw IOException("Couldn't write $filename")
+            }.isSuccess
+            if (updated) return
+        }
+
+        val uri = resolver.insert(
             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
             ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, filename)

@@ -10,6 +10,7 @@ import android.provider.Settings
 import androidx.glance.GlanceId
 import androidx.glance.action.ActionParameters
 import androidx.glance.appwidget.action.ActionCallback
+import com.lastwave.app.MainActivity
 import com.lastwave.app.service.MediaScrobbleListenerService
 
 private fun resolveController(context: Context): MediaController? {
@@ -43,13 +44,15 @@ private fun controllerRank(state: Int?): Int = when (state) {
 class TogglePlayPauseAction : ActionCallback {
     override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
         val controller = resolveController(context) ?: return
-        runCatching {
-            if (controller.playbackState?.state == PlaybackState.STATE_PLAYING) {
+        val wasPlaying = controller.playbackState?.state == PlaybackState.STATE_PLAYING
+        val succeeded = runCatching {
+            if (wasPlaying) {
                 controller.transportControls.pause()
             } else {
                 controller.transportControls.play()
             }
-        }
+        }.isSuccess
+        if (succeeded) WidgetUpdater.setPlaying(context, !wasPlaying)
     }
 }
 
@@ -75,6 +78,17 @@ class OpenMusicAccessAction : ActionCallback {
             context.startActivity(
                 Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+}
+
+class OpenLastWaveAction : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        runCatching {
+            context.startActivity(
+                Intent(context, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             )
         }
     }

@@ -56,15 +56,12 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -89,7 +86,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -120,7 +116,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.ceil
 
 val LocalMusicPlayer = staticCompositionLocalOf<MusicPlayer> {
     error("MusicPlayer is only available inside PlayerHost")
@@ -229,7 +224,6 @@ fun PlayerHost(
                     state = state,
                     player = viewModel.player,
                     onCollapse = { expanded = false },
-                    onAddToPlaylist = { state.current?.let(requestAddToPlaylist) },
                 )
             }
         }
@@ -335,16 +329,9 @@ private fun MiniPlayer(
             .clickable(onClick = onExpand),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier
-                .matchParentSize()
-                .padding(horizontal = if (edgeToEdge) 18.dp else 8.dp, vertical = 3.dp)
-                .blur(26.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f), shape),
-        )
         Surface(
             shape = shape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (edgeToEdge) 0.975f else 0.94f),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = if (edgeToEdge) 0.dp else 6.dp,
             shadowElevation = if (edgeToEdge) 0.dp else 12.dp,
             modifier = Modifier.fillMaxWidth(),
@@ -622,10 +609,9 @@ private fun FullPlayer(
     state: MusicPlayerState,
     player: MusicPlayer,
     onCollapse: () -> Unit,
-    onAddToPlaylist: () -> Unit,
 ) {
     val track = state.current ?: return
-    val showQueue = false
+    var showQueue by remember(track.videoId, track.title) { mutableStateOf(false) }
     var showTrackMenu by remember(track.videoId, track.title) { mutableStateOf(false) }
     var artworkDragX by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
     var dismissDragY by remember(track.videoId, track.title) { mutableFloatStateOf(0f) }
@@ -642,7 +628,7 @@ private fun FullPlayer(
     )
     val swipeThreshold = with(LocalDensity.current) { 88.dp.toPx() }
 
-    fun Modifier.swipeToCollapse(enabled: Boolean): Modifier = if (!enabled) this else pointerInput(track.videoId, track.title) {
+    fun Modifier.playerVerticalSwipe(enabled: Boolean): Modifier = if (!enabled) this else pointerInput(track.videoId, track.title, showQueue) {
         detectVerticalDragGestures(
             onDragStart = { isDismissDragging = true },
             onDragCancel = {
@@ -651,10 +637,19 @@ private fun FullPlayer(
             },
             onDragEnd = {
                 isDismissDragging = false
-                if (dismissDragY > swipeThreshold) onCollapse() else dismissDragY = 0f
+                when {
+                    showQueue && dismissDragY > swipeThreshold -> showQueue = false
+                    !showQueue && dismissDragY < -swipeThreshold -> showQueue = true
+                    !showQueue && dismissDragY > swipeThreshold -> onCollapse()
+                }
+                dismissDragY = 0f
             },
         ) { change, amount ->
-            val updatedDrag = (dismissDragY + amount).coerceAtLeast(0f)
+            val updatedDrag = if (showQueue) {
+                (dismissDragY + amount).coerceAtLeast(0f)
+            } else {
+                dismissDragY + amount
+            }
             if (updatedDrag != dismissDragY) change.consume()
             dismissDragY = updatedDrag
         }
@@ -665,11 +660,11 @@ private fun FullPlayer(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
-                translationY = shownDismissY
+                translationY = shownDismissY.coerceAtLeast(0f)
                 val playerHeight = size.height.coerceAtLeast(1f)
-                alpha = (1f - shownDismissY / (playerHeight * 1.5f)).coerceIn(0.72f, 1f)
+                alpha = (1f - shownDismissY.coerceAtLeast(0f) / (playerHeight * 1.5f)).coerceIn(0.72f, 1f)
             }
-            .swipeToCollapse(enabled = !showQueue),
+            .playerVerticalSwipe(enabled = !showQueue),
     ) {
         Box(Modifier.fillMaxSize()) {
             PlayerArtwork(
@@ -699,19 +694,11 @@ private fun FullPlayer(
                     .windowInsetsPadding(WindowInsets.safeDrawing)
                     .padding(horizontal = 20.dp),
             ) {
-                Box(Modifier.fillMaxWidth().height(16.dp), contentAlignment = Alignment.Center) {
-                    Box(
-                        Modifier
-                            .size(width = 36.dp, height = 4.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)),
-                    )
-                }
                 Box(
                     Modifier
                         .fillMaxWidth()
                         .height(58.dp)
-                        .swipeToCollapse(enabled = showQueue),
+                        .playerVerticalSwipe(enabled = showQueue),
                 ) {
                     IconButton(
                         onClick = onCollapse,
@@ -741,33 +728,20 @@ private fun FullPlayer(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    Row(
-                        Modifier.align(Alignment.CenterEnd),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    IconButton(
+                        onClick = { showTrackMenu = true },
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                     ) {
-                        IconButton(
-                            onClick = onAddToPlaylist,
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                        ) {
-                            Icon(Icons.Filled.PlaylistAdd, "Add current song to playlist", modifier = Modifier.size(22.dp))
-                        }
-                        IconButton(
-                            onClick = { showTrackMenu = true },
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                        ) {
-                            Icon(
-                                Icons.Filled.MoreVert,
-                                "Song options",
-                                modifier = Modifier.size(22.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        Icon(
+                            Icons.Filled.MoreVert,
+                            "Song options",
+                            modifier = Modifier.size(22.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
 
@@ -899,6 +873,14 @@ private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit) {
     val end = state.durationMs.coerceAtLeast(1).toFloat()
     val shown = if (dragging) dragValue else state.positionMs.coerceIn(0, state.durationMs.coerceAtLeast(0)).toFloat()
     Column(Modifier.fillMaxWidth()) {
+        Slider(
+            value = shown.coerceIn(0f, end),
+            onValueChange = { dragging = true; dragValue = it },
+            onValueChangeFinished = { onSeek(dragValue.toLong()); dragging = false },
+            valueRange = 0f..end,
+            enabled = state.durationMs > 0,
+            modifier = Modifier.fillMaxWidth(),
+        )
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 formatTime(shown.toLong()),
@@ -911,14 +893,6 @@ private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Slider(
-            value = shown.coerceIn(0f, end),
-            onValueChange = { dragging = true; dragValue = it },
-            onValueChangeFinished = { onSeek(dragValue.toLong()); dragging = false },
-            valueRange = 0f..end,
-            enabled = state.durationMs > 0,
-            modifier = Modifier.fillMaxWidth(),
-        )
     }
 }
 
@@ -926,26 +900,9 @@ private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit) {
 private fun MainControls(state: MusicPlayerState, player: MusicPlayer) {
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(
-            onClick = player::toggleShuffle,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    if (state.shuffleEnabled) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceContainerHigh,
-                ),
-        ) {
-            Icon(
-                Icons.Filled.Shuffle,
-                "Shuffle",
-                tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.onPrimaryContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
         Surface(
             onClick = player::previous,
             shape = RoundedCornerShape(22.dp),
@@ -989,23 +946,6 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer) {
                 Icon(Icons.Filled.SkipNext, "Next", Modifier.size(31.dp))
             }
         }
-        IconButton(
-            onClick = player::cycleRepeatMode,
-            modifier = Modifier
-                .size(48.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    if (state.repeatMode == Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.surfaceContainerHigh
-                    else MaterialTheme.colorScheme.primaryContainer,
-                ),
-        ) {
-            Icon(
-                if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
-                "Repeat mode",
-                tint = if (state.repeatMode == Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-        }
     }
 }
 
@@ -1017,22 +957,16 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer) 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(
-            onClick = player::cycleSpeed,
+            onClick = player::toggleShuffle,
             shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = if (state.shuffleEnabled) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = if (state.shuffleEnabled) MaterialTheme.colorScheme.onPrimaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f).height(48.dp),
         ) {
-            Row(
-                Modifier.fillMaxSize().padding(horizontal = 10.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Speed, null, modifier = Modifier.size(18.dp))
-                Text(
-                    "${formatSpeed(state.speed)}×",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(start = 5.dp),
-                )
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Shuffle, "Shuffle", modifier = Modifier.size(20.dp))
             }
         }
         Surface(
@@ -1056,24 +990,19 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer) 
             }
         }
         Surface(
-            onClick = player::cycleSleepTimer,
+            onClick = player::cycleRepeatMode,
             shape = RoundedCornerShape(18.dp),
-            color = if (state.sleepTimerRemainingMs != null) MaterialTheme.colorScheme.primaryContainer
+            color = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primaryContainer
             else MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = if (state.sleepTimerRemainingMs != null) MaterialTheme.colorScheme.onPrimaryContainer
-            else MaterialTheme.colorScheme.onSurface,
+            contentColor = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.onPrimaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f).height(48.dp),
         ) {
-            Row(
-                Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Filled.Timer, "Sleep timer", modifier = Modifier.size(18.dp))
-                Text(
-                    sleepTimerLabel(state.sleepTimerRemainingMs),
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(start = 4.dp),
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
+                    "Repeat mode",
+                    modifier = Modifier.size(20.dp),
                 )
             }
         }
@@ -1195,17 +1124,11 @@ private fun formatTime(ms: Long): String {
     return "%d:%02d".format(total / 60, total % 60)
 }
 
-private fun formatSpeed(speed: Float): String = if (speed % 1f == 0f) speed.toInt().toString() else speed.toString().trimEnd('0')
-
 private fun qualityLabel(state: MusicPlayerState): String = when {
     state.bitrateKbps != null && state.audioCodec != null -> "${state.audioCodec} ${state.bitrateKbps}k"
     state.bitrateKbps != null -> "${state.bitrateKbps} kbps"
     else -> "Best quality"
 }
-
-private fun sleepTimerLabel(remainingMs: Long?): String = remainingMs?.let {
-    "${ceil(it / 60_000.0).toInt()}m"
-} ?: "Timer"
 
 private fun PlayableTrack.toGeneratedTrack() = GeneratedTrack(
     name = title,

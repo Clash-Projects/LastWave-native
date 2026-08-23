@@ -578,7 +578,7 @@ private fun PlaylistCard(
                             Icons.Filled.CheckCircle,
                             contentDescription = "Mark playlist complete",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp),
+                            modifier = Modifier.size(36.dp),
                         )
                     }
                     Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {

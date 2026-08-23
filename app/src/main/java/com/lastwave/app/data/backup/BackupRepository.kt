@@ -4,6 +4,8 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.lastwave.app.data.local.db.SavedPlaylistDao
 import com.lastwave.app.data.local.db.SavedPlaylistEntity
@@ -18,11 +20,16 @@ import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val SCHEMA_VERSION = 5
+private const val SCHEMA_VERSION = 6
 private const val BACKUP_TYPE = "lastwave-backup"
 
 @Serializable
-data class BackupPrefsSnapshot(val strings: Map<String, String> = emptyMap(), val booleans: Map<String, Boolean> = emptyMap())
+data class BackupPrefsSnapshot(
+    val strings: Map<String, String> = emptyMap(),
+    val booleans: Map<String, Boolean> = emptyMap(),
+    val integers: Map<String, Int> = emptyMap(),
+    val stringSets: Map<String, Set<String>> = emptyMap(),
+)
 
 @Serializable
 data class BackupPlaylistSnapshot(
@@ -101,12 +108,16 @@ class BackupRepository @Inject constructor(
         val prefs = dataStore.data.first()
         val strings = mutableMapOf<String, String>()
         val booleans = mutableMapOf<String, Boolean>()
+        val integers = mutableMapOf<String, Int>()
+        val stringSets = mutableMapOf<String, Set<String>>()
         for (entry in prefs.asMap()) {
             val key = entry.key.name
             when (val value = entry.value) {
                 is String -> strings[key] = value
                 is Boolean -> booleans[key] = value
-                else -> Unit // Other pref types aren't used anywhere in this app currently.
+                is Int -> integers[key] = value
+                is Set<*> -> stringSets[key] = value.mapNotNull { it as? String }.toSet()
+                else -> Unit
             }
         }
         val playlists = playlistDao.getAll().map {
@@ -127,7 +138,12 @@ class BackupRepository @Inject constructor(
         val backup = BackupFile(
             createdAt = System.currentTimeMillis(),
             appVersion = appVersionName,
-            prefs = BackupPrefsSnapshot(strings, booleans),
+            prefs = BackupPrefsSnapshot(
+                strings = strings,
+                booleans = booleans,
+                integers = integers,
+                stringSets = stringSets,
+            ),
             playlists = playlists,
             seenTracks = seenTracks,
         )
@@ -164,6 +180,8 @@ class BackupRepository @Inject constructor(
                 mutablePrefs.clear()
                 backup.prefs.strings.forEach { (k, v) -> mutablePrefs[stringPreferencesKey(k)] = v }
                 backup.prefs.booleans.forEach { (k, v) -> mutablePrefs[booleanPreferencesKey(k)] = v }
+                backup.prefs.integers.forEach { (k, v) -> mutablePrefs[intPreferencesKey(k)] = v }
+                backup.prefs.stringSets.forEach { (k, v) -> mutablePrefs[stringSetPreferencesKey(k)] = v }
                 if (preserveSignedInSession) {
                     preservedAuthStrings.forEach { (name, value) ->
                         mutablePrefs[stringPreferencesKey(name)] = value
@@ -210,6 +228,8 @@ class BackupRepository @Inject constructor(
             mutablePrefs.clear()
             snapshot.prefs.strings.forEach { (k, v) -> mutablePrefs[stringPreferencesKey(k)] = v }
             snapshot.prefs.booleans.forEach { (k, v) -> mutablePrefs[booleanPreferencesKey(k)] = v }
+            snapshot.prefs.integers.forEach { (k, v) -> mutablePrefs[intPreferencesKey(k)] = v }
+            snapshot.prefs.stringSets.forEach { (k, v) -> mutablePrefs[stringSetPreferencesKey(k)] = v }
         }
     }
 

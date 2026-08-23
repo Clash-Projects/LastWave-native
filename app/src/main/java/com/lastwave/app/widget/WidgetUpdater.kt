@@ -66,6 +66,24 @@ object WidgetUpdater {
         updateAll(context)
     }
 
+    /** Immediately reflects widget-originated playback actions while the
+     * media-session callback catches up, including the animated artwork badge. */
+    suspend fun setPlaying(context: Context, isPlaying: Boolean) {
+        val current = NowPlayingWidgetSnapshot.read(context)
+        if (!current.hasSession) return
+        NowPlayingWidgetSnapshot.write(context, current.copy(isPlaying = isPlaying))
+        if (isPlaying) startAnimation(context.applicationContext) else stopAnimation()
+        updateAll(context)
+    }
+
+    /** Restores frame updates when a widget is placed while music is already playing. */
+    suspend fun sync(context: Context) {
+        val current = NowPlayingWidgetSnapshot.read(context)
+        if (current.hasSession && current.isPlaying) startAnimation(context.applicationContext)
+        else stopAnimation()
+        updateAll(context)
+    }
+
     /** Recompose all placed widgets after the app's live color scheme changes. */
     suspend fun refreshTheme(context: Context) {
         updateAll(context)
