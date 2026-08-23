@@ -390,6 +390,27 @@ class GenerateRepository @Inject constructor(
         return filterPlayable(deduplicate(pool)).take(total)
     }
 
+    suspend fun fetchTasteMixForArtists(artists: List<String>, count: Int): List<GeneratedTrack> {
+        var pool = mutableListOf<GeneratedTrack>()
+        val seeds = artists.shuffled().take(6)
+        for (artist in seeds) {
+            try {
+                val sim = call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "10"))
+                val simArtists = GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(3)
+                for (sa in simArtists) {
+                    try {
+                        val page = (1..3).random()
+                        val d = call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "6", "page" to page.toString()))
+                        pool = (pool + GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))).toMutableList()
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+        }
+        val mix = fetchMix(count)
+        pool = (pool + mix).toMutableList()
+        return precheck(shuffle(pool)).take(count).ifEmpty { deduplicate(pool).take(count) }
+    }
+
     // ── My Recommendations — delegates the heavy scoring/pipeline logic to
     //    RecommendationEngine, kept as a separate file given its size. ──
 

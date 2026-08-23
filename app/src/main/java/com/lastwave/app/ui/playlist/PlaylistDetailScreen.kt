@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
@@ -741,7 +742,7 @@ fun PlaylistDetailScreen(
                             text = { Text("Regenerate playlist") },
                             leadingIcon = {
                                 Icon(
-                                    Icons.Filled.AutoAwesome,
+                                    Icons.Filled.Refresh,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
                                 )

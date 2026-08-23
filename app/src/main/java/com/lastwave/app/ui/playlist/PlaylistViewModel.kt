@@ -354,50 +354,19 @@ class PlaylistViewModel @Inject constructor(
             try {
                 val targetCount = (30..35).random()
                 val playlistArtists = playlist.tracks.map { it.artist }.filter { it.isNotBlank() }.distinct()
-                val pool = mutableListOf<GeneratedTrack>()
-
-                if (playlistArtists.isNotEmpty()) {
-                    val seeds = playlistArtists.shuffled().take(6)
-                    val seedTracks = coroutineScope {
-                        seeds.map { artist ->
-                            async {
-                                try {
-                                    val sim = generateRepository.call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "10"))
-                                    val simArtists = GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(3)
-                                    val tracks = coroutineScope {
-                                        simArtists.map { sa ->
-                                            async {
-                                                try {
-                                                    val page = (1..3).random()
-                                                    val d = generateRepository.call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "6", "page" to page.toString()))
-                                                    GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
-                                                } catch (_: Exception) {
-                                                    emptyList()
-                                                }
-                                            }
-                                        }.awaitAll().flatten()
-                                    }
-                                    tracks
-                                } catch (_: Exception) {
-                                    emptyList()
-                                }
-                            }
-                        }.awaitAll().flatten()
+                val finalTracks = if (playlistArtists.isNotEmpty()) {
+                    generateRepository.fetchTasteMixForArtists(playlistArtists, targetCount)
+                } else {
+                    when (playlist.mode) {
+                        "top", "library" -> generateRepository.fetchTopTracks(targetCount, "overall")
+                        "recent" -> generateRepository.fetchRecentTracks(targetCount)
+                        "recommendations" -> generateRepository.fetchRecommendations(targetCount)
+                        else -> generateRepository.fetchMix(targetCount)
                     }
-                    pool += seedTracks
-                }
-
-                val modeTracks = when (playlist.mode) {
-                    "top", "library" -> generateRepository.fetchTopTracks(targetCount, "overall")
-                    "recent" -> generateRepository.fetchRecentTracks(targetCount)
-                    "recommendations" -> generateRepository.fetchRecommendations(targetCount)
-                    else -> generateRepository.fetchMix(targetCount)
-                }
-                pool += modeTracks
-
-                val prechecked = generateRepository.precheck(generateRepository.shuffle(pool))
-                val finalTracks = prechecked.take(targetCount).ifEmpty {
-                    generateRepository.deduplicate(pool).take(targetCount)
+                }.let { raw ->
+                    generateRepository.precheck(raw).take(targetCount).ifEmpty {
+                        generateRepository.deduplicate(raw).take(targetCount)
+                    }
                 }
 
                 if (finalTracks.isEmpty()) {
