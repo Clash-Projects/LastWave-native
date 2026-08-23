@@ -1,6 +1,6 @@
 /**
  * Dynamic Bundle Scraper and Token Extractor for Qobuz Web Player
- * Exact port of bundle.py from vitiko98/qobuz-dl with fallbacks
+ * Powered by clashflac architecture with dynamic fallbacks
  */
 
 const BASE_URL = "https://play.qobuz.com";

@@ -1,10 +1,10 @@
 # Qobuz Cloudflare Worker Backend — Setup Guide
 
-A 100% hand-crafted, zero-dependency serverless JavaScript music API and downloader backend for **Cloudflare Workers**, porting the core architecture of `vitiko98/qobuz-dl`.
+A 100% hand-crafted, zero-dependency serverless JavaScript music API and downloader backend for **Cloudflare Workers**, powered by the core architecture of [clashflac](https://github.com/ajisth69/clashflac) by [Ajisth (ajisth69)](https://github.com/ajisth69).
 
 ---
 
-## 🛠️ Requirements
+## Requirements
 
 - **Node.js** (v18 or newer)
 - **Cloudflare Account** & **Wrangler CLI** (optional for local testing, required for deployment)
@@ -12,7 +12,7 @@ A 100% hand-crafted, zero-dependency serverless JavaScript music API and downloa
 
 ---
 
-## 🚀 Quick Setup & Deployment
+## Quick Setup & Deployment
 
 ### 1. Installation
 
@@ -77,7 +77,7 @@ npm run deploy
 
 ---
 
-## 📦 Project Architecture (100% Hand-Crafted Pure JavaScript)
+## Project Architecture (100% Hand-Crafted Pure JavaScript)
 
 ```
 qobuz-worker-backend/
@@ -102,7 +102,7 @@ qobuz-worker-backend/
 
 ---
 
-## 📡 API Endpoint Reference & Examples
+## API Endpoint Reference & Examples
 
 ### 1. Catalog & Search
 

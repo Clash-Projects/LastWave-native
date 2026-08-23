@@ -1,7 +1,7 @@
 /**
  * Qobuz Cloudflare Worker Backend
- * A public, serverless JavaScript music API and downloader backend faithfully porting
- * vitiko98/qobuz-dl with dynamic token extraction, request signatures, full audio proxying,
+ * A public, serverless JavaScript music API and downloader backend powered by
+ * clashflac with dynamic token extraction, request signatures, full audio proxying,
  * M3U generation, album/playlist packages, and multi-quality audio streaming.
  */
 
