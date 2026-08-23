@@ -259,7 +259,7 @@ class GenresRepository @Inject constructor(
      * source framing.
      */
     suspend fun explorePersonalizedGenre(genre: String, sourceBoostArtists: Set<String> = emptySet()): List<GeneratedTrack> {
-        val profile = tasteProfileProvider.get()
+        val profile = try { tasteProfileProvider.get() } catch (e: Exception) { null }
         val pool = mutableListOf<GeneratedTrack>()
 
         try {
@@ -268,7 +268,8 @@ class GenresRepository @Inject constructor(
             pool += GenerateJson.normalise(d["tracks"]?.jsonObject?.get("track"))
         } catch (e: Exception) { Log.d(TAG, "explorePersonalizedGenre tag.gettoptracks miss", e) }
 
-        for (artistName in profile.topArtistNames.shuffled().take(5)) {
+        val knownArtists = profile?.topArtistNames?.toList()?.shuffled()?.take(5) ?: emptyList()
+        for (artistName in knownArtists) {
             try {
                 val sim = call(mapOf("method" to "artist.getsimilar", "artist" to artistName, "limit" to "10"))
                 for (sa in GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(2)) {
@@ -285,8 +286,8 @@ class GenresRepository @Inject constructor(
         val scored = deduped.map { track ->
             val artistKey = track.artist.lowercase()
             var score = 0
-            if (profile.topArtistNames.contains(artistKey)) score += 3
-            if (profile.recentArtists.contains(artistKey)) score += 2
+            if (profile?.topArtistNames?.contains(artistKey) == true) score += 3
+            if (profile?.recentArtists?.contains(artistKey) == true) score += 2
             if (artistKey in sourceBoostArtists) score += 4
             track to score
         }
