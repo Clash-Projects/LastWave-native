@@ -167,6 +167,7 @@ fun TrackContextMenuSheet(
     capabilities: TrackMenuCapabilities,
     playableTrack: PlayableTrack? = null,
     onDismiss: () -> Unit,
+    playbackSourceLabel: String = "LastWave",
     onPlayInLastWave: (() -> Unit)? = null,
     onStartMix: ((trackName: String, artistName: String) -> Unit)? = null,
     onExploreGenre: ((genre: String) -> Unit)? = null,
@@ -256,7 +257,7 @@ fun TrackContextMenuSheet(
                     val playable = playableTrack ?: PlayableTrack(title = t.name, artist = t.artist)
                     add { pos ->
                         MenuActionRow(Icons.Filled.PlayCircle, "Play in LastWave", position = pos) {
-                            onPlayInLastWave?.invoke() ?: musicPlayer.play(playable)
+                            onPlayInLastWave?.invoke() ?: musicPlayer.play(playable, sourceLabel = playbackSourceLabel)
                             onDismiss()
                         }
                     }

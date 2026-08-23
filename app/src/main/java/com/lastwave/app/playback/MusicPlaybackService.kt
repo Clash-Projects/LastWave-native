@@ -327,7 +327,7 @@ class MusicPlaybackService : Service() {
             .setShowActionsInCompactView(0, 1, 2)
 
         return builder
-            .setSmallIcon(R.drawable.ic_widget_play)
+            .setSmallIcon(R.drawable.ic_launcher_logo)
             .setContentTitle(state.current?.title ?: "LastWave")
             .setContentText(state.current?.artist ?: "Music player")
             .setSubText(state.current?.album)

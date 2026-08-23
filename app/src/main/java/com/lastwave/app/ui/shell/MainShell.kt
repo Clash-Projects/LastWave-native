@@ -7,7 +7,6 @@ import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -42,8 +40,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -199,17 +195,6 @@ private fun FloatingNavBar(
             .padding(horizontal = 24.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) {
-        // A compact, downward-offset accent bloom like Nothing OS: it
-        // softens only the area directly beneath the dock instead of
-        // fogging the full navigation/gesture region.
-        Box(
-            Modifier
-                .matchParentSize()
-                .padding(horizontal = 12.dp, vertical = 5.dp)
-                .offset(y = 7.dp)
-                .blur(16.dp, edgeTreatment = BlurredEdgeTreatment.Unbounded)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f), DockShape),
-        )
         Surface(
             shape = DockShape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,

@@ -332,6 +332,7 @@ fun HomeScreen(
                                             musicPlayer.playQueue(
                                                 tracks = playbackQueue,
                                                 startIndex = playbackIndexByRow[rowIndex],
+                                                sourceLabel = "Home",
                                             )
                                         },
                                         onLongClick = {
@@ -369,6 +370,7 @@ fun HomeScreen(
         com.lastwave.app.ui.common.TrackContextMenuSheet(
             target = com.lastwave.app.ui.common.TrackMenuTarget.Track(track.name, track.artist, track.artworkUrl.orEmpty()),
             capabilities = com.lastwave.app.ui.common.TrackMenuCapabilities(showCopyActions = true, showDeleteScrobble = true),
+            playbackSourceLabel = "Home",
             onDismiss = { menuTrack = null },
         )
     }

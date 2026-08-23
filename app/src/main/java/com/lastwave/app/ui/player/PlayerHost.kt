@@ -359,13 +359,6 @@ private fun MiniPlayer(
                         ) {
                             PlayerArtwork(track, Modifier.fillMaxSize(), 18.dp)
                         }
-                        if (state.isPlaying) {
-                            PlayingWaveBars(
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(4.dp),
-                            )
-                        }
                     }
                     Column(Modifier.weight(1f).padding(horizontal = 14.dp)) {
                         Text(
@@ -697,7 +690,7 @@ private fun FullPlayer(
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(58.dp)
+                        .height(52.dp)
                         .playerVerticalSwipe(enabled = showQueue),
                 ) {
                     IconButton(
@@ -721,7 +714,7 @@ private fun FullPlayer(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            track.album?.takeIf { it.isNotBlank() } ?: "LastWave",
+                            state.sourceLabel.takeIf { it.isNotBlank() } ?: "LastWave",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -765,9 +758,11 @@ private fun FullPlayer(
                         ) {
                         BoxWithConstraints(
                             modifier = Modifier.fillMaxWidth().weight(1f),
-                            contentAlignment = Alignment.Center,
+                            contentAlignment = Alignment.TopCenter,
                         ) {
-                            val artworkSize = minOf(maxWidth, maxHeight).coerceAtMost(420.dp)
+                            val artworkSize = (minOf(maxWidth, maxHeight) - 20.dp)
+                                .coerceAtLeast(0.dp)
+                                .coerceAtMost(380.dp)
                             Surface(
                                 shape = RoundedCornerShape(36.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -816,12 +811,12 @@ private fun FullPlayer(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        Spacer(Modifier.height(10.dp))
-                        SeekBar(state, player::seekTo)
-                        Spacer(Modifier.height(8.dp))
-                        MainControls(state, player)
                         Spacer(Modifier.height(12.dp))
-                            PlayerUtilityControls(state, player)
+                        SeekBar(state, player::seekTo)
+                        Spacer(Modifier.height(12.dp))
+                        MainControls(state, player)
+                        Spacer(Modifier.height(16.dp))
+                        PlayerUtilityControls(state, player)
                         }
                     }
                 }
@@ -861,7 +856,7 @@ private fun FullPlayer(
             ),
             playableTrack = track,
             onDismiss = { showTrackMenu = false },
-            onPlayInLastWave = { player.play(track) },
+            onPlayInLastWave = { player.play(track, sourceLabel = state.sourceLabel) },
         )
     }
 }

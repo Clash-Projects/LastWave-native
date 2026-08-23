@@ -214,6 +214,7 @@ fun SearchScreen(onBack: () -> Unit = {}, viewModel: SearchViewModel = hiltViewM
         TrackContextMenuSheet(
             target = target,
             capabilities = TrackMenuCapabilities(showCopyActions = true, showDeleteScrobble = true),
+            playbackSourceLabel = "Search",
             onDismiss = { menuTarget = null },
         )
     }

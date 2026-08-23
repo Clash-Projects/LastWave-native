@@ -257,6 +257,7 @@ private fun GenreDetailSheet(
         TrackContextMenuSheet(
             target = TrackMenuTarget.Track(track.name, track.artist, track.url),
             capabilities = TrackMenuCapabilities(showCopyActions = true, showDeleteScrobble = true),
+            playbackSourceLabel = "Genres",
             onDismiss = { menuTrack = null },
             onExploreGenre = onExploreGenre,
         )
@@ -281,7 +282,7 @@ private fun GenreTrackRow(
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     Row(
         modifier.fillMaxWidth()
-            .clickable { musicPlayer.play(com.lastwave.app.playback.PlayableTrack(track.name, track.artist, album = track.album, artworkUrl = track.artworkUrl)) }
+            .clickable { musicPlayer.play(com.lastwave.app.playback.PlayableTrack(track.name, track.artist, album = track.album, artworkUrl = track.artworkUrl), sourceLabel = "Genres") }
             .padding(horizontal = 20.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

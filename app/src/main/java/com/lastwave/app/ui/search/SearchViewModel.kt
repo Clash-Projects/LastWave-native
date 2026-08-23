@@ -86,7 +86,7 @@ class SearchViewModel @Inject constructor(
                         videoId = result.videoId,
                     )
                 }
-                musicPlayer.playQueue(queue, results.indexOf(item).coerceAtLeast(0))
+                musicPlayer.playQueue(queue, results.indexOf(item).coerceAtLeast(0), sourceLabel = "Search")
             }
             SearchTab.ARTISTS, SearchTab.ALBUMS -> viewModelScope.launch {
                 val tracks = runCatching { repository.songsFor(item) }.getOrDefault(emptyList())
@@ -99,7 +99,7 @@ class SearchViewModel @Inject constructor(
                             artworkUrl = track.artworkUrl ?: item.artworkUrl,
                             videoId = track.videoId,
                         )
-                    })
+                    }, sourceLabel = "Search")
                 }
             }
             SearchTab.USERS -> Unit

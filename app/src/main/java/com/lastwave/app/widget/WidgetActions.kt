@@ -12,6 +12,7 @@ import androidx.glance.action.ActionParameters
 import androidx.glance.appwidget.action.ActionCallback
 import com.lastwave.app.MainActivity
 import com.lastwave.app.service.MediaScrobbleListenerService
+import kotlinx.coroutines.delay
 
 private fun resolveController(context: Context): MediaController? {
     val held = ActiveMediaSessionHolder.controller
@@ -52,7 +53,19 @@ class TogglePlayPauseAction : ActionCallback {
                 controller.transportControls.play()
             }
         }.isSuccess
-        if (succeeded) WidgetUpdater.setPlaying(context, !wasPlaying)
+        if (succeeded) {
+            WidgetUpdater.setPlaying(context, !wasPlaying)
+            // Some players publish the MediaSession state a moment after
+            // accepting the transport command. Confirm that transition so
+            // the artwork waves and play/pause glyph never remain stale.
+            delay(300)
+            val confirmedState = controller.playbackState?.state
+            val confirmedPlaying = confirmedState == PlaybackState.STATE_PLAYING ||
+                confirmedState == PlaybackState.STATE_BUFFERING
+            if (confirmedPlaying != wasPlaying) {
+                WidgetUpdater.setPlaying(context, confirmedPlaying)
+            }
+        }
     }
 }
 

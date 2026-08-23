@@ -87,7 +87,7 @@ data class NowPlayingWidgetSnapshot(
     }
 }
 
-/** The single compact 3 x 1 artwork-and-controls widget exposed in the widget picker. */
+/** The single fixed 4 x 1 artwork-and-controls widget exposed in the widget picker. */
 class NowPlayingWidget : GlanceAppWidget() {
 
     @EntryPoint
@@ -218,16 +218,16 @@ private fun PlayerWidget(state: WidgetUiState) {
     Row(
         modifier = playerSurface(GlanceModifier)
             .clickable(actionRunCallback<OpenLastWaveAction>())
-            .padding(8.dp),
+            .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MiniArtwork(state.art, 60, state.isPlaying, state.animationFrame)
-        Spacer(GlanceModifier.width(8.dp))
+        MiniArtwork(state.art, 72, state.isPlaying, state.animationFrame)
+        Spacer(GlanceModifier.width(10.dp))
         Column(modifier = GlanceModifier.defaultWeight()) {
-            TrackTitle(state.title, size = 14)
-            Spacer(GlanceModifier.height(1.dp))
-            TrackArtist(state.artist, size = 11)
-            Spacer(GlanceModifier.height(4.dp))
+            TrackTitle(state.title, size = 15)
+            Spacer(GlanceModifier.height(2.dp))
+            TrackArtist(state.artist, size = 12)
+            Spacer(GlanceModifier.height(6.dp))
             PlaybackControls(state.isPlaying, state.animationFrame)
         }
     }
@@ -335,10 +335,10 @@ private fun PlaybackControls(isPlaying: Boolean, animationFrame: Int) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Row(
             modifier = GlanceModifier
-                .width(76.dp)
-                .height(32.dp)
+                .width(92.dp)
+                .height(38.dp)
                 .background(GlanceTheme.colors.primary)
-                .cornerRadius(16.dp)
+                .cornerRadius(19.dp)
                 .clickable(actionRunCallback<TogglePlayPauseAction>()),
             verticalAlignment = Alignment.CenterVertically,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -346,15 +346,15 @@ private fun PlaybackControls(isPlaying: Boolean, animationFrame: Int) {
             if (isPlaying) AnimatedPauseGlyph(animationFrame) else Image(
                 provider = ImageProvider(icon),
                 contentDescription = label,
-                modifier = GlanceModifier.size(16.dp),
+                modifier = GlanceModifier.size(18.dp),
                 colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimary),
             )
-            Spacer(GlanceModifier.width(4.dp))
+            Spacer(GlanceModifier.width(6.dp))
             Text(
                 text = label,
                 style = TextStyle(
                     color = GlanceTheme.colors.onPrimary,
-                    fontSize = 12.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
@@ -362,16 +362,16 @@ private fun PlaybackControls(isPlaying: Boolean, animationFrame: Int) {
         Spacer(GlanceModifier.width(6.dp))
         Box(
             modifier = GlanceModifier
-                .size(32.dp)
+                .size(38.dp)
                 .background(GlanceTheme.colors.primary)
-                .cornerRadius(16.dp)
+                .cornerRadius(19.dp)
                 .clickable(actionRunCallback<SkipNextAction>()),
             contentAlignment = Alignment.Center,
         ) {
             Image(
                 provider = ImageProvider(R.drawable.ic_widget_skip_next),
                 contentDescription = "Next",
-                modifier = GlanceModifier.size(16.dp),
+                modifier = GlanceModifier.size(18.dp),
                 colorFilter = ColorFilter.tint(GlanceTheme.colors.onPrimary),
             )
         }

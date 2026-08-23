@@ -55,10 +55,11 @@ data class PlayableTrack(
 
 @Serializable
 internal data class PersistedPlaybackSession(
-    val version: Int = 1,
+    val version: Int = 2,
     val queue: List<PlayableTrack>,
     val currentIndex: Int,
     val positionMs: Long,
+    val sourceLabel: String = "LastWave",
     val isEndlessQueue: Boolean = false,
     val shuffleEnabled: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
@@ -70,6 +71,7 @@ data class MusicPlayerState(
     val current: PlayableTrack? = null,
     val queue: List<PlayableTrack> = emptyList(),
     val currentIndex: Int = -1,
+    val sourceLabel: String = "LastWave",
     val isEndlessQueue: Boolean = false,
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
@@ -212,7 +214,7 @@ class MusicPlayer @Inject constructor(
         }
     }
 
-    fun play(track: PlayableTrack) {
+    fun play(track: PlayableTrack, sourceLabel: String = "LastWave") {
         disableDiscoverQueue()
         playRequest?.cancel()
         unavailableSkipJob?.cancel()
@@ -225,6 +227,7 @@ class MusicPlayer @Inject constructor(
                     current = track,
                     queue = listOf(track),
                     currentIndex = 0,
+                    sourceLabel = sourceLabel,
                     isBuffering = true,
                 )
                 persistPlaybackSession()
@@ -258,18 +261,19 @@ class MusicPlayer @Inject constructor(
         }
     }
 
-    fun playQueue(tracks: List<PlayableTrack>, startIndex: Int = 0) {
-        playQueueInternal(tracks, startIndex, endlessDiscover = false)
+    fun playQueue(tracks: List<PlayableTrack>, startIndex: Int = 0, sourceLabel: String = "LastWave") {
+        playQueueInternal(tracks, startIndex, endlessDiscover = false, sourceLabel = sourceLabel)
     }
 
     fun playDiscoverQueue(tracks: List<PlayableTrack>, startIndex: Int = 0) {
-        playQueueInternal(tracks, startIndex, endlessDiscover = true)
+        playQueueInternal(tracks, startIndex, endlessDiscover = true, sourceLabel = "Discover")
     }
 
     private fun playQueueInternal(
         tracks: List<PlayableTrack>,
         startIndex: Int,
         endlessDiscover: Boolean,
+        sourceLabel: String = if (endlessDiscover) "Discover" else "LastWave",
     ) {
         if (tracks.isEmpty()) return
         discoverQueueLoadJob?.cancel()
@@ -287,6 +291,7 @@ class MusicPlayer @Inject constructor(
                     current = tracks[selectedIndex],
                     queue = tracks,
                     currentIndex = selectedIndex,
+                    sourceLabel = sourceLabel,
                     isEndlessQueue = endlessDiscover,
                     isBuffering = true,
                 )
@@ -513,6 +518,7 @@ class MusicPlayer @Inject constructor(
         tracks: List<PlayableTrack>,
         failedIndex: Int,
         endlessDiscover: Boolean,
+        sourceLabel: String = if (endlessDiscover) "Discover" else "LastWave",
     ) {
         val nextIndex = failedIndex + 1
         if (nextIndex !in tracks.indices) return
@@ -521,7 +527,7 @@ class MusicPlayer @Inject constructor(
             delay(UNAVAILABLE_SKIP_DELAY_MS)
             if (_state.value.currentIndex == failedIndex && !player.isPlaying) {
                 unavailableSkipJob = null
-                playQueueInternal(tracks, nextIndex, endlessDiscover)
+                playQueueInternal(tracks, nextIndex, endlessDiscover, sourceLabel)
             }
         }
     }
@@ -591,6 +597,7 @@ class MusicPlayer @Inject constructor(
             current = restoredQueue[restoredIndex],
             queue = restoredQueue,
             currentIndex = restoredIndex,
+            sourceLabel = session.sourceLabel,
             isEndlessQueue = session.isEndlessQueue,
             positionMs = session.positionMs.coerceAtLeast(0),
             shuffleEnabled = session.shuffleEnabled,
@@ -631,6 +638,7 @@ class MusicPlayer @Inject constructor(
             append(persistedIndex).append('|')
             append(persistedQueue[persistedIndex].queueKey()).append('|')
             append(snapshot.positionMs / POSITION_PERSIST_INTERVAL_MS).append('|')
+            append(snapshot.sourceLabel).append('|')
             append(snapshot.isEndlessQueue).append('|')
             append(snapshot.shuffleEnabled).append('|')
             append(snapshot.repeatMode).append('|')
@@ -641,6 +649,7 @@ class MusicPlayer @Inject constructor(
             queue = persistedQueue,
             currentIndex = persistedIndex,
             positionMs = snapshot.positionMs.coerceAtLeast(0),
+            sourceLabel = snapshot.sourceLabel,
             isEndlessQueue = snapshot.isEndlessQueue,
             shuffleEnabled = snapshot.shuffleEnabled,
             repeatMode = snapshot.repeatMode,
@@ -680,6 +689,7 @@ class MusicPlayer @Inject constructor(
             current = current,
             queue = queue,
             currentIndex = player.currentMediaItemIndex.takeIf { player.mediaItemCount > 0 } ?: -1,
+            sourceLabel = previous.sourceLabel,
             isEndlessQueue = previous.isEndlessQueue && discoverQueueActive,
             isPlaying = player.isPlaying,
             isBuffering = player.playbackState == Player.STATE_BUFFERING,

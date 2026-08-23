@@ -246,6 +246,7 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
                                     isRegenerating = state.regeneratingId == playlist.id,
                                     currentTrack = playbackState.current,
                                     isPlaying = playbackState.isPlaying,
+                                    playbackSource = playbackState.sourceLabel,
                                     onToggleExpand = { viewModel.toggleExpanded(playlist.id) },
                                     onExport = { viewModel.openExportSheet(playlist.id) },
                                     onRegenerate = { viewModel.regenerate(playlist.id) },
@@ -266,6 +267,7 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
                                                 )
                                             },
                                             startIndex = startIndex,
+                                            sourceLabel = playlist.title,
                                         )
                                     },
                                     onAddTrackToPlaylist = { track ->
@@ -429,10 +431,11 @@ fun PlaylistScreen(viewModel: PlaylistViewModel = hiltViewModel()) {
     }
 
     // ── Shared track context menu (§1.7) ──
-    menuTarget?.let { (_, track) ->
+    menuTarget?.let { (playlistId, track) ->
         TrackContextMenuSheet(
             target = TrackMenuTarget.Track(track.name, track.artist, track.url),
             capabilities = TrackMenuCapabilities(showCopyActions = true, showDeleteScrobble = true),
+            playbackSourceLabel = state.playlists.firstOrNull { it.id == playlistId }?.title ?: "Playlists",
             onDismiss = { menuTarget = null },
             onDeleteScrobble = { name, artist -> viewModel.deleteScrobble(name, artist) },
             onRefreshArtwork = { viewModel.refreshArtwork(track.name, track.artist) },
@@ -498,6 +501,7 @@ private fun PlaylistCard(
     isRegenerating: Boolean,
     currentTrack: com.lastwave.app.playback.PlayableTrack?,
     isPlaying: Boolean,
+    playbackSource: String,
     onToggleExpand: () -> Unit,
     onExport: () -> Unit,
     onRegenerate: () -> Unit,
@@ -512,6 +516,7 @@ private fun PlaylistCard(
     onTrackMenu: (GeneratedTrack) -> Unit,
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val isThisPlaylistPlaying = isPlaying && playbackSource == playlist.title
     Card(
         shape = com.lastwave.app.ui.common.groupShape(position),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -529,7 +534,14 @@ private fun PlaylistCard(
                     .padding(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PlaylistCover(playlist = playlist, modifier = Modifier.size(60.dp))
+                Box(Modifier.size(60.dp)) {
+                    PlaylistCover(playlist = playlist, modifier = Modifier.fillMaxSize())
+                    if (isThisPlaylistPlaying) {
+                        com.lastwave.app.ui.player.PlayingWaveBars(
+                            Modifier.align(Alignment.BottomEnd).padding(3.dp),
+                        )
+                    }
+                }
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -631,7 +643,7 @@ private fun PlaylistCard(
                         TrackRow(
                             index = index + 1,
                             track = track,
-                            isPlaying = isPlaying &&
+                            isPlaying = isThisPlaylistPlaying &&
                                 currentTrack?.title?.equals(track.name, ignoreCase = true) == true &&
                                 currentTrack?.artist?.equals(track.artist, ignoreCase = true) == true,
                             onClick = { onPlay(index) },
