@@ -37,6 +37,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MoreVert
@@ -182,6 +183,7 @@ fun PlaylistDetailScreen(
 
     var menuTarget by remember { mutableStateOf<GeneratedTrack?>(null) }
     var overflowMenuOpen by remember { mutableStateOf(false) }
+    val syncedPlaylistIds by viewModel.syncedPlaylistIds.collectAsState()
     var sortMenuOpen by remember { mutableStateOf(false) }
     var currentSort by remember { mutableStateOf(PlaylistTrackSort.CUSTOM) }
     var sortAscending by remember { mutableStateOf(true) }
@@ -712,6 +714,22 @@ fun PlaylistDetailScreen(
                             leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
                             onClick = {
                                 viewModel.openExportSheet(playlistId)
+                                overflowMenuOpen = false
+                            },
+                        )
+                        val isSyncedToYt = syncedPlaylistIds.isEmpty() || playlistId in syncedPlaylistIds
+                        DropdownMenuItem(
+                            text = { Text(if (isSyncedToYt) "Syncing to YouTube Music" else "Sync to YouTube Music") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.CloudSync,
+                                    contentDescription = null,
+                                    tint = if (isSyncedToYt) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.toggleYtSync(playlistId)
                                 overflowMenuOpen = false
                             },
                         )

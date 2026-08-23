@@ -80,6 +80,10 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val ytLastSyncAt: StateFlow<Long> = ytMusicPreferences.lastSyncAt
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    val syncedPlaylistIds: StateFlow<Set<Long>> = ytMusicPreferences.syncedPlaylistIds
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val allPlaylists: StateFlow<List<com.lastwave.app.data.playlist.SavedPlaylist>> = playlistRepository.playlists
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val session: StateFlow<SessionData> = kotlinx.coroutines.flow.combine(
         sessionPreferences.session,
@@ -162,6 +166,7 @@ class SettingsViewModel @Inject constructor(
     fun setPreferQobuzStreaming(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setPreferQobuzStreaming(enabled) }
     fun setQobuzQuality(quality: Int) = viewModelScope.launch { settingsPreferences.setQobuzQuality(quality) }
     fun setMusicEnhancer(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setMusicEnhancer(enabled) }
+    fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = viewModelScope.launch { settingsPreferences.setLyricsAnimation(animation) }
 
     // ── Experimental: 15-band equalizer ──
 
@@ -387,6 +392,25 @@ class SettingsViewModel @Inject constructor(
             ytMusicPreferences.setSyncEnabled(false)
             ytAuthManager.signOut()
             _uiState.update { it.copy(toastMessage = "YouTube Music disconnected") }
+        }
+    }
+
+    fun togglePlaylistSync(playlistId: Long, enabled: Boolean) {
+        viewModelScope.launch {
+            ytMusicPreferences.togglePlaylistSync(playlistId, enabled)
+            if (ytSyncEnabled.value) {
+                runCatching { ytMusicSyncManager.syncNow("selection_change") }
+            }
+        }
+    }
+
+    fun selectAllPlaylistsForSync(select: Boolean) {
+        viewModelScope.launch {
+            val allIds = if (select) allPlaylists.value.map { it.id }.toSet() else emptySet()
+            ytMusicPreferences.setSyncedPlaylistIds(allIds)
+            if (ytSyncEnabled.value) {
+                runCatching { ytMusicSyncManager.syncNow("selection_change") }
+            }
         }
     }
 

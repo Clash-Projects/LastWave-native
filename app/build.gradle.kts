@@ -8,8 +8,7 @@ plugins {
 
 android {
     namespace = "com.lastwave.app"
-    compileSdk = 36
-    buildToolsVersion = "36.0.0"
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.lastwave.app"

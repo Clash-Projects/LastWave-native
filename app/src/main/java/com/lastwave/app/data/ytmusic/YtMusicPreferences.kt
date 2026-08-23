@@ -136,6 +136,28 @@ class YtMusicPreferences @Inject constructor(
         }
     }
 
+    val syncedPlaylistIds: Flow<Set<Long>> = dataStore.data.map { prefs ->
+        prefs[SYNCED_PLAYLIST_IDS_KEY]?.let { raw ->
+            runCatching { json.decodeFromString<Set<Long>>(raw) }.getOrNull()
+        } ?: emptySet()
+    }
+
+    suspend fun setSyncedPlaylistIds(ids: Set<Long>) {
+        dataStore.edit { prefs ->
+            prefs[SYNCED_PLAYLIST_IDS_KEY] = json.encodeToString(ids)
+        }
+    }
+
+    suspend fun togglePlaylistSync(playlistId: Long, enabled: Boolean) {
+        dataStore.edit { prefs ->
+            val current = prefs[SYNCED_PLAYLIST_IDS_KEY]?.let { raw ->
+                runCatching { json.decodeFromString<Set<Long>>(raw) }.getOrNull()
+            } ?: emptySet()
+            val updated = if (enabled) current + playlistId else current - playlistId
+            prefs[SYNCED_PLAYLIST_IDS_KEY] = json.encodeToString(updated)
+        }
+    }
+
     suspend fun setSyncEnabled(enabled: Boolean) {
         dataStore.edit { it[SYNC_ENABLED_KEY] = enabled }
     }
@@ -154,6 +176,7 @@ class YtMusicPreferences @Inject constructor(
         val PHOTO_URL_KEY = stringPreferencesKey("ytm_photo_url")
         val CONNECTED_AT_KEY = longPreferencesKey("ytm_connected_at")
         val SYNC_ENABLED_KEY = booleanPreferencesKey("ytm_sync_enabled")
+        val SYNCED_PLAYLIST_IDS_KEY = stringPreferencesKey("ytm_synced_playlist_ids")
         val MAPPINGS_KEY = stringPreferencesKey("ytm_playlist_mappings")
         val LAST_SYNC_KEY = longPreferencesKey("ytm_last_sync_at")
     }

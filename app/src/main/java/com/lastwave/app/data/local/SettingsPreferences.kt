@@ -10,6 +10,24 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
+import androidx.datastore.preferences.core.stringPreferencesKey
+
+enum class LyricsAnimation(val id: String, val title: String, val description: String) {
+    APPLE_FLUID("apple_fluid", "Apple Fluid", "Smooth spring scaling with dynamic focal tracking"),
+    KARAOKE_PULSE("karaoke_pulse", "Karaoke Pulse", "Rhythmic scale pop with energetic spring bounce"),
+    KINETIC_SLIDE("kinetic_slide", "Kinetic Slide", "Active line glides smoothly from leading edge"),
+    CINEMATIC_BLUR("cinematic_blur", "Cinematic Focus", "Soft background blur & vertical drift on past lines"),
+    LOSSLESS_GLOW("lossless_glow", "Lossless Glow", "Vibrant gradient text with frosted glass reflection"),
+    CARD_POP("card_pop", "Glass Elevation", "3D floating glass card lift with specular highlights"),
+    APPLE_ZOOM("apple_zoom", "Dynamic Focus Zoom", "Expanded focal magnification with fluid spring push"),
+    MINIMAL_WAVE("minimal_wave", "Minimal Clean", "Pure low-latency opacity transitions without distortion");
+
+    companion object {
+        fun fromId(id: String?): LyricsAnimation =
+            entries.firstOrNull { it.id == id } ?: APPLE_FLUID
+    }
+}
+
 data class MiscSettings(
     /** When on, the app's accent color follows the dominant color of the
      *  currently-scrobbling track's artwork (Home's "now playing" track),
@@ -37,6 +55,8 @@ data class MiscSettings(
      *  fuller and more present without reshaping their tonal balance.
      *  Separate from the equalizer; see playback/AudioEffectsEngine. */
     val musicEnhancerEnabled: Boolean = false,
+    /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
+    val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
 )
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
@@ -52,6 +72,7 @@ class SettingsPreferences @Inject constructor(
         val PREFER_QOBUZ_STREAMING = booleanPreferencesKey("lw_prefer_qobuz_streaming")
         val QOBUZ_QUALITY = androidx.datastore.preferences.core.intPreferencesKey("lw_qobuz_quality")
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
+        val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data.map { p ->
@@ -62,6 +83,7 @@ class SettingsPreferences @Inject constructor(
             preferQobuzStreaming = p[Keys.PREFER_QOBUZ_STREAMING] ?: true,
             qobuzQuality = p[Keys.QOBUZ_QUALITY] ?: 27,
             musicEnhancerEnabled = p[Keys.MUSIC_ENHANCER] ?: false,
+            lyricsAnimation = LyricsAnimation.fromId(p[Keys.LYRICS_ANIMATION]),
         )
     }
 
@@ -83,6 +105,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setMusicEnhancer(enabled: Boolean) {
         dataStore.edit { it[Keys.MUSIC_ENHANCER] = enabled }
+    }
+
+    suspend fun setLyricsAnimation(animation: LyricsAnimation) {
+        dataStore.edit { it[Keys.LYRICS_ANIMATION] = animation.id }
     }
 
     suspend fun toggleFriendPinned(username: String) {

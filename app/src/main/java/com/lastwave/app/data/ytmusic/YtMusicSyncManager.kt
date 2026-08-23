@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -116,7 +117,10 @@ class YtMusicSyncManager @Inject constructor(
         }
 
         try {
-            val playlists = playlistRepository.getAll()
+            val allPlaylists = playlistRepository.getAll()
+            val syncedIds = preferences.syncedPlaylistIds.first()
+            val playlists = if (syncedIds.isNotEmpty()) allPlaylists.filter { it.id in syncedIds } else allPlaylists
+
             if (playlists.isEmpty()) {
                 _state.value = YtSyncState.Completed(System.currentTimeMillis(), 0, 0, 0)
                 preferences.setLastSyncAt(System.currentTimeMillis())

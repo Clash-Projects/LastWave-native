@@ -3,6 +3,7 @@ package com.lastwave.app.ui.shell
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
@@ -43,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -96,7 +100,7 @@ object FloatingNavDefaults {
 // @Composable body: RoundedCornerShape is immutable and never changes here,
 // so there's no reason to let it be reconstructed on every recomposition.
 private val DockShape: Shape = RoundedCornerShape(32.dp)
-private val PillShape: Shape = RoundedCornerShape(50)
+private val PillShape: Shape = CircleShape
 
 // One shared spring keeps tab selection, label expansion, and pager controls
 // visually coherent while preserving each call site's inferred value type.
@@ -138,15 +142,7 @@ fun MainShell(
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             // Predictive back on a non-Home tab returns to Home (with the
-            // real shrink/round gesture animation) instead of doing
-            // nothing — these tabs live inside MainShell's own
-            // HorizontalPager, not the outer NavHost, so they never got
-            // PredictiveBackScreen's handling before. Only the CURRENTLY
-            // shown page enables its handler (`page == pagerState
-            // .currentPage`): HorizontalPager keeps neighboring pages
-            // composed too (beyondViewportPageCount = 2), and without this
-            // guard an offscreen page's handler could intercept the
-            // gesture instead of the one actually visible. Home itself
+            // same swipe-to-pop gesture as other screens), but once on Home
             // stays enabled = false so back on Home falls through to the
             // system default (exit/minimize), same as before.
             val isCurrent = page == pagerState.currentPage
@@ -190,9 +186,6 @@ private fun FloatingNavBar(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // Liquid Glass (Settings → Experimental): the dock's fill already comes
-    // from surfaceContainerHigh, which turns translucent scheme-wide; this
-    // adds the specular sheen + hairline border on top. No-op when off.
     val liquidGlass = LocalLiquidGlass.current
     Box(
         modifier = modifier
@@ -205,23 +198,16 @@ private fun FloatingNavBar(
         Surface(
             shape = DockShape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 5.dp,
-            shadowElevation = 10.dp,
+            tonalElevation = 6.dp,
+            shadowElevation = 12.dp,
             modifier = Modifier.liquidGlassChrome(DockShape, liquidGlass),
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 tabs.forEachIndexed { index, tab ->
-                    // Stable per-index lambda: without remembering this, a new
-                    // lambda instance is created for every tab whenever this
-                    // row of tabs recomposes (i.e. on every tab switch),
-                    // which makes Compose treat all three FloatingNavItems as
-                    // "changed" even the ones whose selected state didn't
-                    // change, forcing unnecessary recomposition of all of them
-                    // instead of just the two whose selection actually flipped.
                     val onClick = remember(index) { { onSelect(index) } }
                     FloatingNavItem(
                         label = tab.label,
@@ -258,22 +244,45 @@ private fun FloatingNavItem(
         shape = PillShape,
         color = backgroundColor,
         modifier = Modifier
-            .heightIn(min = 48.dp)
+            .height(48.dp)
             .animateContentSize(animationSpec = navSpring()),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = if (selected) 18.dp else 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .padding(horizontal = if (selected) 18.dp else 12.dp)
+                .height(48.dp),
         ) {
-            Icon(icon, contentDescription = label, tint = contentColor, modifier = Modifier.size(24.dp))
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = contentColor,
+                modifier = Modifier.size(24.dp),
+            )
             AnimatedVisibility(
                 visible = selected,
-                enter = fadeIn(animationSpec = navSpring()) + expandHorizontally(animationSpec = navSpring()),
-                exit = fadeOut() + shrinkHorizontally(animationSpec = navSpring()),
+                enter = fadeIn(animationSpec = navSpring()) + expandHorizontally(
+                    animationSpec = navSpring(),
+                    expandFrom = Alignment.Start,
+                ),
+                exit = fadeOut(animationSpec = tween(90)) + shrinkHorizontally(
+                    animationSpec = navSpring(),
+                    shrinkTowards = Alignment.Start,
+                ),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Spacer(Modifier.width(8.dp))
-                    Text(label, style = MaterialTheme.typography.labelLarge, color = contentColor, maxLines = 1)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 8.dp),
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = contentColor,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
                 }
             }
         }

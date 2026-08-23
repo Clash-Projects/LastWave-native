@@ -344,9 +344,6 @@ fun TrackContextMenuSheet(
                             }
                         }
                     }
-                    if (capabilities.showDeleteScrobble && onDeleteScrobble != null) {
-                        add { pos -> MenuActionRow(Icons.Filled.Delete, "Delete Scrobble", danger = true, position = pos) { onDeleteScrobble(t.name, t.artist); onDismiss() } }
-                    }
                 }
                 ExpressiveGroup(rowCount = rows.size) { index, position -> rows[index](position) }
             } else if (target is TrackMenuTarget.Artist) {

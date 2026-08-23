@@ -53,13 +53,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -95,6 +91,20 @@ import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
+import com.lastwave.app.ui.theme.LocalLiquidGlass
+import com.lastwave.app.ui.theme.liquidGlassChrome
+
+private val SearchHeaderShape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp)
+
 private val EXPLORE_GENRES = listOf(
     "Pop", "Rock", "Hip-Hop", "Lo-Fi", "Electronic", "Indie",
     "R&B", "Bollywood", "Jazz", "Metal", "Acoustic", "Chill",
@@ -119,79 +129,137 @@ fun SearchScreen(
     var menuTarget by remember { mutableStateOf<TrackMenuTarget?>(null) }
     val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
     val focusManager = LocalFocusManager.current
+    val liquidGlass = LocalLiquidGlass.current
 
     Column(Modifier.fillMaxSize()) {
         Surface(
-            shape = MaterialTheme.shapes.extraLarge,
+            shape = SearchHeaderShape,
             color = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = 3.dp,
-            shadowElevation = 4.dp,
+            tonalElevation = 2.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                .padding(horizontal = 16.dp)
-                .padding(top = 12.dp),
+                .liquidGlassChrome(SearchHeaderShape, liquidGlass),
         ) {
-            Row(
-                Modifier
+            Column(
+                modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 8.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+                    )
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 6.dp, bottom = 10.dp),
             ) {
-                HeaderActionIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack)
-                TextField(
-                    value = state.query,
-                    onValueChange = viewModel::setQuery,
-                    placeholder = {
-                        Text(
-                            if (state.tab == SearchTab.USERS) "Search Last.fm users\u2026"
-                            else "Search YouTube Music\u2026",
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+                // Top Search Input Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    HeaderActionIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onBack)
+                    Spacer(Modifier.width(10.dp))
+
+                    val pillBg = if (liquidGlass) {
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f)
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHighest
+                    }
+                    val pillBorder = if (liquidGlass) {
+                        Brush.linearGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.28f),
+                                Color.White.copy(alpha = 0.08f),
+                            ),
                         )
-                    },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (state.query.isNotEmpty()) {
-                            IconButton(onClick = viewModel::clearQuery) {
-                                Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                    } else {
+                        Brush.linearGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.15f),
+                            ),
+                        )
+                    }
+
+                    BasicTextField(
+                        value = state.query,
+                        onValueChange = viewModel::setQuery,
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = {
+                                focusManager.clearFocus()
+                                viewModel.searchNow()
+                            },
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp),
+                        decorationBox = { innerTextField ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                                    .background(pillBg)
+                                    .border(BorderStroke(1.dp, pillBorder), CircleShape)
+                                    .padding(horizontal = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Search,
+                                    contentDescription = null,
+                                    tint = if (state.query.isNotEmpty()) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f)
+                                    },
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Box(
+                                    modifier = Modifier.weight(1f),
+                                    contentAlignment = Alignment.CenterStart,
+                                ) {
+                                    if (state.query.isEmpty()) {
+                                        Text(
+                                            text = if (state.tab == SearchTab.USERS) "Search Last.fm users\u2026"
+                                            else "Search YouTube Music\u2026",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.60f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                                if (state.query.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = viewModel::clearQuery,
+                                        modifier = Modifier.size(28.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Clear,
+                                            contentDescription = "Clear",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
                             }
-                        }
-                    },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(
-                        onSearch = {
-                            focusManager.clearFocus()
-                            viewModel.searchNow()
                         },
-                    ),
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent,
-                        errorIndicatorColor = Color.Transparent,
-                    ),
-                    shape = MaterialTheme.shapes.large,
-                    modifier = Modifier.weight(1f).padding(start = 8.dp),
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                // Modern Segmented Filter Pills
+                SearchFilterPills(
+                    selectedTab = state.tab,
+                    onTabSelected = viewModel::setTab,
+                    liquidGlass = liquidGlass,
                 )
             }
-        }
-
-        val tabIndex = when (state.tab) {
-            SearchTab.TRACKS -> 0; SearchTab.ARTISTS -> 1; SearchTab.ALBUMS -> 2; SearchTab.USERS -> 3
-        }
-        ScrollableTabRow(
-            selectedTabIndex = tabIndex,
-            edgePadding = 16.dp,
-            modifier = Modifier.safeHorizontalContentPadding(),
-        ) {
-            Tab(selected = tabIndex == 0, onClick = { viewModel.setTab(SearchTab.TRACKS) }, text = { Text("Tracks") })
-            Tab(selected = tabIndex == 1, onClick = { viewModel.setTab(SearchTab.ARTISTS) }, text = { Text("Artists") })
-            Tab(selected = tabIndex == 2, onClick = { viewModel.setTab(SearchTab.ALBUMS) }, text = { Text("Albums") })
-            Tab(selected = tabIndex == 3, onClick = { viewModel.setTab(SearchTab.USERS) }, text = { Text("Users") })
         }
 
         Box(Modifier.fillMaxSize().safeHorizontalContentPadding()) {
@@ -776,3 +844,92 @@ private fun SearchResultRow(
         }
     }
 }
+
+@Composable
+private fun SearchFilterPills(
+    selectedTab: SearchTab,
+    onTabSelected: (SearchTab) -> Unit,
+    liquidGlass: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val tabs = listOf(
+        SearchTab.TRACKS to "Tracks",
+        SearchTab.ARTISTS to "Artists",
+        SearchTab.ALBUMS to "Albums",
+        SearchTab.USERS to "Users",
+    )
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        tabs.forEach { (tab, label) ->
+            val selected = selectedTab == tab
+            val interactionSource = remember { MutableInteractionSource() }
+
+            val pillBg = when {
+                selected && liquidGlass -> MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                selected -> MaterialTheme.colorScheme.primary
+                liquidGlass -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f)
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
+            }
+
+            val contentColor = when {
+                selected && liquidGlass -> MaterialTheme.colorScheme.primary
+                selected -> MaterialTheme.colorScheme.onPrimary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+
+            val stroke = when {
+                selected && liquidGlass -> BorderStroke(
+                    1.dp,
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.65f),
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                        ),
+                    ),
+                )
+                liquidGlass -> BorderStroke(
+                    1.dp,
+                    Brush.linearGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.20f),
+                            Color.White.copy(alpha = 0.05f),
+                        ),
+                    ),
+                )
+                !selected -> BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f),
+                )
+                else -> null
+            }
+
+            Surface(
+                shape = CircleShape,
+                color = pillBg,
+                border = stroke,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = interactionSource,
+                        indication = null,
+                        onClick = { onTabSelected(tab) },
+                    ),
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    ),
+                    color = contentColor,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp),
+                )
+            }
+        }
+    }
+}
+

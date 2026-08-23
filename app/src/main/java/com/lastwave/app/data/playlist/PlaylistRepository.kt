@@ -17,8 +17,10 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -57,6 +59,13 @@ class PlaylistRepository @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true }
     private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val changes = _changes.asSharedFlow()
+
+    val playlists: Flow<List<SavedPlaylist>> = flow {
+        emit(getAll())
+        changes.collect {
+            emit(getAll())
+        }
+    }
 
     // Fire-and-forget scope for the public Downloads export copy — outlives
     // any single screen's viewModelScope (it's a Singleton), and its own

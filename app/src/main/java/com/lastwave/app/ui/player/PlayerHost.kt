@@ -108,6 +108,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -137,9 +142,6 @@ import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.liquidGlassChrome
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 enum class FullPlayerTab {
@@ -168,9 +170,12 @@ class PlayerViewModel @Inject constructor(
     val player: MusicPlayer,
     private val playlistRepository: PlaylistRepository,
     private val lyricsRepository: LyricsRepository,
+    private val settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
     private val navigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator,
 ) : ViewModel() {
     val state = player.state
+    val settings: StateFlow<com.lastwave.app.data.local.MiscSettings> = settingsPreferences.settings
+        .stateIn(viewModelScope, SharingStarted.Eagerly, com.lastwave.app.data.local.MiscSettings())
     private val _customPlaylists = MutableStateFlow<List<SavedPlaylist>>(emptyList())
     val customPlaylists = _customPlaylists.asStateFlow()
 
@@ -272,6 +277,7 @@ fun PlayerHost(
     val state by viewModel.state.collectAsState()
     val customPlaylists by viewModel.customPlaylists.collectAsState()
     val lyricsState by viewModel.lyricsState.collectAsState()
+    val settings by viewModel.settings.collectAsState()
     var expanded by rememberSaveable { mutableStateOf(false) }
     var currentTab by rememberSaveable { mutableStateOf(FullPlayerTab.NOW_PLAYING) }
     var playlistTrack by remember { mutableStateOf<PlayableTrack?>(null) }
@@ -331,6 +337,7 @@ fun PlayerHost(
                     state = state,
                     player = viewModel.player,
                     lyricsState = lyricsState,
+                    lyricsAnimation = settings.lyricsAnimation,
                     currentTab = currentTab,
                     onTabChange = { currentTab = it },
                     onRetryLyrics = viewModel::retryLyrics,
@@ -728,6 +735,7 @@ private fun FullPlayer(
     state: MusicPlayerState,
     player: MusicPlayer,
     lyricsState: LyricsUiState,
+    lyricsAnimation: com.lastwave.app.data.local.LyricsAnimation = com.lastwave.app.data.local.LyricsAnimation.APPLE_FLUID,
     currentTab: FullPlayerTab,
     onTabChange: (FullPlayerTab) -> Unit,
     onRetryLyrics: () -> Unit,
@@ -911,6 +919,7 @@ private fun FullPlayer(
                                 state = state,
                                 player = player,
                                 lyricsState = lyricsState,
+                                lyricsAnimation = lyricsAnimation,
                                 onRetry = onRetryLyrics,
                                 modifier = Modifier.fillMaxSize(),
                             )

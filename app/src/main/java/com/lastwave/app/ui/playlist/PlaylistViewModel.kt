@@ -22,6 +22,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
+
 enum class ExportFormat { CSV, M3U }
 enum class PlaylistSortMode { DATE_DESC, DATE_ASC, NAME, TRACK_COUNT }
 
@@ -64,10 +68,29 @@ class PlaylistViewModel @Inject constructor(
     private val fileExportHelper: FileExportHelper,
     private val generationStatus: com.lastwave.app.data.generate.GenerationStatus,
     private val exportEvents: PlaylistExportEvents,
+    private val ytMusicPreferences: com.lastwave.app.data.ytmusic.YtMusicPreferences,
+    private val ytMusicSyncManager: com.lastwave.app.data.ytmusic.YtMusicSyncManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlaylistUiState())
     val uiState: StateFlow<PlaylistUiState> = _uiState.asStateFlow()
+
+    val syncedPlaylistIds: StateFlow<Set<Long>> = ytMusicPreferences.syncedPlaylistIds
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    fun toggleYtSync(playlistId: Long) {
+        viewModelScope.launch {
+            val current = ytMusicPreferences.syncedPlaylistIds.first()
+            val isSynced = if (current.isEmpty()) true else playlistId in current
+            ytMusicPreferences.togglePlaylistSync(playlistId, !isSynced)
+            if (ytMusicPreferences.syncEnabled.first()) {
+                runCatching { ytMusicSyncManager.syncNow("selection_change") }
+            }
+            _uiState.update {
+                it.copy(toastMessage = if (!isSynced) "Playlist added to YouTube Music sync" else "Playlist removed from YouTube Music sync")
+            }
+        }
+    }
 
     init {
         load()
