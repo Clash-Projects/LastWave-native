@@ -393,15 +393,24 @@ class MusicPlaybackService : Service() {
         if (signature == systemStateSignature) return
         systemStateSignature = signature
 
+        val artUri = artworkUrl ?: track?.artworkUrl.orEmpty()
         mediaSession.setMetadata(
             MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, track?.title.orEmpty())
                 .putString(MediaMetadata.METADATA_KEY_ARTIST, track?.artist.orEmpty())
                 .putString(MediaMetadata.METADATA_KEY_ALBUM, track?.album.orEmpty())
-                .putString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI, track?.artworkUrl.orEmpty())
-                .putString(MediaMetadata.METADATA_KEY_ART_URI, track?.artworkUrl.orEmpty())
+                .putString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI, artUri)
+                .putString(MediaMetadata.METADATA_KEY_ART_URI, artUri)
+                .putString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI, artUri)
                 .putLong(MediaMetadata.METADATA_KEY_DURATION, state.durationMs)
-                .apply { artworkBitmap?.let { putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, it) } }
+                .apply {
+                    val art = artworkBitmap
+                    if (art != null) {
+                        putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, art)
+                        putBitmap(MediaMetadata.METADATA_KEY_ART, art)
+                        putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, art)
+                    }
+                }
                 .build(),
         )
         mediaSession.setPlaybackState(
@@ -453,6 +462,7 @@ class MusicPlaybackService : Service() {
             artworkRequestKey = ""
             artworkUrl = null
             artworkBitmap = null
+            artworkJob?.cancel()
             return
         }
 
@@ -461,6 +471,12 @@ class MusicPlaybackService : Service() {
         val requestKey = "${track.title}|${track.artist}|${track.artworkUrl.orEmpty()}"
         if (requestKey == artworkRequestKey) return
         artworkRequestKey = requestKey
+
+        // Track has changed: immediately clear previous track's artwork
+        // so the notification bar never displays the old song's cover art
+        artworkBitmap = null
+        artworkUrl = null
+        artworkJob?.cancel()
 
         val directUrl = track.artworkUrl?.takeIf(String::isNotBlank)
         if (directUrl != null) {
@@ -475,13 +491,22 @@ class MusicPlaybackService : Service() {
             fetchArtwork(cached)
         } else {
             scope.launch(Dispatchers.IO) {
-                artworkRepository.resolve(track.title, track.artist)
+                val resolved = artworkRepository.resolve(track.title, track.artist)
+                if (!resolved.isNullOrBlank()) {
+                    withContext(Dispatchers.Main.immediate) {
+                        val current = musicPlayer.state.value.current
+                        if (current?.title == track.title && current?.artist == track.artist) {
+                            fetchArtwork(resolved)
+                        }
+                    }
+                }
             }
         }
     }
 
     private fun fetchArtwork(url: String) {
         val cleanUrl = url.trim()
+        if (cleanUrl.isBlank()) return
         if (cleanUrl == artworkUrl && artworkBitmap != null) return
         artworkUrl = cleanUrl
         artworkJob?.cancel()
