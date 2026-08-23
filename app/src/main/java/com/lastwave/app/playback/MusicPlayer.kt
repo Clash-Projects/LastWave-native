@@ -195,12 +195,26 @@ class MusicPlayer @Inject constructor(
             errorRetryCount = 0
             if (mediaItem != null) {
                 val currentIndex = player.currentMediaItemIndex
+                val currentTrack = mediaItem.toPlayableTrack()
+                val currentQueue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toPlayableTrack() }
+                _state.update {
+                    it.copy(
+                        current = currentTrack,
+                        currentIndex = currentIndex,
+                        queue = if (currentQueue.isNotEmpty()) currentQueue else it.queue,
+                        isBuffering = true,
+                        error = null,
+                    )
+                }
                 enrichUpcomingQueue(currentIndex)
                 extendDiscoverQueueIfNeeded(currentIndex)
-                val currentQueue = _state.value.queue
-                val nextIndex = currentIndex + 1
-                if (nextIndex in currentQueue.indices) {
-                    preloadNextTrack(currentQueue[nextIndex])
+                val nextIndex = if (player.shuffleModeEnabled) {
+                    player.nextMediaItemIndex
+                } else {
+                    currentIndex + 1
+                }
+                if (nextIndex != C.INDEX_UNSET && nextIndex in 0 until player.mediaItemCount) {
+                    preloadNextTrack(player.getMediaItemAt(nextIndex).toPlayableTrack())
                 }
             }
         }
@@ -416,12 +430,17 @@ class MusicPlayer @Inject constructor(
         }
     }
 
-    fun playQueue(tracks: List<PlayableTrack>, startIndex: Int = 0, sourceLabel: String = "LastWave") {
-        playQueueInternal(tracks, startIndex, endlessDiscover = false, sourceLabel = sourceLabel)
+    fun playQueue(
+        tracks: List<PlayableTrack>,
+        startIndex: Int = 0,
+        sourceLabel: String = "LastWave",
+        startShuffled: Boolean = false,
+    ) {
+        playQueueInternal(tracks, startIndex, endlessDiscover = false, sourceLabel = sourceLabel, startShuffled = startShuffled)
     }
 
     fun playDiscoverQueue(tracks: List<PlayableTrack>, startIndex: Int = 0) {
-        playQueueInternal(tracks, startIndex, endlessDiscover = true, sourceLabel = "Discover")
+        playQueueInternal(tracks, startIndex, endlessDiscover = true, sourceLabel = "Discover", startShuffled = false)
     }
 
     private fun playQueueInternal(
@@ -429,6 +448,7 @@ class MusicPlayer @Inject constructor(
         startIndex: Int,
         endlessDiscover: Boolean,
         sourceLabel: String = if (endlessDiscover) "Discover" else "LastWave",
+        startShuffled: Boolean = false,
     ) {
         if (tracks.isEmpty()) return
         discoverQueueLoadJob?.cancel()
@@ -445,6 +465,9 @@ class MusicPlayer @Inject constructor(
 
         onMain {
             ensureForegroundService()
+            if (startShuffled) {
+                player.shuffleModeEnabled = true
+            }
             _state.value = MusicPlayerState(
                 current = selectedTrack,
                 queue = tracks,
@@ -453,6 +476,7 @@ class MusicPlayer @Inject constructor(
                 isEndlessQueue = endlessDiscover,
                 isBuffering = true,
                 isPlaying = true,
+                shuffleEnabled = player.shuffleModeEnabled,
             )
             persistPlaybackSession()
             player.setMediaItems(tracks.map(PlayableTrack::toMediaItem), selectedIndex, 0L)
@@ -464,8 +488,9 @@ class MusicPlayer @Inject constructor(
                 appendMissingDiscoverTracks(discoverRepository.getCachedFeed().map(GeneratedTrack::toPlayableTrack))
             }
             extendDiscoverQueueIfNeeded(selectedIndex)
-            if (selectedIndex + 1 in tracks.indices) {
-                preloadNextTrack(tracks[selectedIndex + 1])
+            val nextIndex = if (player.shuffleModeEnabled) player.nextMediaItemIndex else selectedIndex + 1
+            if (nextIndex != C.INDEX_UNSET && nextIndex in tracks.indices) {
+                preloadNextTrack(tracks[nextIndex])
             }
         }
     }
@@ -546,7 +571,12 @@ class MusicPlayer @Inject constructor(
         if (player.currentPosition > 5_000) player.seekTo(0) else player.seekToPreviousMediaItem()
     }
     fun next() = onMain { player.seekToNextMediaItem() }
-    fun toggleShuffle() = onMain { player.shuffleModeEnabled = !player.shuffleModeEnabled }
+    fun toggleShuffle() = onMain {
+        val newShuffle = !player.shuffleModeEnabled
+        player.shuffleModeEnabled = newShuffle
+        _state.update { it.copy(shuffleEnabled = newShuffle) }
+        persistPlaybackSession()
+    }
     fun cycleRepeatMode() = onMain {
         player.repeatMode = when (player.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
@@ -624,11 +654,21 @@ class MusicPlayer @Inject constructor(
     private fun enrichUpcomingQueue(currentIndex: Int) {
         queueEnrichmentJob?.cancel()
         queueEnrichmentJob = applicationScope.launch {
-            val endExclusive = withContext(Dispatchers.Main.immediate) {
-                minOf(currentIndex + 4, player.mediaItemCount)
+            val targetIndices = withContext(Dispatchers.Main.immediate) {
+                val list = mutableListOf<Int>()
+                for (i in (currentIndex + 1) until minOf(currentIndex + 5, player.mediaItemCount)) {
+                    list.add(i)
+                }
+                if (player.shuffleModeEnabled) {
+                    val next = player.nextMediaItemIndex
+                    if (next != C.INDEX_UNSET && next !in list && next in 0 until player.mediaItemCount) {
+                        list.add(0, next)
+                    }
+                }
+                list
             }
             data class PendingEnrich(val index: Int, val original: PlayableTrack, val expectedMediaId: String)
-            val pending = (currentIndex until endExclusive).mapNotNull { index ->
+            val pending = targetIndices.mapNotNull { index ->
                 val original = withContext(Dispatchers.Main.immediate) {
                     if (index >= player.mediaItemCount) null else player.getMediaItemAt(index).toPlayableTrack()
                 } ?: return@mapNotNull null
@@ -654,15 +694,9 @@ class MusicPlayer @Inject constructor(
                 val expectedMediaId = item.expectedMediaId
                 val index = item.index
                 withContext(Dispatchers.Main.immediate) {
-                    if (index < player.mediaItemCount && player.getMediaItemAt(index).mediaId == expectedMediaId) {
+                    // NEVER replace the currently playing item, as replaceMediaItem resets the player buffer and interrupts playback midway
+                    if (index != player.currentMediaItemIndex && index in 0 until player.mediaItemCount && player.getMediaItemAt(index).mediaId == expectedMediaId) {
                         player.replaceMediaItem(index, enriched.toMediaItem())
-                        if (index == player.currentMediaItemIndex) {
-                            _state.update { state ->
-                                if (state.current?.title == enriched.title && state.current?.artist == enriched.artist) {
-                                    state.copy(current = enriched)
-                                } else state
-                            }
-                        }
                     }
                 }
             }

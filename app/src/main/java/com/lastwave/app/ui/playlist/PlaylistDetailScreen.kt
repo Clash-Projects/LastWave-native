@@ -332,18 +332,20 @@ fun PlaylistDetailScreen(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 if (playlist.tracks.isNotEmpty()) {
-                                    val shuffled = playlist.tracks.map { track ->
+                                    val playableTracks = playlist.tracks.map { track ->
                                         com.lastwave.app.playback.PlayableTrack(
                                             title = track.name,
                                             artist = track.artist,
                                             album = track.album,
                                             artworkUrl = track.artworkUrl,
                                         )
-                                    }.shuffled()
+                                    }
+                                    val randomIndex = (playableTracks.indices).random()
                                     musicPlayer.playQueue(
-                                        shuffled,
-                                        startIndex = 0,
+                                        playableTracks,
+                                        startIndex = randomIndex,
                                         sourceLabel = playlist.title,
+                                        startShuffled = true,
                                     )
                                 }
                             },
@@ -732,6 +734,21 @@ fun PlaylistDetailScreen(
                             leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
                             onClick = {
                                 viewModel.togglePinned(playlistId)
+                                overflowMenuOpen = false
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Regenerate playlist") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            },
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.regenerate(playlistId)
                                 overflowMenuOpen = false
                             },
                         )

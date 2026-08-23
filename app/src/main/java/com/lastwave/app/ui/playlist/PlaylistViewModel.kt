@@ -350,40 +350,67 @@ class PlaylistViewModel @Inject constructor(
     fun regenerate(id: Long) {
         val playlist = _uiState.value.playlists.firstOrNull { it.id == id } ?: return
         viewModelScope.launch {
-            _uiState.update { it.copy(regeneratingId = id) }
+            _uiState.update { it.copy(regeneratingId = id, toastMessage = "Regenerating playlist\u2026") }
             try {
-                val targetCount = if (playlist.mode == "recommendations") {
-                    RECOMMENDATION_TRACK_COUNT
-                } else {
-                    playlist.tracks.size.coerceAtLeast(5)
+                val targetCount = (30..35).random()
+                val playlistArtists = playlist.tracks.map { it.artist }.filter { it.isNotBlank() }.distinct()
+                val pool = mutableListOf<GeneratedTrack>()
+
+                if (playlistArtists.isNotEmpty()) {
+                    val seeds = playlistArtists.shuffled().take(6)
+                    val seedTracks = coroutineScope {
+                        seeds.map { artist ->
+                            async {
+                                try {
+                                    val sim = generateRepository.call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "10"))
+                                    val simArtists = GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(3)
+                                    val tracks = coroutineScope {
+                                        simArtists.map { sa ->
+                                            async {
+                                                try {
+                                                    val page = (1..3).random()
+                                                    val d = generateRepository.call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "6", "page" to page.toString()))
+                                                    GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
+                                                } catch (_: Exception) {
+                                                    emptyList()
+                                                }
+                                            }
+                                        }.awaitAll().flatten()
+                                    }
+                                    tracks
+                                } catch (_: Exception) {
+                                    emptyList()
+                                }
+                            }
+                        }.awaitAll().flatten()
+                    }
+                    pool += seedTracks
                 }
-                val raw: List<GeneratedTrack> = when (playlist.mode) {
+
+                val modeTracks = when (playlist.mode) {
                     "top", "library" -> generateRepository.fetchTopTracks(targetCount, "overall")
                     "recent" -> generateRepository.fetchRecentTracks(targetCount)
-                    "mix" -> generateRepository.fetchMix(targetCount)
                     "recommendations" -> generateRepository.fetchRecommendations(targetCount)
                     else -> generateRepository.fetchMix(targetCount)
                 }
-                val finalTracks = if (playlist.mode == "recommendations") {
-                    generateRepository.deduplicate(raw).take(targetCount)
-                } else {
-                    generateRepository.precheck(raw).take(targetCount)
+                pool += modeTracks
+
+                val prechecked = generateRepository.precheck(generateRepository.shuffle(pool))
+                val finalTracks = prechecked.take(targetCount).ifEmpty {
+                    generateRepository.deduplicate(pool).take(targetCount)
                 }
+
                 if (finalTracks.isEmpty()) {
-                    throw IllegalStateException("No songs found to mix for this playlist.")
+                    throw IllegalStateException("No tracks found to mix for this playlist.")
                 }
-                if (playlist.mode == "recommendations" && finalTracks.size < targetCount) {
-                    throw IllegalStateException(
-                        "Found only ${finalTracks.size} of $targetCount fresh tracks. Please try again.",
-                    )
-                }
+
                 generateRepository.markAsSeen(finalTracks)
                 val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())
-                val saved = playlistRepository.save(title, playlist.subtitle, playlist.mode, finalTracks)
-                _uiState.update { it.copy(regeneratingId = null) }
+                val saved = playlistRepository.save(title, playlist.subtitle.ifBlank { "Regenerated Mix" }, playlist.mode, finalTracks)
+                _uiState.update { it.copy(regeneratingId = null, toastMessage = "Regenerated \"$title\" (${finalTracks.size} tracks)") }
                 load(justGeneratedId = saved.id)
             } catch (e: Exception) {
-                _uiState.update { it.copy(regeneratingId = null, toastMessage = e.message ?: "Couldn't regenerate") }
+                _uiState.update { it.copy(regeneratingId = null, toastMessage = e.message ?: "Couldn't regenerate playlist") }
             }
         }
     }
