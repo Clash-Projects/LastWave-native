@@ -4,7 +4,7 @@
 
 # ✨ LastWave v3.0
 
-**A fully-featured Last.fm client, high-fidelity music streamer, and native scrobbler for Android, built with Material 3 Expressive design.**
+**A High-Resolution Lossless Music Streaming & Player App with Real-Time Synced Lyrics & Smart Discovery for Android, built with Material 3 Expressive design.**
 
 <p align="center">
   <a href="https://github.com/duxtami/LastWave-native/stargazers">
@@ -12,6 +12,9 @@
   </a>
   <a href="https://github.com/duxtami/LastWave-native/network/members">
     <img src="https://img.shields.io/github/forks/duxtami/LastWave-native?style=for-the-badge&color=ffb4a2&labelColor=2d2d2d" alt="Forks" />
+  </a>
+  <a href="#">
+    <img src="https://img.shields.io/badge/Audio-Hi--Res%20Lossless%20FLAC-00E5FF?style=for-the-badge&labelColor=012226" alt="Hi-Res Lossless FLAC" />
   </a>
   <a href="#">
     <img src="https://img.shields.io/badge/Version-3.0.0--native-C6F100?style=for-the-badge&labelColor=012226" alt="Version 3.0.0-native" />
@@ -35,84 +38,73 @@
 <br/>
 
 <div align="center">
-  <img src="Screenshot/Screenshot_20260815-095128.png" width="32%" style="border-radius: 12px;" />
-  <img src="Screenshot/Screenshot_20260815-095135.png" width="32%" style="border-radius: 12px;" />
-  <img src="Screenshot/Screenshot_20260815-095140.png" width="32%" style="border-radius: 12px;" />
+  <img src="Screenshot/screenshot_1.png" width="31%" style="border-radius: 14px; margin: 4px;" />
+  <img src="Screenshot/screenshot_2.png" width="31%" style="border-radius: 14px; margin: 4px;" />
+  <img src="Screenshot/screenshot_3.png" width="31%" style="border-radius: 14px; margin: 4px;" />
   <br/>
   <br/>
-  <img src="Screenshot/Screenshot_20260815-095145.png" width="32%" style="border-radius: 12px;" />
-  <img src="Screenshot/Screenshot_20260815-095150.png" width="32%" style="border-radius: 12px;" />
-  <img src="Screenshot/Screenshot_20260815-095158.png" width="32%" style="border-radius: 12px;" />
+  <img src="Screenshot/screenshot_4.png" width="31%" style="border-radius: 14px; margin: 4px;" />
+  <img src="Screenshot/screenshot_5.png" width="31%" style="border-radius: 14px; margin: 4px;" />
+  <img src="Screenshot/screenshot_6.png" width="31%" style="border-radius: 14px; margin: 4px;" />
 </div>
 
 <br/>
 
-## About
+## 🌟 Overview
 
-LastWave is a native Android music client and intelligent companion for Last.fm — built purely in Kotlin and Jetpack Compose around the latest Material 3 Expressive guidelines. It features lossless high-res audio streaming, full-fidelity offline downloads with embedded metadata and lyrics, real-time synchronized LRCLIB lyrics with kinetic animations, taste-mix generation, and a powerful background scrobbler.
+**LastWave** is a next-generation native Android music streaming app engineered for audiophiles and music lovers. It delivers studio-quality **Hi-Res Lossless FLAC (up to 24-bit/192kHz)** and Opus playback, offline downloads with full embedded metadata, kinetic real-time synchronized lyrics, smart algorithmic playlist generation, and automatic scrobbling across all your devices.
+
+Designed from the ground up around **Material 3 Expressive**, LastWave pairs an ultra-smooth visual experience with uncompromising audio fidelity.
 
 ---
 
-## Core Features
+## 🎧 Lossless Audio Streaming & Backend
 
-| Feature | Description |
+LastWave features a lossless streaming and download engine powered directly by the **[clashflac](https://github.com/ajisth69/clashflac)** backend:
+
+- 🎼 **Studio Master Quality:** Stream and download bit-perfect FLAC audio up to **24-bit / 192kHz** directly from Qobuz via **[clashflac](https://github.com/ajisth69/clashflac)**.
+- ⚡ **Opus & High-Efficiency Audio:** Seamless dual-engine fallback streaming via YouTube Music Opus for exhaustive global catalog coverage.
+- 💾 **Full-Fidelity Offline Downloads:** One-tap downloads saved directly to your local storage (`Music/LastWave`), fully tagged with high-res cover art, release tags, and synchronized LRCLIB `.lrc` lyrics.
+- 🎛️ **Zero-Gap Playback:** Powered by AndroidX Media3 ExoPlayer with foreground audio playback and lockscreen media session controls.
+
+---
+
+## ✨ Key Features
+
+| Feature | Highlight |
 |:---|:---|
-| 🏠 **Home & Activity** | Recent scrobbles, top tracks & artists by timeframe (7d / 30d / 90d / 180d / 365d / overall), live Now Playing pulsing indicator, and loved tracks. |
-| 🔮 **Smart Discovery** | Adaptive recommendation engine using track & artist similarity, loved seeds, tag graphs, and personalized charting. |
-| 🎸 **Genre DNA & Explorer** | Detailed genre breakdown of your listening habits with one-tap mix generation and instant "Discover More" recommendations. |
-| 🪄 **Taste Mix & Playlists** | Generate unique 30–35 track dynamic playlists, regenerate mixes, export to custom in-app playlists, and sync with YouTube Music. |
-| 🎵 **Lossless Audio & Downloads** | Hi-Res Qobuz FLAC (up to 24-bit/192kHz) and YouTube Opus streaming with offline downloads, tagged with synchronized lyrics & cover art. |
-| 🎤 **Real-time Synced Lyrics** | Millisecond-accurate synchronized lyrics powered by LRCLIB with 8 customizable fluid physics animations. |
-| 🔍 **Universal Search** | Instant search for tracks, artists, albums, and Last.fm user profiles. |
-| 👥 **Friends Activity** | Seamlessly switch between friends' profiles to explore their listening stats and taste mixes. |
-| ⚙️ **Customization & Backup** | Material You wallpaper color extraction, custom HSL color wheel, dynamic Now Playing palette, and full JSON backup & restore. |
+| 🎵 **Lossless Streaming** | True Hi-Res 24-bit FLAC & Opus streaming with lossless bitstream output. |
+| 📥 **Offline Downloader** | Download albums, mixes, and individual songs with embedded album art and synced lyrics. |
+| 🎤 **Real-Time Synced Lyrics** | Millisecond-accurate animated karaoke lyrics powered by LRCLIB with 8 customizable physics motion styles (Apple Fluid, Karaoke Pulse, Kinetic Slide, etc.). |
+| 🔮 **Smart Discovery Engine** | Tailored recommendation feed built from your taste profile, similar seeds, loved tracks, and live charts. |
+| 🎸 **Genre DNA & Explorer** | Dynamic breakdown of your favorite genres with instant "Start Mix" and one-tap "Discover More" recommendations. |
+| 🪄 **Taste Mixes & Playlists** | Generate unique 30–35 track mood mixes, regenerate fresh variations, manage custom playlists, and sync with YouTube Music. |
+| 👥 **Friends & Social Feed** | Browse friends' listening habits, explore their top tracks, and play their taste profiles. |
+| 🔄 **Integrated Scrobbler** | Automatic background scrobbler watching your active media sessions across any Android music app with zero battery drain. |
+| 🎨 **Material 3 Expressive** | Dynamic wallpaper colors, custom HSL color picker, dynamic album art palette, fluid morphing cards, and tactile haptics. |
 
 ---
 
-## Lossless Streaming & Backend Credits
+## 🛠️ Tech Stack & Architecture
 
-- **Qobuz Lossless FLAC Backend:** High-fidelity audio playback and download engine is powered by the [clashflac](https://github.com/ajisth69/clashflac) backend by [Ajisth (ajisth69)](https://github.com/ajisth69).
-- **Lyrics Provider:** [LRCLIB](https://lrclib.net) for synced and plain lyric data.
-- **Scrobble & Metadata Service:** Official [Last.fm API](https://www.last.fm/api).
-
----
-
-## The Native Scrobbler
-
-- Detects currently playing media via Android's native `MediaSessionManager` across all music apps without requiring per-app setup.
-- Configurable scrobble percentage threshold and custom app allowlists.
-- Handles track repeats, pauses, seeking, and rapid app switching accurately.
-- Automatically cleans auto-generated suffix tags (such as ` - Topic`) from YouTube Music artists.
-- Built-in live debug log in Settings for full scrobble status visibility.
+- **Language & Framework:** 100% Kotlin + Jetpack Compose (Material 3 Expressive)
+- **Lossless Audio Backend:** **[clashflac](https://github.com/ajisth69/clashflac)** by [Ajisth (ajisth69)](https://github.com/ajisth69)
+- **Audio Engine:** AndroidX Media3 ExoPlayer + MediaSessionService
+- **Lyrics Engine:** [LRCLIB](https://lrclib.net) API
+- **Data & Intelligence:** Last.fm API, Room DB, Jetpack DataStore, Dagger Hilt
 
 ---
 
-## Design & Aesthetics
+## 🚀 Getting Started
 
-- **Material 3 Expressive:** Grouped surface cards, fluid shape morphing, spring-physics motion, and contextual haptics.
-- **Theming:** Material You wallpaper dynamic theming, custom HSL color picker, and dynamic album art extraction.
-- **Predictive Back:** Native gesture animations throughout sheets and nested screens.
-- **Custom Typography:** Google Sans Flex variable typography.
-
----
-
-## Tech Stack
-
-- **UI:** Jetpack Compose + Material 3 Expressive (Compose 1.8+)
-- **Architecture:** MVVM + Clean Architecture + Kotlin Coroutines & Flow
-- **Dependency Injection:** Dagger Hilt
-- **Media Playback:** Media3 ExoPlayer with foreground audio service & notification controls
-- **Networking & Storage:** Retrofit, OkHttp, Room, Jetpack DataStore
+1. Download the latest APK from the **[Releases](https://github.com/duxtami/LastWave-native/actions)** tab.
+2. Install the single release package (`LastWave-v3.0.0-release.apk`).
+3. Connect your Last.fm account to sync your scrobbles, taste profile, and discovery feed.
+4. Start streaming in bit-perfect lossless quality!
 
 ---
 
-## Getting Started
-
-1. Download the latest release from the [Releases](https://github.com/duxtami/LastWave-native/actions) tab.
-2. Tap **Connect with Last.fm** to securely authenticate via Custom Tabs.
-3. Grant notification listener permission for background scrobbling.
-
-## Building from Source
+## 📦 Building from Source
 
 ```bash
 git clone https://github.com/duxtami/LastWave-native.git
@@ -122,7 +114,7 @@ cd LastWave-native
 
 ---
 
-## Community & Support
+## 💬 Community & Support
 
 - 📢 **Updates & Support:** [Join @clashprojects on Telegram](https://t.me/clashprojects)
 - 🚀 **More From Us:** [Join @MaterialYouApp on Telegram](https://t.me/MaterialYouApp)
