@@ -4,6 +4,10 @@ import android.util.Log
 import androidx.compose.runtime.Immutable
 import com.lastwave.app.data.local.SessionPreferences
 import com.lastwave.app.data.network.LastFmApiService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
