@@ -31,6 +31,7 @@ data class GenresUiState(
     // Detail sheet
     val detailGenre: String? = null,
     val detailTracks: List<GeneratedTrack> = emptyList(),
+    val isDiscoverMode: Boolean = false,
     val detailLoading: Boolean = false,
     val detailPage: Int = 1,
     val detailSort: GenreDetailSort = GenreDetailSort.POPULAR,
@@ -55,10 +56,10 @@ class GenresViewModel @Inject constructor(
         // A genre tapped from any track's context menu app-wide (Home,
         // Discover, Playlist, Search) — see GenreExplorer's doc comment.
         // Consumed immediately so navigating back to this screen normally
-        // afterwards doesn't reopen the same detail again.
+        // doesn't reopen the sheet.
         genreExplorer.pendingGenre.value?.let { genre ->
-            openDetail(genre)
             genreExplorer.consume()
+            openDetail(genre)
         }
     }
 
@@ -85,6 +86,7 @@ class GenresViewModel @Inject constructor(
             it.copy(
                 detailGenre = genre,
                 detailTracks = emptyList(),
+                isDiscoverMode = false,
                 detailLoading = true,
                 detailPage = 1,
                 detailSort = GenreDetailSort.POPULAR,
@@ -95,7 +97,7 @@ class GenresViewModel @Inject constructor(
     }
 
     fun closeDetail() {
-        _uiState.update { it.copy(detailGenre = null, detailTracks = emptyList()) }
+        _uiState.update { it.copy(detailGenre = null, detailTracks = emptyList(), isDiscoverMode = false) }
     }
 
     fun setDetailSort(sort: GenreDetailSort) {
@@ -106,8 +108,22 @@ class GenresViewModel @Inject constructor(
         }
     }
 
+    fun showYourTracks(genre: String) {
+        _uiState.update {
+            it.copy(
+                isDiscoverMode = false,
+                detailTracks = emptyList(),
+                detailLoading = true,
+                detailPage = 1,
+                detailHasMore = true,
+            )
+        }
+        loadDetailPage(reset = true)
+    }
+
     fun loadDetailPage(reset: Boolean = false) {
         val genre = _uiState.value.detailGenre ?: return
+        if (_uiState.value.isDiscoverMode) return
         if (_uiState.value.detailLoading && !reset) return
         if (!reset && !_uiState.value.detailHasMore) return
         viewModelScope.launch {
@@ -126,9 +142,10 @@ class GenresViewModel @Inject constructor(
         }
     }
 
-    /** §5.3's "Start Mix" — instantly begins playback of the genre mix and saves to playlists. */
+    /** §5.3's "Start Mix" — instantly begins playback of the visible genre queue and saves to playlists. */
     fun startMix(genre: String) {
         val currentTracks = _uiState.value.detailTracks
+        val isDiscover = _uiState.value.isDiscoverMode
         viewModelScope.launch {
             _uiState.update { it.copy(detailLoading = true) }
             try {
@@ -149,10 +166,10 @@ class GenresViewModel @Inject constructor(
                     musicPlayer.playQueue(
                         playable,
                         startIndex = 0,
-                        sourceLabel = "${genre.replaceFirstChar { it.uppercase() }} Mix",
+                        sourceLabel = "${genre.replaceFirstChar { it.uppercase() }} ${if (isDiscover) "Discovery" else "Mix"}",
                     )
                 }
-                val finalTracks = generateRepository.precheck(tracks).take(25)
+                val finalTracks = generateRepository.precheck(tracks).take(35).ifEmpty { tracks.take(35) }
                 generateRepository.markAsSeen(finalTracks)
                 val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())
                 val subtitle = PlaylistNamer.subtitleFor("tag", tagInput = genre)
@@ -164,22 +181,22 @@ class GenresViewModel @Inject constructor(
         }
     }
 
-    /** §5.5 "Discover More" — loads fresh undiscovered tracks in this genre directly into the list. */
+    /** §5.5 "Discover More" — directly loads and displays 30-35 fresh undiscovered genre recommendations. */
     fun discoverMore(genre: String) {
         viewModelScope.launch {
-            _uiState.update { it.copy(detailLoading = true) }
+            _uiState.update { it.copy(detailLoading = true, isDiscoverMode = true) }
             try {
                 val fresh = genresRepository.discoverMore(genre)
                 _uiState.update { s ->
-                    val combined = generateRepository.deduplicate(s.detailTracks + fresh)
                     s.copy(
-                        detailTracks = combined,
+                        detailTracks = fresh.ifEmpty { s.detailTracks },
+                        isDiscoverMode = true,
                         detailLoading = false,
-                        detailHasMore = true,
+                        detailHasMore = false,
                     )
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(detailLoading = false, error = e.message) }
+                _uiState.update { it.copy(detailLoading = false, error = e.message ?: "Failed to discover genre tracks") }
             }
         }
     }

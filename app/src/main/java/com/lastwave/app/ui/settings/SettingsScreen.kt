@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
@@ -740,6 +741,28 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("About")
+                    SettingsGroup(rowCount = 2) { index, position ->
+                        when (index) {
+                            0 -> SettingsActionCard(
+                                icon = Icons.AutoMirrored.Filled.Send,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "Updates & Support",
+                                subtitle = "Join @clashprojects on Telegram",
+                                onClick = { openTelegramChannel(context, "clashprojects") },
+                                position = position,
+                            )
+                            1 -> SettingsActionCard(
+                                icon = Icons.Filled.AutoAwesome,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "More From Us",
+                                subtitle = "Join @MaterialYouApp on Telegram",
+                                onClick = { openTelegramChannel(context, "MaterialYouApp") },
+                                position = position,
+                            )
+                        }
+                    }
                     Spacer(Modifier.height(4.dp))
                     AboutCard(versionName = appVersionName(context))
                     SettingsActionCard(
@@ -1684,6 +1707,32 @@ private fun AboutCard(versionName: String) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
+        }
+    }
+}
+
+private fun openTelegramChannel(context: android.content.Context, handleOrUrl: String) {
+    val username = handleOrUrl
+        .removePrefix("https://t.me/")
+        .removePrefix("http://t.me/")
+        .removePrefix("@")
+        .trim()
+    val tgIntent = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=$username")).apply {
+        setPackage("org.telegram.messenger")
+    }
+    val genericTgIntent = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=$username"))
+    val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/$username"))
+    try {
+        context.startActivity(tgIntent)
+    } catch (_: Exception) {
+        try {
+            context.startActivity(genericTgIntent)
+        } catch (_: Exception) {
+            try {
+                context.startActivity(webIntent)
+            } catch (_: Exception) {
+                // Ignore fallback
+            }
         }
     }
 }

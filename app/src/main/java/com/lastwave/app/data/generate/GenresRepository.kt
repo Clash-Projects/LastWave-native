@@ -197,57 +197,72 @@ class GenresRepository @Inject constructor(
      *  genre) + track.getsimilar for a few pool tracks — filtered against
      *  the user's own top-200 all-time history, with an unfiltered fallback
      *  if filtering leaves too few. */
-    suspend fun discoverMore(genre: String): List<GeneratedTrack> {
+    suspend fun discoverMore(genre: String): List<GeneratedTrack> = coroutineScope {
         val pool = mutableListOf<GeneratedTrack>()
-
-        try {
-            val page = (1..6).random()
-            val d = call(mapOf("method" to "tag.gettoptracks", "tag" to genre, "limit" to "30", "page" to page.toString()))
-            pool += GenerateJson.normalise(d["tracks"]?.jsonObject?.get("track"))
-        } catch (e: Exception) { Log.d(TAG, "discoverMore tag.gettoptracks miss", e) }
-
         val profile = try { tasteProfileProvider.get() } catch (e: Exception) { null }
-        val knownArtistsInGenre = profile?.topArtistNames?.toList()?.shuffled()?.take(4) ?: emptyList()
 
-        if (knownArtistsInGenre.isNotEmpty()) {
-            for (artistName in knownArtistsInGenre) {
-                try {
-                    val sim = call(mapOf("method" to "artist.getsimilar", "artist" to artistName, "limit" to "8"))
-                    for (sa in GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(2)) {
-                        try {
-                            val d = call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "8"))
-                            pool += GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
-                        } catch (e: Exception) { Log.d(TAG, "discoverMore similar-artist toptracks miss", e) }
-                    }
-                } catch (e: Exception) { Log.d(TAG, "discoverMore artist.getsimilar miss", e) }
+        // 1. Tag top tracks across random pages
+        val tagTracksDeferred = async(Dispatchers.IO) {
+            try {
+                val page = (1..5).random()
+                val d = call(mapOf("method" to "tag.gettoptracks", "tag" to genre.trim(), "limit" to "50", "page" to page.toString()))
+                GenerateJson.normalise(d["tracks"]?.jsonObject?.get("track"))
+            } catch (e: Exception) {
+                Log.d(TAG, "discoverMore tag.gettoptracks miss", e)
+                emptyList()
             }
-        } else {
+        }
+
+        // 2. Tag top artists
+        val tagArtistsDeferred = async(Dispatchers.IO) {
             try {
-                val d = call(mapOf("method" to "tag.gettopartists", "tag" to genre, "limit" to "10"))
-                val artistNames = GenerateJson.namesOf(d["topartists"]?.jsonObject?.get("artist")).shuffled().take(4)
-                for (artistName in artistNames) {
-                    try {
-                        val td = call(mapOf("method" to "artist.gettoptracks", "artist" to artistName, "limit" to "8"))
-                        pool += GenerateJson.normalise(td["toptracks"]?.jsonObject?.get("track"))
-                    } catch (e: Exception) { Log.d(TAG, "discoverMore cold-start artist toptracks miss", e) }
+                val d = call(mapOf("method" to "tag.gettopartists", "tag" to genre.trim(), "limit" to "12"))
+                GenerateJson.namesOf(d["topartists"]?.jsonObject?.get("artist"))
+            } catch (e: Exception) {
+                Log.d(TAG, "discoverMore tag.gettopartists miss", e)
+                emptyList()
+            }
+        }
+
+        val tagTracks = tagTracksDeferred.await()
+        val tagArtists = tagArtistsDeferred.await()
+        pool += tagTracks
+
+        // 3. Concurrently fetch top tracks for top genre artists
+        val artistSeeds = (profile?.topArtistNames?.toList()?.shuffled()?.take(3) ?: emptyList()) + tagArtists.shuffled().take(5)
+        val artistTopTracks = artistSeeds.distinct().take(6).map { artistName ->
+            async(Dispatchers.IO) {
+                try {
+                    val page = (1..3).random()
+                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to artistName, "limit" to "6", "page" to page.toString()))
+                    GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
+                } catch (e: Exception) {
+                    emptyList()
                 }
-            } catch (e: Exception) { Log.d(TAG, "discoverMore tag.gettopartists miss", e) }
-        }
+            }
+        }.awaitAll().flatten()
+        pool += artistTopTracks
 
-        for (seed in pool.shuffled().take(3)) {
-            if (seed.name.isBlank() || seed.artist.isBlank()) continue
-            try {
-                val d = call(mapOf("method" to "track.getsimilar", "track" to seed.name, "artist" to seed.artist, "limit" to "10"))
-                pool += GenerateJson.normalise(d["similartracks"]?.jsonObject?.get("track"))
-            } catch (e: Exception) { Log.d(TAG, "discoverMore track.getsimilar miss", e) }
-        }
+        // 4. Concurrently fetch similar tracks for 2-3 pool seeds
+        val trackSeeds = pool.filter { it.name.isNotBlank() && it.artist.isNotBlank() }.shuffled().take(3)
+        val similarTracks = trackSeeds.map { seed ->
+            async(Dispatchers.IO) {
+                try {
+                    val d = call(mapOf("method" to "track.getsimilar", "track" to seed.name, "artist" to seed.artist, "limit" to "8"))
+                    GenerateJson.normalise(d["similartracks"]?.jsonObject?.get("track"))
+                } catch (e: Exception) {
+                    emptyList()
+                }
+            }
+        }.awaitAll().flatten()
+        pool += similarTracks
 
-        val heardKeys = ((profile?.topTracksRaw ?: emptyList())).map { it.key }.toSet()
+        val heardKeys = (profile?.topTracksRaw ?: emptyList()).map { it.key }.toSet()
         val deduped = generateRepository.deduplicate(pool)
         val filtered = deduped.filterNot { it.key in heardKeys }
-        val finalPool = if (filtered.size >= 10) filtered else deduped
+        val finalPool = if (filtered.size >= 12) filtered else deduped
 
-        return generateRepository.filterPlayable(finalPool.shuffled()).take(30)
+        generateRepository.filterPlayable(finalPool.shuffled()).take(35)
     }
 
     /**

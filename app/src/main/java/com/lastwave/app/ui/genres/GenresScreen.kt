@@ -131,6 +131,7 @@ fun GenresScreen(
             onLoadMore = { viewModel.loadDetailPage() },
             onStartMix = { viewModel.startMix(genre) },
             onDiscoverMore = { viewModel.discoverMore(genre) },
+            onShowYourTracks = { viewModel.showYourTracks(genre) },
             onExploreGenre = { viewModel.exploreGenre(it) },
         )
     }
@@ -194,6 +195,7 @@ private fun GenreDetailSheet(
     onLoadMore: () -> Unit,
     onStartMix: () -> Unit,
     onDiscoverMore: () -> Unit,
+    onShowYourTracks: () -> Unit,
     onExploreGenre: (String) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -207,19 +209,33 @@ private fun GenreDetailSheet(
         }
     }
     LaunchedEffect(shouldLoadMore, state.detailTracks.size) {
-        if (shouldLoadMore && !state.detailLoading && state.detailHasMore) onLoadMore()
+        if (shouldLoadMore && !state.detailLoading && state.detailHasMore && !state.isDiscoverMode) onLoadMore()
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
                 Text(genre.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text("Your Tracks", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (state.isDiscoverMode) "Discoveries \u2022 Fresh recommendations" else "Your Tracks \u2022 Based on your scrobbles",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                androidx.compose.material3.Button(onClick = onStartMix, modifier = Modifier.weight(1f)) { Text("Start Mix") }
-                androidx.compose.material3.OutlinedButton(onClick = onDiscoverMore, modifier = Modifier.weight(1f)) { Text("Discover More") }
+                androidx.compose.material3.Button(onClick = onStartMix, modifier = Modifier.weight(1f)) {
+                    Text("Start Mix")
+                }
+                if (state.isDiscoverMode) {
+                    androidx.compose.material3.OutlinedButton(onClick = onShowYourTracks, modifier = Modifier.weight(1f)) {
+                        Text("Your Tracks")
+                    }
+                } else {
+                    androidx.compose.material3.OutlinedButton(onClick = onDiscoverMore, modifier = Modifier.weight(1f)) {
+                        Text("Discover More")
+                    }
+                }
             }
 
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(bottom = 12.dp)) {
