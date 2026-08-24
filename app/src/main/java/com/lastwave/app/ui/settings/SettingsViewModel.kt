@@ -122,6 +122,11 @@ class SettingsViewModel @Inject constructor(
 
     init {
         refreshRecommendationExclusionCount()
+        viewModelScope.launch {
+            generateRepository.observeRecommendationExclusions().collect { exclusions ->
+                _uiState.update { it.copy(recommendationExclusionCount = exclusions.size) }
+            }
+        }
     }
 
     fun refreshRecommendationExclusionCount() {

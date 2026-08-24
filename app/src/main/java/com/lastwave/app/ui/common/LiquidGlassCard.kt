@@ -77,7 +77,7 @@ fun LiquidGlassCard(
     }
 
     val glassTint = (if (tintColor.isSpecified) tintColor else MaterialTheme.colorScheme.surfaceContainerHigh)
-        .let { it.copy(alpha = it.alpha.coerceAtLeast(0.90f)) }
+        .let { it.copy(alpha = minOf(it.alpha, 0.72f)) }
     val clickModifier = if (onClick != null) {
         Modifier.clickable(
             interactionSource = remember { MutableInteractionSource() },
@@ -92,8 +92,8 @@ fun LiquidGlassCard(
     Box(
         modifier = modifier
             .clip(shape)
-            .liquidGlassChrome(shape, enabled = true)
             .background(glassTint, shape)
+            .liquidGlassChrome(shape, enabled = true)
             .then(clickModifier)
             .padding(16.dp),
         contentAlignment = Alignment.TopStart,

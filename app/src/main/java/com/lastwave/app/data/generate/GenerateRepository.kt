@@ -131,7 +131,12 @@ class GenerateRepository @Inject constructor(
         return exclusionMutex.withLock {
             try {
                 recommendationExclusionDao.upsert(
-                    RecommendationExclusionEntity(track.key, System.currentTimeMillis()),
+                    RecommendationExclusionEntity(
+                        trackKey = track.key,
+                        excludedAtMillis = System.currentTimeMillis(),
+                        trackName = trackName.trim(),
+                        artistName = artistName.trim(),
+                    ),
                 )
                 exclusionKeysCache = (exclusionKeysCache ?: recommendationExclusionDao.getAll()
                     .mapTo(mutableSetOf()) { it.trackKey }) + track.key
@@ -173,6 +178,19 @@ class GenerateRepository @Inject constructor(
     }
 
     suspend fun recommendationExclusionCount(): Int = recommendationExclusionKeys().size
+
+    fun observeRecommendationExclusions() = recommendationExclusionDao.observeAll()
+
+    suspend fun removeRecommendationExclusion(trackKey: String): Boolean = exclusionMutex.withLock {
+        try {
+            recommendationExclusionDao.delete(trackKey)
+            exclusionKeysCache = exclusionKeysCache?.minus(trackKey)
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to restore excluded recommendation", e)
+            false
+        }
+    }
 
     fun invalidateRecommendationExclusionCache() {
         exclusionKeysCache = null

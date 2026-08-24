@@ -79,6 +79,18 @@ object DatabaseModule {
         }
     }
 
+    /** Adds display metadata so exclusions can be managed individually. */
+    private val migration9To10 = object : Migration(9, 10) {
+        override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+            database.execSQL(
+                "ALTER TABLE recommendation_exclusions ADD COLUMN trackName TEXT NOT NULL DEFAULT ''",
+            )
+            database.execSQL(
+                "ALTER TABLE recommendation_exclusions ADD COLUMN artistName TEXT NOT NULL DEFAULT ''",
+            )
+        }
+    }
+
     private val migration7To8 = object : Migration(7, 8) {
         override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
             database.execSQL(
@@ -113,7 +125,14 @@ object DatabaseModule {
             // future schema changes can rebuild Room, then restores that
             // mirror if the database opens empty. Artwork is cache.
             .fallbackToDestructiveMigration()
-            .addMigrations(migration4To5, migration5To6, migration6To7, migration7To8, migration8To9)
+            .addMigrations(
+                migration4To5,
+                migration5To6,
+                migration6To7,
+                migration7To8,
+                migration8To9,
+                migration9To10,
+            )
             .build()
 
     @Provides

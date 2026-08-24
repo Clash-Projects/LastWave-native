@@ -27,9 +27,9 @@ import javax.inject.Singleton
  *
  * Designed around pristine studio-grade playback:
  *  • **Clarity First**: Open vocal presence (1.5k–4kHz) and sparkling air (10k–16kHz) without harshness.
- *  • **Zero Phase Distortion**: No fake 3D virtualizers, phase comb-filtering, or bloated bass boosters.
- *  • **Safe Audio Processing**: Dynamic pre-attenuation and brickwall peak limiting (Android 9+) to
- *    prevent inter-sample digital clipping even at maximum volume on 0 dBFS masters.
+ *  • **Natural Imaging**: No fake 3D virtualizers, comb filtering, or bloated bass effects.
+ *  • **Controlled Dynamics**: Gentle five-zone control adds separation and punch without crushing transients.
+ *  • **Safe Output**: Dynamic gain staging and peak limiting (Android 9+) protect dense masters.
  *  • **Memory & HAL Safe**: Thread-safe lifecycle using [Mutex] and background dispatchers so vendor
  *    AudioFX IPC calls never stutter playback or block the main thread.
  */
@@ -120,38 +120,25 @@ class AudioEffectsEngine @Inject constructor(
             (20.0 * log10(volumeBoostPercent / 100.0)).toFloat().coerceIn(0f, 6.1f)
         } else 0f
 
-        // Prefer modern DynamicsProcessing with a brickwall limiter on Android 9+.
-        // The gain is applied before the limiter, so 200% does not silently
-        // become a clipped digital signal on supported devices.
+        // Keep tone shaping and loudness as separate stages. Feeding +6 dB
+        // into the tone limiter made the old 200% control collapse back toward
+        // the original peaks and sound almost unchanged on modern Android.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            applyDynamicsProcessing(
-                gainsDb = activeGains,
-                requestedOutputGainDb = boostDb,
-                toneProcessingActive = needsToneProcessing,
-            )
+            if (needsToneProcessing) applyDynamicsProcessing(activeGains) else releaseToneProcessingInternal()
         } else {
             if (needsToneProcessing) applyEqualizer(activeGains) else releaseToneProcessingInternal()
-            if (volumeBoostActive) applyLegacyVolumeBoost(boostDb) else releaseLoudnessInternal()
         }
+        if (volumeBoostActive) applyVolumeBoost(boostDb) else releaseLoudnessInternal()
     }
 
     // ── DynamicsProcessing (API 28+ Studio Precision) ──
 
-    private fun applyDynamicsProcessing(
-        gainsDb: List<Float>,
-        requestedOutputGainDb: Float,
-        toneProcessingActive: Boolean,
-    ) {
+    private fun applyDynamicsProcessing(gainsDb: List<Float>) {
         runCatching {
             // Leave at most a small bounded boost before the safety limiter.
             // This retains perceived energy while avoiding constant gain
             // reduction on already-loud masters.
-            val toneHeadroomDb = if (toneProcessingActive) {
-                calculateHeadroomDb(gainsDb)
-            } else {
-                0f
-            }
-            val stagedInputGainDb = requestedOutputGainDb + toneHeadroomDb
+            val stagedInputGainDb = calculateHeadroomDb(gainsDb)
 
             var dp = dynamicsProcessor
             if (dp == null) {
@@ -160,8 +147,8 @@ class AudioEffectsEngine @Inject constructor(
                     /* channelCount = */ 2,
                     /* enablePreEq = */ true,
                     /* preEqBandCount = */ EQ_BAND_FREQS_HZ.size,
-                    /* enableMbc = */ false,
-                    /* mbcBandCount = */ 0,
+                    /* enableMbc = */ true,
+                    /* mbcBandCount = */ STUDIO_MBC_BAND_COUNT,
                     /* enablePostEq = */ false,
                     /* postEqBandCount = */ 0,
                     /* enableLimiter = */ true
@@ -187,9 +174,14 @@ class AudioEffectsEngine @Inject constructor(
             }
             dp.setPreEqAllChannelsTo(preEq)
 
+            // Studio Master only: five broad, gently controlled zones keep
+            // sub-bass firm, vocals present and treble calm. Ratios stay very
+            // low so micro-detail and natural musical dynamics remain intact.
+            dp.setMbcAllChannelsTo(createStudioMasterDynamics(enhancerEnabled))
+
             // Fast safety ceiling with recovery slow enough to avoid audible
             // pumping. It should stay idle during normal clarity playback and
-            // engage mainly for hot masters or an explicit volume boost.
+            // engage mainly for hot masters and rare combined-band peaks.
             val limiter = DynamicsProcessing.Limiter(
                 /* inUse = */ true,
                 /* enabled = */ true,
@@ -203,27 +195,54 @@ class AudioEffectsEngine @Inject constructor(
             dp.setLimiterAllChannelsTo(limiter)
             dp.enabled = true
             // A prior vendor-DSP failure may have created the legacy fallbacks.
-            // Never leave two independent tone/gain effects active together.
+            // Never leave two independent tone effects active together.
             releaseEqualizerInternal()
-            releaseLoudnessInternal()
         }.onFailure { e ->
             Log.w(TAG, "DynamicsProcessing unavailable, falling back to legacy Equalizer: ${e.message}")
             releaseDynamicsProcessorInternal()
             applyEqualizer(gainsDb)
-            if (requestedOutputGainDb > 0f) {
-                applyLegacyVolumeBoost(requestedOutputGainDb)
-            } else {
-                releaseLoudnessInternal()
-            }
         }
     }
 
-    /** Pre-Android 9 fallback for the same bounded gain control. */
-    private fun applyLegacyVolumeBoost(boostDb: Float) {
+    private fun createStudioMasterDynamics(enabled: Boolean): DynamicsProcessing.Mbc {
+        val stage = DynamicsProcessing.Mbc(enabled, true, STUDIO_MBC_BAND_COUNT)
+        for (index in 0 until STUDIO_MBC_BAND_COUNT) {
+            stage.setBand(
+                index,
+                DynamicsProcessing.MbcBand(
+                    /* enabled = */ true,
+                    /* cutoffFrequency = */ STUDIO_MBC_CUTOFF_HZ[index],
+                    /* attackTime = */ STUDIO_MBC_ATTACK_MS[index],
+                    /* releaseTime = */ STUDIO_MBC_RELEASE_MS[index],
+                    /* ratio = */ STUDIO_MBC_RATIO[index],
+                    /* threshold = */ STUDIO_MBC_THRESHOLD_DB[index],
+                    /* kneeWidth = */ 8.0f,
+                    /* noiseGateThreshold = */ -90.0f,
+                    /* expanderRatio = */ 1.0f,
+                    /* preGain = */ 0.0f,
+                    /* postGain = */ STUDIO_MBC_POST_GAIN_DB[index],
+                ),
+            )
+        }
+        return stage
+    }
+
+    /**
+     * Dedicated audible loudness stage for every supported Android version.
+     * LoudnessEnhancer applies the requested gain while compressing only peaks
+     * that would clip, which is exactly the behavior a 100–200% control needs.
+     */
+    private fun applyVolumeBoost(boostDb: Float) {
         if (sessionId == C.AUDIO_SESSION_ID_UNSET) return
         runCatching {
-            val enhancer = loudnessEnhancer ?: LoudnessEnhancer(sessionId).also {
-                loudnessEnhancer = it
+            val current = loudnessEnhancer
+            val enhancer = if (current != null && runCatching { current.hasControl() }.getOrDefault(false)) {
+                current
+            } else {
+                releaseLoudnessInternal()
+                LoudnessEnhancer(sessionId).also {
+                    loudnessEnhancer = it
+                }
             }
             enhancer.setTargetGain((boostDb * MB_PER_DB).roundToInt().coerceIn(0, 610))
             enhancer.enabled = true
@@ -331,5 +350,13 @@ class AudioEffectsEngine @Inject constructor(
         const val MILLIHERTZ_PER_HZ = 1000
         const val MB_PER_DB = 100f
         const val MAX_PRE_LIMITER_BOOST_DB = 0.6f
+        const val STUDIO_MBC_BAND_COUNT = 5
+
+        val STUDIO_MBC_CUTOFF_HZ = floatArrayOf(120f, 500f, 2_200f, 6_500f, 20_000f)
+        val STUDIO_MBC_ATTACK_MS = floatArrayOf(18f, 13f, 8f, 4f, 3f)
+        val STUDIO_MBC_RELEASE_MS = floatArrayOf(170f, 140f, 115f, 100f, 90f)
+        val STUDIO_MBC_RATIO = floatArrayOf(1.16f, 1.12f, 1.14f, 1.20f, 1.12f)
+        val STUDIO_MBC_THRESHOLD_DB = floatArrayOf(-18f, -20f, -22f, -20f, -18f)
+        val STUDIO_MBC_POST_GAIN_DB = floatArrayOf(0.30f, 0.05f, 0.25f, 0.05f, 0.15f)
     }
 }

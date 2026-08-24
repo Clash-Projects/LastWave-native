@@ -145,19 +145,17 @@ object Md3SchemeBuilder {
 
         return scheme.copy(
             surfaceContainer = scheme.surfaceContainer.copy(alpha = GLASS_CONTAINER_ALPHA),
-            surfaceContainerHigh = scheme.surfaceContainerHigh.copy(alpha = GLASS_CONTAINER_ALPHA + 0.02f),
-            surfaceContainerHighest = scheme.surfaceContainerHighest.copy(alpha = GLASS_CONTAINER_ALPHA + 0.04f),
-            surfaceVariant = scheme.surfaceVariant.copy(alpha = 0.98f),
+            surfaceContainerHigh = scheme.surfaceContainerHigh.copy(alpha = GLASS_CONTAINER_ALPHA + 0.04f),
+            surfaceContainerHighest = scheme.surfaceContainerHighest.copy(alpha = GLASS_CONTAINER_ALPHA + 0.08f),
+            surfaceVariant = scheme.surfaceVariant.copy(alpha = 0.86f),
             primaryContainer = scheme.primaryContainer,
             secondaryContainer = scheme.secondaryContainer,
             tertiaryContainer = scheme.tertiaryContainer,
         )
     }
 
-    /** Base opacity for floating container surfaces while glass is on.
-     *  High enough that scrolling content underneath never fights with
-     *  card/label text, icons, or progress bars. */
-    private const val GLASS_CONTAINER_ALPHA = 0.94f
+    /** Real translucency while retaining enough density for white text. */
+    private const val GLASS_CONTAINER_ALPHA = 0.74f
 
     /**
      * HSL(h in 0-360, s in 0-100, l in 0-100) -> Compose Color.

@@ -10,7 +10,7 @@ import androidx.room.RoomDatabase
         SavedPlaylistEntity::class,
         DownloadedTrackEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

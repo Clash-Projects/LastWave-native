@@ -33,31 +33,32 @@ fun Modifier.liquidGlassChrome(shape: Shape, enabled: Boolean): Modifier =
             is Outline.Generic -> outline.path
             is Outline.Rectangle -> Path().apply { addRect(outline.rect) }
         }
-        val substrate = Color(0xFF090A0D).copy(alpha = 0.62f)
+        val substrate = Color(0xFF090A0D).copy(alpha = 0.38f)
         val reflection = Brush.verticalGradient(
-            0f to Color.White.copy(alpha = 0.115f),
-            0.22f to Color.White.copy(alpha = 0.045f),
-            0.58f to Color.Transparent,
-            1f to Color.Black.copy(alpha = 0.10f),
+            0f to Color.White.copy(alpha = 0.20f),
+            0.16f to Color.White.copy(alpha = 0.075f),
+            0.48f to Color.Transparent,
+            1f to Color.Black.copy(alpha = 0.14f),
             startY = 0f,
             endY = size.height,
         )
         val refraction = Brush.linearGradient(
-            0f to Color(0xFFB8D8FF).copy(alpha = 0.035f),
+            0f to Color(0xFFB8D8FF).copy(alpha = 0.075f),
             0.48f to Color.Transparent,
-            1f to Color(0xFFFFD8F0).copy(alpha = 0.025f),
+            1f to Color(0xFFFFD8F0).copy(alpha = 0.055f),
             start = Offset.Zero,
             end = Offset(size.width, size.height),
         )
         val fresnelEdge = Brush.linearGradient(
-            0f to Color.White.copy(alpha = 0.48f),
-            0.20f to Color.White.copy(alpha = 0.18f),
-            0.58f to Color.White.copy(alpha = 0.045f),
-            1f to Color.White.copy(alpha = 0.22f),
+            0f to Color.White.copy(alpha = 0.72f),
+            0.20f to Color.White.copy(alpha = 0.28f),
+            0.58f to Color.White.copy(alpha = 0.07f),
+            1f to Color.White.copy(alpha = 0.34f),
             start = Offset.Zero,
             end = Offset(size.width, size.height),
         )
         val edgeWidth = 1.dp.toPx()
+        val innerEdgeWidth = 2.5.dp.toPx()
 
         onDrawWithContent {
             clipPath(path) {
@@ -66,6 +67,11 @@ fun Modifier.liquidGlassChrome(shape: Shape, enabled: Boolean): Modifier =
                 drawRect(refraction)
             }
             drawContent()
+            drawPath(
+                path,
+                Color.White.copy(alpha = 0.055f),
+                style = Stroke(width = innerEdgeWidth),
+            )
             drawPath(path, fresnelEdge, style = Stroke(width = edgeWidth))
         }
     }
@@ -77,8 +83,8 @@ fun Modifier.liquidGlassAmbient(primary: Color, tertiary: Color): Modifier =
         val maxDim = maxOf(size.width, size.height).coerceAtLeast(1f)
         val topGlow = Brush.radialGradient(
             colors = listOf(
-                primary.copy(alpha = 0.11f),
-                primary.copy(alpha = 0.03f),
+                primary.copy(alpha = 0.18f),
+                primary.copy(alpha = 0.055f),
                 primary.copy(alpha = 0f),
             ),
             center = Offset(size.width * 0.18f, size.height * 0.14f),
@@ -86,8 +92,8 @@ fun Modifier.liquidGlassAmbient(primary: Color, tertiary: Color): Modifier =
         )
         val sideGlow = Brush.radialGradient(
             colors = listOf(
-                tertiary.copy(alpha = 0.09f),
-                tertiary.copy(alpha = 0.025f),
+                tertiary.copy(alpha = 0.14f),
+                tertiary.copy(alpha = 0.045f),
                 tertiary.copy(alpha = 0f),
             ),
             center = Offset(size.width * 0.87f, size.height * 0.52f),
@@ -95,16 +101,27 @@ fun Modifier.liquidGlassAmbient(primary: Color, tertiary: Color): Modifier =
         )
         val bottomGlow = Brush.radialGradient(
             colors = listOf(
-                primary.copy(alpha = 0.07f),
+                primary.copy(alpha = 0.11f),
                 primary.copy(alpha = 0f),
             ),
             center = Offset(size.width * 0.52f, size.height * 1.02f),
             radius = maxDim * 0.90f,
+        )
+        val aurora = Brush.linearGradient(
+            colors = listOf(
+                Color.Transparent,
+                primary.copy(alpha = 0.035f),
+                tertiary.copy(alpha = 0.045f),
+                Color.Transparent,
+            ),
+            start = Offset(0f, size.height * 0.78f),
+            end = Offset(size.width, size.height * 0.18f),
         )
 
         onDrawBehind {
             drawRect(topGlow)
             drawRect(sideGlow)
             drawRect(bottomGlow)
+            drawRect(aurora)
         }
     }

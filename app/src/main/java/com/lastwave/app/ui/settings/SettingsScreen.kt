@@ -221,6 +221,7 @@ fun SettingsScreen(
     onLoggedOut: () -> Unit = {},
     onOpenChooseApps: () -> Unit = {},
     onOpenDownloads: () -> Unit = {},
+    onOpenExcludedSongs: () -> Unit = {},
     onOpenYouTubeImport: () -> Unit = {},
     onOpenYouTubeLogin: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
@@ -560,9 +561,17 @@ fun SettingsScreen(
                                 onClick = { showEqSheet = true },
                                 position = position,
                             )
-                            3 -> StudioMasterClarityCard(
-                                enabled = misc.musicEnhancerEnabled,
-                                equalizerOverrides = eq.enabled,
+                            3 -> SettingsToggleCard(
+                                icon = Icons.Filled.AutoAwesome,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "Studio Master Clarity",
+                                subtitle = if (misc.musicEnhancerEnabled) {
+                                    "Ultra-fine clarity, clean separation and balanced studio detail"
+                                } else {
+                                    "Original unshaped output"
+                                },
+                                checked = misc.musicEnhancerEnabled,
                                 onCheckedChange = viewModel::setMusicEnhancer,
                                 position = position,
                             )
@@ -697,9 +706,9 @@ fun SettingsScreen(
                                 icon = Icons.Filled.RestartAlt,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Clear Exclusion History",
+                                title = "Excluded Songs",
                                 subtitle = "${state.recommendationExclusionCount} songs excluded",
-                                onClick = viewModel::clearRecommendationExclusions,
+                                onClick = onOpenExcludedSongs,
                                 position = position,
                             )
                             1 -> SettingsActionCard(
@@ -2602,7 +2611,16 @@ private fun VolumeBoostSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = enabled, onCheckedChange = onSetEnabled)
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { shouldEnable ->
+                        if (shouldEnable && sliderValue <= 100f) {
+                            sliderValue = 125f
+                            onSetPercent(125)
+                        }
+                        onSetEnabled(shouldEnable)
+                    },
+                )
             }
 
             Text(
@@ -2614,10 +2632,13 @@ private fun VolumeBoostSheet(
             Slider(
                 value = sliderValue,
                 onValueChange = { sliderValue = it },
-                onValueChangeFinished = { onSetPercent(sliderValue.toInt()) },
+                onValueChangeFinished = {
+                    val selectedPercent = sliderValue.toInt()
+                    onSetPercent(selectedPercent)
+                    onSetEnabled(selectedPercent > 100)
+                },
                 valueRange = 100f..200f,
                 steps = 19,
-                enabled = enabled,
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
@@ -2633,196 +2654,6 @@ private fun VolumeBoostSheet(
                 Text("Done", fontWeight = FontWeight.Bold)
             }
         }
-    }
-}
-
-/**
- * A dedicated visual control for the default Studio Master signal path. The
- * compact response meter previews the actual house curve instead of reducing
- * this audio mode to a generic settings switch.
- */
-@Composable
-private fun StudioMasterClarityCard(
-    enabled: Boolean,
-    equalizerOverrides: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    position: GroupPosition = GroupPosition.SINGLE,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val scale = rememberPressScale(interactionSource)
-    val shape = groupShape(position)
-    val liquidGlass = LocalLiquidGlass.current
-    val isActive = enabled && !equalizerOverrides
-    val responseStrength by animateFloatAsState(
-        targetValue = if (isActive) 1f else 0.28f,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "studioClarityStrength",
-    )
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-
-    Card(
-        onClick = { onCheckedChange(!enabled) },
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        interactionSource = interactionSource,
-        modifier = Modifier
-            .fillMaxWidth()
-            .scale(scale)
-            .liquidGlassChrome(shape, liquidGlass),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            primary.copy(alpha = if (isActive) 0.16f else 0.05f),
-                            tertiary.copy(alpha = if (isActive) 0.08f else 0.02f),
-                            Color.Transparent,
-                        ),
-                    ),
-                ),
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconBadge(
-                        icon = Icons.Filled.AutoAwesome,
-                        container = if (isActive) primary else MaterialTheme.colorScheme.surfaceContainerHighest,
-                        tint = if (isActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            "Studio Master Clarity",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            when {
-                                !enabled -> "OFF  •  ORIGINAL OUTPUT"
-                                equalizerOverrides -> "READY  •  EQUALIZER HAS PRIORITY"
-                                else -> "ACTIVE  •  CLEAN STUDIO DSP"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isActive) primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = enabled,
-                        onCheckedChange = onCheckedChange,
-                        thumbContent = if (enabled) {
-                            {
-                                Icon(
-                                    Icons.Filled.Check,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(SwitchDefaults.IconSize),
-                                )
-                            }
-                        } else null,
-                    )
-                }
-
-                StudioClarityResponseMeter(
-                    strength = responseStrength,
-                    modifier = Modifier.fillMaxWidth().height(54.dp),
-                )
-
-                Text(
-                    when {
-                        !enabled -> "Turn on for cleaner separation and a protected output ceiling."
-                        equalizerOverrides -> "The 15-band equalizer is currently shaping the sound."
-                        else -> "Tighter bass • focused vocals • smooth detail • open air"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
-                ) {
-                    ClarityFeaturePill("STUDIO CURVE", isActive, Modifier.weight(1f))
-                    ClarityFeaturePill("PEAK SAFE", isActive, Modifier.weight(1f))
-                    ClarityFeaturePill("LOW LATENCY", isActive, Modifier.weight(1f))
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StudioClarityResponseMeter(
-    strength: Float,
-    modifier: Modifier = Modifier,
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    val baseline = MaterialTheme.colorScheme.outlineVariant
-    val gains = EqualizerPresets.STUDIO_MASTER.gainsDb
-
-    Canvas(modifier = modifier) {
-        val centerY = size.height * 0.58f
-        val horizontalPadding = 5.dp.toPx()
-        val step = (size.width - horizontalPadding * 2f) / gains.size
-        val barWidth = (step * 0.48f).coerceAtLeast(2.dp.toPx())
-
-        drawLine(
-            color = baseline.copy(alpha = 0.55f),
-            start = Offset(horizontalPadding, centerY),
-            end = Offset(size.width - horizontalPadding, centerY),
-            strokeWidth = 1.dp.toPx(),
-        )
-
-        gains.forEachIndexed { index, gainDb ->
-            val x = horizontalPadding + step * (index + 0.5f)
-            val endY = centerY - gainDb * 12.dp.toPx() * strength
-            drawLine(
-                color = (if (gainDb >= 0f) primary else tertiary).copy(
-                    alpha = 0.30f + 0.70f * strength,
-                ),
-                start = Offset(x, centerY),
-                end = Offset(x, endY),
-                strokeWidth = barWidth,
-                cap = StrokeCap.Round,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ClarityFeaturePill(
-    label: String,
-    active: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(50),
-        color = if (active) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f)
-        },
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold,
-            color = if (active) {
-                MaterialTheme.colorScheme.onPrimaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
-        )
     }
 }
 

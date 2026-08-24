@@ -49,6 +49,8 @@ data class BackupPlaylistSnapshot(
 data class BackupRecommendationExclusionSnapshot(
     val trackKey: String,
     val excludedAtMillis: Long,
+    val trackName: String = "",
+    val artistName: String = "",
 )
 
 @Serializable
@@ -133,7 +135,12 @@ class BackupRepository @Inject constructor(
             )
         }
         val exclusions = recommendationExclusionDao.getAll().map {
-            BackupRecommendationExclusionSnapshot(it.trackKey, it.excludedAtMillis)
+            BackupRecommendationExclusionSnapshot(
+                trackKey = it.trackKey,
+                excludedAtMillis = it.excludedAtMillis,
+                trackName = it.trackName,
+                artistName = it.artistName,
+            )
         }
         val backup = BackupFile(
             createdAt = System.currentTimeMillis(),
@@ -206,7 +213,12 @@ class BackupRepository @Inject constructor(
                 recommendationExclusionDao.clear()
                 recommendationExclusionDao.upsertAll(
                     backup.recommendationExclusions.map {
-                        RecommendationExclusionEntity(it.trackKey, it.excludedAtMillis)
+                        RecommendationExclusionEntity(
+                            trackKey = it.trackKey,
+                            excludedAtMillis = it.excludedAtMillis,
+                            trackName = it.trackName,
+                            artistName = it.artistName,
+                        )
                     },
                 )
             }
