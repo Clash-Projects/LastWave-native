@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BubbleChart
@@ -589,7 +590,7 @@ fun SettingsScreen(
                                 position = position,
                             )
                             5 -> SettingsToggleCard(
-                                icon = Icons.Filled.FitScreen,
+                                icon = Icons.Filled.Fullscreen,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = "Full Screen Cover Art",

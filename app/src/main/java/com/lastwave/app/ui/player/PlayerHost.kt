@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.lastwave.app.ui.player
 
 import android.content.Context
@@ -29,6 +31,8 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -81,6 +85,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -1220,7 +1225,7 @@ private fun FullPlayer(
                                         val splitArtists = remember(track.artist) {
                                             com.lastwave.app.util.ArtistHelper.splitArtists(track.artist)
                                         }
-                                        androidx.compose.foundation.layout.FlowRow(
+                                        FlowRow(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalArrangement = Arrangement.spacedBy(4.dp),
                                         ) {

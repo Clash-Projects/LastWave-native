@@ -8,6 +8,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -59,8 +61,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -83,7 +88,7 @@ import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.player.LocalMusicPlayer
 import com.lastwave.app.ui.player.PlayingWaveBars
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AlbumDetailScreen(
     albumTitle: String,
@@ -156,11 +161,11 @@ fun AlbumDetailScreen(
                         coil.compose.AsyncImage(
                             model = data.artworkUrl,
                             contentDescription = null,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .fillMaxSize()
-                                .androidx.compose.ui.graphics.graphicsLayer { alpha = 0.35f }
-                                .androidx.compose.ui.draw.blur(32.dp),
+                                .graphicsLayer { alpha = 0.35f }
+                                .blur(32.dp),
                         )
                     }
                     Box(
