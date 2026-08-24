@@ -255,8 +255,6 @@ class PlaylistViewModel @Inject constructor(
             }
             load()
         }
-    }
-
     fun removeTrack(playlistId: Long, index: Int) {
         viewModelScope.launch {
             val updated = playlistRepository.removeTrack(playlistId, index)
@@ -300,6 +298,8 @@ class PlaylistViewModel @Inject constructor(
         val mime = if (format == ExportFormat.CSV) "text/csv" else "audio/x-mpegurl"
         fileExportHelper.shareFile(filename, content, mime)
         _uiState.update { it.copy(exportSheetForPlaylistId = null) }
+    }
+
     private fun exportFilename(playlist: SavedPlaylist, format: ExportFormat): String {
         val safeTitle = fileExportHelper.sanitizeFilename(playlist.title)
         return when (format) {
