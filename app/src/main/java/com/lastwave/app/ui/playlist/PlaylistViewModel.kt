@@ -95,10 +95,6 @@ class PlaylistViewModel @Inject constructor(
 
     init {
         load()
-        // Mirrors the same generation state Generate screen shows, so the
-        // progress card here is never a second copy of that logic — and
-        // reloads the list the instant a generation finishes, so a newly
-        // saved playlist appears without waiting for the tab to be revisited.
         viewModelScope.launch {
             var wasGenerating = false
             generationStatus.state.collect { progress ->
@@ -140,8 +136,6 @@ class PlaylistViewModel @Inject constructor(
                 )
             }
             if (justGeneratedId != null) {
-                // Pre-enrich likely automatic-cover candidates so the newest
-                // playlist can show artwork immediately on first render.
                 all.firstOrNull { it.id == justGeneratedId }?.let { pl ->
                     artworkRepository.enrichBatch(pl.tracks.take(6).map { it.name to it.artist })
                 }
@@ -255,6 +249,8 @@ class PlaylistViewModel @Inject constructor(
             }
             load()
         }
+    }
+
     fun removeTrack(playlistId: Long, index: Int) {
         viewModelScope.launch {
             val updated = playlistRepository.removeTrack(playlistId, index)
@@ -385,5 +381,4 @@ class PlaylistViewModel @Inject constructor(
             load()
         }
     }
-}
 }
