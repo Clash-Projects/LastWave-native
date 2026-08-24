@@ -132,9 +132,6 @@ class AudioEffectsEngine @Inject constructor(
     }
 
     // ── DynamicsProcessing (API 28+ Studio Precision) ──
-    }
-
-    // ── DynamicsProcessing (API 28+ Studio Precision) ──
 
     private fun applyDynamicsProcessing(gainsDb: List<Float>) {
         runCatching {
