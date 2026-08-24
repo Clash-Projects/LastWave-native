@@ -527,7 +527,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Experimental")
-                    SettingsGroup(rowCount = 5) { index, position ->
+                    SettingsGroup(rowCount = 6) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.BubbleChart,
@@ -567,7 +567,7 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = "Studio Master Clarity",
                                 subtitle = if (misc.musicEnhancerEnabled) {
-                                    "Ultra-fine clarity, clean separation and balanced studio detail"
+                                    "Crystal-clear open sound \u2022 airy detail \u2022 deep clean separation"
                                 } else {
                                     "Original unshaped output"
                                 },
@@ -586,6 +586,20 @@ fun SettingsScreen(
                                     "Optional clean gain up to 200%"
                                 },
                                 onClick = { showVolumeBoostSheet = true },
+                                position = position,
+                            )
+                            5 -> SettingsToggleCard(
+                                icon = Icons.Filled.FitScreen,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Full Screen Cover Art",
+                                subtitle = if (misc.fullScreenCoverArtEnabled) {
+                                    "Edge-to-edge artwork with translucent glass controls"
+                                } else {
+                                    "Standard centered artwork layout"
+                                },
+                                checked = misc.fullScreenCoverArtEnabled,
+                                onCheckedChange = viewModel::setFullScreenCoverArt,
                                 position = position,
                             )
                         }

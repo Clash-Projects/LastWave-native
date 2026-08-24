@@ -384,6 +384,7 @@ private fun ExpandedPlayer(
         player = viewModel.player,
         lyricsState = lyricsState,
         lyricsAnimation = settings.lyricsAnimation,
+        fullScreenCoverArt = settings.fullScreenCoverArtEnabled,
         currentTab = currentTab,
         onTabChange = onTabChange,
         onRetryLyrics = onRetryLyrics,
@@ -790,6 +791,7 @@ private fun FullPlayer(
     player: MusicPlayer,
     lyricsState: LyricsUiState,
     lyricsAnimation: com.lastwave.app.data.local.LyricsAnimation = com.lastwave.app.data.local.LyricsAnimation.APPLE_FLUID,
+    fullScreenCoverArt: Boolean = false,
     currentTab: FullPlayerTab,
     onTabChange: (FullPlayerTab) -> Unit,
     onRetryLyrics: () -> Unit,
@@ -862,24 +864,36 @@ private fun FullPlayer(
                 track = track,
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer { alpha = 0.24f; scaleX = 1.25f; scaleY = 1.25f }
-                    .blur(72.dp),
+                    .graphicsLayer {
+                        alpha = if (fullScreenCoverArt) 0.88f else 0.24f
+                        scaleX = if (fullScreenCoverArt) 1.06f else 1.25f
+                        scaleY = if (fullScreenCoverArt) 1.06f else 1.25f
+                    }
+                    .blur(if (fullScreenCoverArt) 0.dp else 72.dp),
                 corner = 0.dp,
-                // The 72dp blur destroys fine detail, so decoding a full-screen
-                // second copy wastes memory and upload time with no visual gain.
-                decodeSizePx = 160,
+                decodeSizePx = if (fullScreenCoverArt) 800 else 160,
             )
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.42f),
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-                                MaterialTheme.colorScheme.surface,
-                            ),
-                        ),
+                        if (fullScreenCoverArt) {
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Black.copy(alpha = 0.35f),
+                                    Color.Black.copy(alpha = 0.58f),
+                                    Color.Black.copy(alpha = 0.88f),
+                                ),
+                            )
+                        } else {
+                            Brush.verticalGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.42f),
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+                                    MaterialTheme.colorScheme.surface,
+                                ),
+                            )
+                        },
                     ),
             )
             Column(
@@ -1198,24 +1212,36 @@ private fun FullPlayer(
                                             track.title,
                                             style = MaterialTheme.typography.headlineSmall,
                                             fontWeight = FontWeight.Bold,
+                                            color = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.onSurface,
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
                                         )
                                         Spacer(Modifier.height(4.dp))
-                                        Surface(
-                                            onClick = { onOpenArtist(track.artist) },
-                                            shape = RoundedCornerShape(10.dp),
-                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                                        val splitArtists = remember(track.artist) {
+                                            com.lastwave.app.util.ArtistHelper.splitArtists(track.artist)
+                                        }
+                                        androidx.compose.foundation.layout.FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp),
                                         ) {
-                                            Text(
-                                                track.artist,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontWeight = FontWeight.SemiBold,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                            )
+                                            splitArtists.forEach { artName ->
+                                                Surface(
+                                                    onClick = { onOpenArtist(artName) },
+                                                    shape = RoundedCornerShape(10.dp),
+                                                    color = if (fullScreenCoverArt) Color.White.copy(alpha = 0.20f)
+                                                    else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                                                ) {
+                                                    Text(
+                                                        artName,
+                                                        style = MaterialTheme.typography.titleMedium,
+                                                        color = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.primary,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
 
@@ -1225,8 +1251,9 @@ private fun FullPlayer(
                                     Surface(
                                         onClick = { onTabChange(FullPlayerTab.LYRICS) },
                                         shape = RoundedCornerShape(18.dp),
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        contentColor = MaterialTheme.colorScheme.primary,
+                                        color = if (fullScreenCoverArt) Color.White.copy(alpha = 0.20f)
+                                        else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        contentColor = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.primary,
                                         tonalElevation = 2.dp,
                                         modifier = Modifier.size(50.dp),
                                     ) {
@@ -1235,17 +1262,17 @@ private fun FullPlayer(
                                                 Icons.Filled.Lyrics,
                                                 contentDescription = "Show lyrics",
                                                 modifier = Modifier.size(24.dp),
-                                                tint = MaterialTheme.colorScheme.primary,
+                                                tint = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.primary,
                                             )
                                         }
                                     }
                                 }
                                 Spacer(Modifier.height(10.dp))
-                                SeekBar(state, player::seekTo)
+                                SeekBar(state, player::seekTo, isTranslucent = fullScreenCoverArt)
                                 Spacer(Modifier.height(10.dp))
-                                MainControls(state, player)
+                                MainControls(state, player, isTranslucent = fullScreenCoverArt)
                                 Spacer(Modifier.height(16.dp))
-                                PlayerUtilityControls(state, player)
+                                PlayerUtilityControls(state, player, isTranslucent = fullScreenCoverArt)
                             }
                         }
                     }
@@ -1304,7 +1331,7 @@ private fun FullPlayer(
 }
 
 @Composable
-private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit) {
+private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit, isTranslucent: Boolean = false) {
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
     val end = state.durationMs.coerceAtLeast(1).toFloat()
@@ -1317,24 +1344,31 @@ private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit) {
             valueRange = 0f..end,
             enabled = state.durationMs > 0,
             modifier = Modifier.fillMaxWidth(),
+            colors = if (isTranslucent) {
+                SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = Color.White,
+                    inactiveTrackColor = Color.White.copy(alpha = 0.30f),
+                )
+            } else SliderDefaults.colors(),
         )
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 formatTime(shown.toLong()),
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (isTranslucent) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 "−${formatTime((state.durationMs - shown.toLong()).coerceAtLeast(0))}",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (isTranslucent) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
 
 @Composable
-private fun MainControls(state: MusicPlayerState, player: MusicPlayer) {
+private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslucent: Boolean = false) {
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
@@ -1343,8 +1377,8 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer) {
         Surface(
             onClick = player::previous,
             shape = RoundedCornerShape(22.dp),
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            color = if (isTranslucent) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
             modifier = Modifier.size(58.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1354,8 +1388,8 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer) {
         Surface(
             onClick = player::togglePlayPause,
             shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
+            color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary,
+            contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
             tonalElevation = 4.dp,
             shadowElevation = 8.dp,
             modifier = Modifier.size(76.dp),
@@ -1364,7 +1398,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer) {
                 if (state.isBuffering) {
                     ExpressiveInlineLoadingIndicator(
                         size = 30.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
+                        color = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
                         strokeWidth = 3.dp,
                     )
                 } else {
@@ -1375,8 +1409,8 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer) {
         Surface(
             onClick = player::next,
             shape = RoundedCornerShape(22.dp),
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            color = if (isTranslucent) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
             modifier = Modifier.size(58.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1387,7 +1421,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer) {
 }
 
 @Composable
-private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer) {
+private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, isTranslucent: Boolean = false) {
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1396,10 +1430,17 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer) 
         Surface(
             onClick = player::toggleShuffle,
             shape = RoundedCornerShape(18.dp),
-            color = if (state.shuffleEnabled) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = if (state.shuffleEnabled) MaterialTheme.colorScheme.onPrimaryContainer
-            else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = when {
+                isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.38f)
+                isTranslucent -> Color.White.copy(alpha = 0.18f)
+                state.shuffleEnabled -> MaterialTheme.colorScheme.primaryContainer
+                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+            },
+            contentColor = when {
+                isTranslucent -> Color.White
+                state.shuffleEnabled -> MaterialTheme.colorScheme.onPrimaryContainer
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
             modifier = Modifier.weight(1f).height(48.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1408,8 +1449,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer) 
         }
         Surface(
             shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (isTranslucent) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = if (isTranslucent) Color.White else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1.3f).height(48.dp),
         ) {
             Row(
@@ -1420,13 +1461,14 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer) 
                 Icon(
                     Icons.Filled.HighQuality,
                     null,
-                    tint = if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (isTranslucent) Color.White else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
                 )
                 Text(
                     qualityLabel(state),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
+                    color = if (isTranslucent) Color.White else Color.Unspecified,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(start = 4.dp),
@@ -1436,10 +1478,17 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer) 
         Surface(
             onClick = player::cycleRepeatMode,
             shape = RoundedCornerShape(18.dp),
-            color = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = if (state.repeatMode != Player.REPEAT_MODE_OFF) MaterialTheme.colorScheme.onPrimaryContainer
-            else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = when {
+                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.38f)
+                isTranslucent -> Color.White.copy(alpha = 0.18f)
+                state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.primaryContainer
+                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+            },
+            contentColor = when {
+                isTranslucent -> Color.White
+                state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.onPrimaryContainer
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
             modifier = Modifier.weight(1f).height(48.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {

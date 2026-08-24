@@ -317,16 +317,20 @@ fun TrackContextMenuSheet(
                         }
                     }
                     add { pos -> MenuActionRow(Icons.Filled.PlaylistAdd, "Add to playlist", position = pos) { addToPlaylist(playable); onDismiss() } }
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.Person, "Go to Artist (${t.artist})", position = pos) {
-                            artistAlbumViewModel.openArtist(t.artist)
-                            onDismiss()
+                    val splitArtists = com.lastwave.app.util.ArtistHelper.splitArtists(t.artist)
+                    for (art in splitArtists) {
+                        add { pos ->
+                            MenuActionRow(Icons.Filled.Person, "Go to Artist ($art)", position = pos) {
+                                artistAlbumViewModel.openArtist(art)
+                                onDismiss()
+                            }
                         }
                     }
                     if (!playable.album.isNullOrBlank()) {
                         add { pos ->
+                            val primaryArt = splitArtists.firstOrNull() ?: t.artist
                             MenuActionRow(Icons.Filled.Album, "Go to Album (${playable.album})", position = pos) {
-                                artistAlbumViewModel.openAlbum(playable.album!!, t.artist)
+                                artistAlbumViewModel.openAlbum(playable.album!!, primaryArt)
                                 onDismiss()
                             }
                         }

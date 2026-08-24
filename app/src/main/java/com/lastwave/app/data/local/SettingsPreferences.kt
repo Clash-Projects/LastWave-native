@@ -4,13 +4,12 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
-
-import androidx.datastore.preferences.core.stringPreferencesKey
 
 enum class LyricsAnimation(val id: String, val title: String, val description: String) {
     APPLE_FLUID("apple_fluid", "Apple Fluid", "Smooth spring scaling with dynamic focal tracking"),
@@ -60,6 +59,8 @@ data class MiscSettings(
      *  can raise track level from 100% up to a bounded 200%. */
     val volumeBoostEnabled: Boolean = false,
     val volumeBoostPercent: Int = 100,
+    /** Experimental full screen cover art mode with translucent glassmorphic controls. */
+    val fullScreenCoverArtEnabled: Boolean = false,
 )
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
@@ -78,6 +79,7 @@ class SettingsPreferences @Inject constructor(
         val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
         val VOLUME_BOOST_ENABLED = booleanPreferencesKey("lw_volume_boost_enabled")
         val VOLUME_BOOST_PERCENT = androidx.datastore.preferences.core.intPreferencesKey("lw_volume_boost_percent")
+        val FULL_SCREEN_COVER_ART = booleanPreferencesKey("lw_fullscreen_cover_art")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data.map { p ->
@@ -91,6 +93,7 @@ class SettingsPreferences @Inject constructor(
             lyricsAnimation = LyricsAnimation.fromId(p[Keys.LYRICS_ANIMATION]),
             volumeBoostEnabled = p[Keys.VOLUME_BOOST_ENABLED] ?: false,
             volumeBoostPercent = (p[Keys.VOLUME_BOOST_PERCENT] ?: 100).coerceIn(100, 200),
+            fullScreenCoverArtEnabled = p[Keys.FULL_SCREEN_COVER_ART] ?: false,
         )
     }
 
@@ -124,6 +127,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setVolumeBoostPercent(percent: Int) {
         dataStore.edit { it[Keys.VOLUME_BOOST_PERCENT] = percent.coerceIn(100, 200) }
+    }
+
+    suspend fun setFullScreenCoverArt(enabled: Boolean) {
+        dataStore.edit { it[Keys.FULL_SCREEN_COVER_ART] = enabled }
     }
 
     suspend fun toggleFriendPinned(username: String) {

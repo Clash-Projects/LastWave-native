@@ -174,8 +174,10 @@ class AudioEffectsEngine @Inject constructor(
             }
             dp.setPreEqAllChannelsTo(preEq)
 
-            // Studio Master: gentle, transparent multi-zone dynamics preserve
-            // micro-detail and acoustic space without squashing or pumping.
+            // Studio Master: peak-only multi-zone dynamics — slow attacks let
+            // transients bloom, slow releases never pump, and per-band output
+            // trims carve mud while lifting presence and air. The result is
+            // the open, spacious "studio window" sound instead of glued loudness.
             dp.setMbcAllChannelsTo(createStudioMasterDynamics(enhancerEnabled))
 
             // Transparent safety limiter: catches hot 24-bit inter-sample peaks
@@ -214,7 +216,7 @@ class AudioEffectsEngine @Inject constructor(
                     /* releaseTime = */ STUDIO_MBC_RELEASE_MS[index],
                     /* ratio = */ STUDIO_MBC_RATIO[index],
                     /* threshold = */ STUDIO_MBC_THRESHOLD_DB[index],
-                    /* kneeWidth = */ 10.0f,
+                    /* kneeWidth = */ 8.0f,
                     /* noiseGateThreshold = */ -90.0f,
                     /* expanderRatio = */ 1.0f,
                     /* preGain = */ 0.0f,
@@ -347,14 +349,19 @@ class AudioEffectsEngine @Inject constructor(
         const val EFFECT_PRIORITY = 0
         const val MILLIHERTZ_PER_HZ = 1000
         const val MB_PER_DB = 100f
-        const val MAX_PRE_LIMITER_BOOST_DB = 0.5f
+        const val MAX_PRE_LIMITER_BOOST_DB = 1.5f
         const val STUDIO_MBC_BAND_COUNT = 5
 
+        // Peak-only dynamics: thresholds sit just under true-peak territory,
+        // ratios barely close, attacks slow enough for transients to pass and
+        // releases long enough to stay invisible. Post gains shape the tone —
+        // trimming congested low-mids and lifting presence/air for the
+        // crystal-open Studio Master character.
         val STUDIO_MBC_CUTOFF_HZ = floatArrayOf(120f, 600f, 2_400f, 7_500f, 20_000f)
-        val STUDIO_MBC_ATTACK_MS = floatArrayOf(40f, 35f, 25f, 15f, 10f)
-        val STUDIO_MBC_RELEASE_MS = floatArrayOf(200f, 160f, 140f, 120f, 100f)
-        val STUDIO_MBC_RATIO = floatArrayOf(1.06f, 1.05f, 1.05f, 1.06f, 1.05f)
-        val STUDIO_MBC_THRESHOLD_DB = floatArrayOf(-12f, -14f, -14f, -12f, -12f)
-        val STUDIO_MBC_POST_GAIN_DB = floatArrayOf(0.05f, 0.00f, 0.05f, 0.05f, 0.10f)
+        val STUDIO_MBC_ATTACK_MS = floatArrayOf(50f, 45f, 35f, 25f, 15f)
+        val STUDIO_MBC_RELEASE_MS = floatArrayOf(400f, 350f, 300f, 250f, 200f)
+        val STUDIO_MBC_RATIO = floatArrayOf(1.03f, 1.02f, 1.02f, 1.03f, 1.04f)
+        val STUDIO_MBC_THRESHOLD_DB = floatArrayOf(-9f, -10f, -10f, -9f, -8f)
+        val STUDIO_MBC_POST_GAIN_DB = floatArrayOf(0.0f, -0.4f, 0.2f, 0.6f, 0.9f)
     }
 }

@@ -29,6 +29,10 @@ import javax.inject.Singleton
 private const val TAG = "GenerateRepository"
 const val RECOMMENDATION_TRACK_COUNT = 35
 
+/** Floor for regenerated "inspired" mixes — the generator relaxes artist
+ *  diversity and widens its discovery net before ever returning fewer. */
+const val MIN_TASTE_MIX_SIZE = 20
+
 @Singleton
 class GenerateRepository @Inject constructor(
     private val api: LastFmApiService,
@@ -37,6 +41,7 @@ class GenerateRepository @Inject constructor(
     private val tasteProfileProvider: TasteProfileProvider,
     private val playlistRepository: PlaylistRepository,
     private val viewingProfileState: com.lastwave.app.data.repository.ViewingProfileState,
+    private val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val requestScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -466,13 +471,26 @@ class GenerateRepository @Inject constructor(
         return filterPlayable(deduplicate(filterRecommendationExclusions(pool))).take(total)
     }
 
+    /**
+     * Builds a brand-new "inspired" mix from a source playlist's taste.
+     * The source playlist itself is never modified and none of its tracks
+     * are ever repeated — every returned song is fresh, discovered through
+     * Last.fm similarity graphs plus YouTube Music search, so the regenerated
+     * playlist feels like a genuinely new selection with the same taste.
+     *
+     * Targets [count] (30–35) but always tries to land at least
+     * [MIN_TASTE_MIX_SIZE] songs by progressively relaxing the artist cap
+     * and widening the discovery net before giving up.
+     */
     suspend fun fetchTasteMixForPlaylist(playlistTracks: List<GeneratedTrack>, count: Int): List<GeneratedTrack> = kotlinx.coroutines.supervisorScope {
+        val originalKeys = playlistTracks.mapTo(mutableSetOf()) { it.key }
         val pool = java.util.Collections.synchronizedList(mutableListOf<GeneratedTrack>())
         val distinctArtists = playlistTracks.map { it.artist.trim() }.filter { it.isNotBlank() }.distinct()
         val seedArtists = distinctArtists.shuffled().take(10)
         val seedTracks = playlistTracks.filter { it.name.isNotBlank() && it.artist.isNotBlank() }.shuffled().take(8)
 
-        // 1. Fetch similar artists and their top tracks concurrently
+        // 1. Similar artists' top tracks (Last.fm) — the core "same taste,
+        //    different songs" source.
         val simArtistJobs = seedArtists.map { artist ->
             async(Dispatchers.IO) {
                 try {
@@ -497,7 +515,7 @@ class GenerateRepository @Inject constructor(
             }
         }
 
-        // 2. Fetch similar tracks for seed tracks concurrently
+        // 2. Similar tracks for seed tracks (Last.fm).
         val simTrackJobs = seedTracks.map { seed ->
             async(Dispatchers.IO) {
                 try {
@@ -509,7 +527,9 @@ class GenerateRepository @Inject constructor(
             }
         }
 
-        // 3. Fetch top tracks directly for all playlist seed artists
+        // 3. Deep cuts from the playlist's own artists (Last.fm) — random
+        //    pages surface album tracks beyond the hits the source playlist
+        //    already captured.
         val directArtistJobs = seedArtists.map { artist ->
             async(Dispatchers.IO) {
                 try {
@@ -522,15 +542,36 @@ class GenerateRepository @Inject constructor(
             }
         }
 
-        val simArtistTracks = simArtistJobs.awaitAll().flatten()
-        val simTracks = simTrackJobs.awaitAll().flatten()
-        val directArtistTracks = directArtistJobs.awaitAll().flatten()
+        // 4. YouTube Music search — queries built from seed tracks/artists
+        //    widen the candidate pool beyond Last.fm's graph.
+        val ytQueries = buildList {
+            seedTracks.take(4).forEach { add("${it.artist} ${it.name}") }
+            seedArtists.take(4).forEach { add(it) }
+        }.shuffled().take(6)
+        val ytJobs = ytQueries.map { query ->
+            async(Dispatchers.IO) {
+                try {
+                    innerTube.searchSongs(query, 10).map { t ->
+                        GeneratedTrack(
+                            name = t.title,
+                            artist = t.artist,
+                            artworkUrl = t.artworkUrl,
+                            url = "https://music.youtube.com/watch?v=${t.videoId}",
+                            album = t.album,
+                        )
+                    }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }
 
-        pool.addAll(simArtistTracks)
-        pool.addAll(simTracks)
-        pool.addAll(directArtistTracks)
+        pool.addAll(simArtistJobs.awaitAll().flatten())
+        pool.addAll(simTrackJobs.awaitAll().flatten())
+        pool.addAll(directArtistJobs.awaitAll().flatten())
+        pool.addAll(ytJobs.awaitAll().flatten())
 
-        // 4. If pool is small, extract genre tags from artists and fetch tag top tracks
+        // 5. Genre-tag discovery when the pool is still thin.
         if (pool.size < count) {
             try {
                 val tagJobs = seedArtists.take(3).map { artist ->
@@ -560,25 +601,72 @@ class GenerateRepository @Inject constructor(
             } catch (_: Exception) {}
         }
 
-        // 5. If still small, blend in the source playlist tracks as base inspiration
-        if (pool.size < count) {
-            pool.addAll(playlistTracks)
-        }
+        // Fresh, de-duplicated candidates only — the source playlist's own
+        // tracks never leak into the regenerated mix.
+        val candidates = deduplicate(
+            filterRecommendationExclusions(pool.toList()).filterNot { it.key in originalKeys },
+        )
 
-        // 6. Last-resort fallback to ensure generator never fails
-        if (pool.isEmpty()) {
-            try {
-                pool.addAll(fetchChartTracks(count))
-            } catch (_: Exception) {
-                pool.addAll(playlistTracks)
+        // 6. Progressive artist-cap relaxation: strict 3/artist first for
+        //    variety, widening just enough to secure MIN_TASTE_MIX_SIZE.
+        fun capped(cap: Int): List<GeneratedTrack> {
+            val counts = mutableMapOf<String, Int>()
+            return candidates.filter {
+                val key = it.artist.lowercase().trim()
+                val c = (counts[key] ?: 0) + 1
+                counts[key] = c
+                c <= cap
             }
         }
 
-        val allowed = filterRecommendationExclusions(pool.toList())
-        val result = precheck(shuffle(allowed)).take(count).ifEmpty {
-            deduplicate(allowed).shuffled().take(count)
+        val minSize = minOf(MIN_TASTE_MIX_SIZE, count)
+        var result = capped(3)
+        if (result.size < minSize) result = capped(6)
+        if (result.size < minSize) result = candidates
+
+        // 7. Last-resort: one more similar-artist sweep, then chart filler —
+        //    a slightly-less-on-taste 20+ beats a half-empty playlist.
+        if (result.size < minSize) {
+            try {
+                val extraArtists = distinctArtists.shuffled().take(4)
+                val extra = coroutineScope {
+                    extraArtists.map { artist ->
+                        async(Dispatchers.IO) {
+                            try {
+                                val d = call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "20"))
+                                GenerateJson.namesOf(d["similarartists"]?.jsonObject?.get("artist")).shuffled().take(6)
+                            } catch (_: Exception) {
+                                emptyList()
+                            }
+                        }
+                    }.awaitAll().flatten().distinct().filter { sa -> sa.lowercase() !in distinctArtists.mapTo(mutableSetOf()) { it.lowercase() } }
+                }
+                val extraTracks = coroutineScope {
+                    extra.map { sa ->
+                        async(Dispatchers.IO) {
+                            try {
+                                val d = call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "6"))
+                                GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
+                            } catch (_: Exception) {
+                                emptyList()
+                            }
+                        }
+                    }.awaitAll().flatten()
+                }
+                val extraCandidates = deduplicate(
+                    filterRecommendationExclusions(extraTracks).filterNot { it.key in originalKeys },
+                )
+                val seen = result.mapTo(mutableSetOf()) { it.key }
+                result = result + extraCandidates.filter { seen.add(it.key) }
+            } catch (_: Exception) {}
         }
-        if (result.isNotEmpty()) result else playlistTracks.shuffled().take(count)
+        if (result.size < minSize) {
+            runCatching { fetchChartTracks(minSize * 2) }.getOrDefault(emptyList())
+                .filterNot { it.key in originalKeys || result.any { r -> r.key == it.key } }
+                .let { filler -> result = (result + filler) }
+        }
+
+        return@supervisorScope result.shuffled().take(count)
     }
 
     suspend fun fetchTasteMixForArtists(artists: List<String>, count: Int): List<GeneratedTrack> = coroutineScope {

@@ -324,15 +324,18 @@ class PlaylistViewModel @Inject constructor(
             try {
                 val targetCount = (30..35).random()
                 val finalTracks = if (playlist.tracks.isNotEmpty()) {
+                    // fetchTasteMixForPlaylist already dedupes, filters and
+                    // caps artists itself (relaxing the cap to protect the
+                    // 20+ floor) — re-prechecking here would re-shrink the
+                    // result, so the mix is taken as-is.
                     generateRepository.fetchTasteMixForPlaylist(playlist.tracks, targetCount)
                 } else {
-                    when (playlist.mode) {
+                    val raw = when (playlist.mode) {
                         "top", "library" -> generateRepository.fetchTopTracks(targetCount, "overall")
                         "recent" -> generateRepository.fetchRecentTracks(targetCount)
                         "recommendations" -> generateRepository.fetchRecommendations(targetCount)
                         else -> generateRepository.fetchMix(targetCount)
                     }
-                }.let { raw ->
                     generateRepository.precheck(raw).take(targetCount).ifEmpty {
                         generateRepository.deduplicate(raw).take(targetCount)
                     }

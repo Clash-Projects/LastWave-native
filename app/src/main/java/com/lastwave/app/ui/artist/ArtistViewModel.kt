@@ -16,6 +16,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+import com.lastwave.app.data.local.MiscSettings
+import com.lastwave.app.data.local.SettingsPreferences
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
+
 sealed interface ArtistUiState {
     data object Loading : ArtistUiState
     data class Success(val data: ArtistPageData) : ArtistUiState
@@ -27,7 +32,11 @@ class ArtistViewModel @Inject constructor(
     private val repository: ArtistRepository,
     private val musicPlayer: MusicPlayer,
     private val mixLauncher: MixLauncher,
+    private val settingsPreferences: SettingsPreferences,
 ) : ViewModel() {
+
+    val settings: StateFlow<MiscSettings> = settingsPreferences.settings
+        .stateIn(viewModelScope, SharingStarted.Eagerly, MiscSettings())
 
     private val _uiState = MutableStateFlow<ArtistUiState>(ArtistUiState.Loading)
     val uiState: StateFlow<ArtistUiState> = _uiState.asStateFlow()

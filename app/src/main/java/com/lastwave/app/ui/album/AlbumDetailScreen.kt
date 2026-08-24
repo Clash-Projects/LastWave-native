@@ -95,6 +95,8 @@ fun AlbumDetailScreen(
     viewModel: AlbumViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val isFullScreen = settings.fullScreenCoverArtEnabled
     val musicPlayer = LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
@@ -144,23 +146,49 @@ fun AlbumDetailScreen(
                 val isAlbumPlaying = playbackState.isPlaying &&
                     (playbackState.sourceLabel.contains(data.title, ignoreCase = true) || playbackState.current?.album.equals(data.title, ignoreCase = true))
 
-                // Ambient Mesh Backdrop Gradient
+                // Ambient Mesh Backdrop / Full Screen Cover Art Gradient
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(380.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
-                                    MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f),
-                                    Color.Transparent,
-                                ),
-                                startY = 0f,
-                                endY = 1000f,
+                        .height(if (isFullScreen) 460.dp else 380.dp),
+                ) {
+                    if (isFullScreen && !data.artworkUrl.isNullOrBlank()) {
+                        coil.compose.AsyncImage(
+                            model = data.artworkUrl,
+                            contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .androidx.compose.ui.graphics.graphicsLayer { alpha = 0.35f }
+                                .androidx.compose.ui.draw.blur(32.dp),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                if (isFullScreen) {
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.Black.copy(alpha = 0.25f),
+                                            Color.Black.copy(alpha = 0.60f),
+                                            MaterialTheme.colorScheme.background,
+                                        ),
+                                    )
+                                } else {
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f),
+                                            Color.Transparent,
+                                        ),
+                                        startY = 0f,
+                                        endY = 1000f,
+                                    )
+                                },
                             ),
-                        ),
-                )
+                    )
+                }
 
                 LazyColumn(
                     state = listState,
@@ -184,9 +212,9 @@ fun AlbumDetailScreen(
                             // Elevated Cover Artwork with dynamic shadow
                             Box(
                                 modifier = Modifier
-                                    .size(208.dp)
+                                    .size(if (isFullScreen) 228.dp else 208.dp)
                                     .shadow(
-                                        elevation = 20.dp,
+                                        elevation = if (isFullScreen) 28.dp else 20.dp,
                                         shape = RoundedCornerShape(26.dp),
                                         ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                                         spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
@@ -230,23 +258,33 @@ fun AlbumDetailScreen(
 
                             Spacer(Modifier.height(6.dp))
 
-                            // Clickable Artist Link
-                            Surface(
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onOpenArtist(data.artist, data.artistBrowseId)
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                            // Clickable Artist Link(s)
+                            val splitArtists = remember(data.artist) {
+                                com.lastwave.app.util.ArtistHelper.splitArtists(data.artist)
+                            }
+                            androidx.compose.foundation.layout.FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                Text(
-                                    text = data.artist,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                                )
+                                splitArtists.forEach { artName ->
+                                    Surface(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onOpenArtist(artName, if (splitArtists.size == 1) data.artistBrowseId else null)
+                                        },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                                    ) {
+                                        Text(
+                                            text = artName,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                }
                             }
 
                             Spacer(Modifier.height(8.dp))

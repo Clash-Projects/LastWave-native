@@ -35,16 +35,17 @@ object EqualizerPresets {
 
     val FLAT = EqPreset("Default", List(EQ_BAND_FREQS_HZ.size) { 0f })
     /**
-     * Balanced audiophile studio reference curve for Studio Master Clarity.
-     * Clean sub-bass warmth, natural un-scooped midrange body, intimate vocal
-     * presence, and sparkling, silky-smooth treble air without harshness or fatigue.
+     * Crystal-open audiophile reference curve for Studio Master Clarity.
+     * Tight, controlled sub-bass depth, a deliberate low-mid dip that
+     * removes congestion and mud, natural vocal body, strong presence lift
+     * and a tall silky air shelf — the "window opened" spacious sound.
      */
     val STUDIO_MASTER = EqPreset(
         "Studio Master",
         listOf(
-            1.2f, 1.0f, 0.8f, 0.4f, 0.0f,
-            0.0f, 0.2f, 0.4f, 0.8f, 1.2f,
-            1.4f, 1.2f, 1.5f, 2.0f, 2.2f,
+            1.5f, 1.2f, 0.8f, 0.3f, -0.2f,
+            -0.8f, -0.5f, 0.0f, 0.6f, 1.2f,
+            1.8f, 2.2f, 2.6f, 3.2f, 3.5f,
         ),
     )
 

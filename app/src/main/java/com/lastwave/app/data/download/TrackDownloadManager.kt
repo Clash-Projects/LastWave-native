@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -164,13 +165,13 @@ class TrackDownloadManager @Inject constructor(
             try {
 
                 // Resolve missing metadata & cover art proactively
-                var resolvedArtworkUrl = artworkUrl?.takeIf { it.isNotBlank() }
+                var resolvedArtworkUrl = artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                 var resolvedAlbum = album?.takeIf { it.isNotBlank() }
 
                 if (resolvedArtworkUrl == null || resolvedAlbum == null) {
                     val best = runCatching { innerTube.findBestMatch(title, artist) }.getOrNull()
                     if (resolvedArtworkUrl == null) {
-                        resolvedArtworkUrl = best?.artworkUrl?.takeIf { it.isNotBlank() }
+                        resolvedArtworkUrl = best?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                     }
                     if (resolvedAlbum == null) {
                         resolvedAlbum = best?.album?.takeIf { it.isNotBlank() }
@@ -181,6 +182,9 @@ class TrackDownloadManager @Inject constructor(
                     artworkRepository.resolve(title, artist)
                     val cacheKey = ArtworkNormalizer.cacheKey(title, artist)
                     resolvedArtworkUrl = artworkRepository.resolved.value[cacheKey]?.takeIf { it.isNotBlank() }
+                        ?: kotlinx.coroutines.withTimeoutOrNull(3_500L) {
+                            artworkRepository.resolved.first { it.containsKey(cacheKey) }[cacheKey]
+                        }?.takeIf { it.isNotBlank() }
                 }
 
                 // 1. Resolve source — respect user's Qobuz preference for downloads too
@@ -222,7 +226,9 @@ class TrackDownloadManager @Inject constructor(
                     // Fallback to YouTube Music
                     val bestMatch = innerTube.findBestMatch(title, artist)
                     val videoId = bestMatch.videoId ?: error("No audio source found for $title")
-                    if (resolvedArtworkUrl == null) resolvedArtworkUrl = bestMatch.artworkUrl
+                    if (resolvedArtworkUrl == null) {
+                        resolvedArtworkUrl = bestMatch.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                    }
                     if (resolvedAlbum == null) resolvedAlbum = bestMatch.album
                     val ytStream = innerTube.resolveAudioStream(videoId)
                     resolvedUrl = ytStream.url
@@ -231,7 +237,11 @@ class TrackDownloadManager @Inject constructor(
                         extension = "m4a"
                         mimeType = "audio/mp4"
                         formatBadge = "M4A AAC"
-                    } else if (rawMime.contains("webm") || rawMime.contains("opus")) {
+                    } else if (rawMime.contains("webm")) {
+                        extension = "webm"
+                        mimeType = "audio/webm"
+                        formatBadge = "WEBM OPUS"
+                    } else if (rawMime.contains("ogg") || rawMime.contains("opus")) {
                         extension = "opus"
                         mimeType = "audio/ogg"
                         formatBadge = "OPUS"
@@ -242,9 +252,6 @@ class TrackDownloadManager @Inject constructor(
                     }
                     isQobuz = false
                 }
-
-
-                val safeFilename = sanitizeFilename("$artist - $title") + ".$extension"
 
                 // 2. Download raw stream to local temp cache file
                 val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
@@ -269,6 +276,15 @@ class TrackDownloadManager @Inject constructor(
                         if (contentType.contains("text/html") || contentType.contains("application/json")) {
                             response.close()
                             throw IOException("Invalid download payload ($contentType)")
+                        }
+                        if (contentType.contains("webm")) {
+                            extension = "webm"
+                            mimeType = "audio/webm"
+                            formatBadge = "WEBM OPUS"
+                        } else if (contentType.contains("ogg") || contentType.contains("opus")) {
+                            extension = "opus"
+                            mimeType = "audio/ogg"
+                            formatBadge = "OPUS"
                         }
 
                         val body = response.body ?: throw IOException("Empty response body")
@@ -338,6 +354,8 @@ class TrackDownloadManager @Inject constructor(
                         downloadSuccess = true
                     }
 
+                    val safeFilename = sanitizeFilename("$artist - $title") + ".$extension"
+
                     // 3. Fetch lyrics BEFORE tagging so they can be embedded
                     // INTO the audio file (a sidecar alone lands in a folder
                     // most players never associate with the track).
@@ -396,6 +414,14 @@ class TrackDownloadManager @Inject constructor(
 
                     // 6. Mark public MediaStore file as finished (IS_PENDING = 0)
                     finalizePublicFile(uri)
+                    if (file != null) {
+                        MediaScannerConnection.scanFile(
+                            context,
+                            arrayOf(file.absolutePath),
+                            arrayOf(mimeType),
+                            null,
+                        )
+                    }
 
                     val finalPath = file?.absolutePath ?: uri?.toString() ?: safeFilename
 
@@ -415,7 +441,7 @@ class TrackDownloadManager @Inject constructor(
                     artworkUrl = resolvedArtworkUrl,
                     filePath = finalPath,
                     mediaStoreUri = uri?.toString(),
-                    fileSizeBytes = bytesReadTotal,
+                    fileSizeBytes = tempDownloadFile.length(),
                     formatBadge = formatBadge,
                     durationMs = durationMs,
                     isQobuz = isQobuz,
@@ -490,6 +516,7 @@ class TrackDownloadManager @Inject constructor(
                 mimeType.contains("mp4") || mimeType.contains("m4a") || mimeType.contains("aac") -> "audio/mp4"
                 mimeType.contains("flac") -> "audio/flac"
                 mimeType.contains("mp3") || mimeType.contains("mpeg") -> "audio/mpeg"
+                mimeType.contains("webm") -> "audio/webm"
                 mimeType.contains("ogg") || mimeType.contains("opus") -> "audio/ogg"
                 mimeType.contains("wav") -> "audio/x-wav"
                 else -> "audio/mp4"

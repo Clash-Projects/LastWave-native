@@ -175,6 +175,7 @@ class SettingsViewModel @Inject constructor(
     fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = viewModelScope.launch { settingsPreferences.setLyricsAnimation(animation) }
     fun setVolumeBoostEnabled(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setVolumeBoostEnabled(enabled) }
     fun setVolumeBoostPercent(percent: Int) = viewModelScope.launch { settingsPreferences.setVolumeBoostPercent(percent) }
+    fun setFullScreenCoverArt(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setFullScreenCoverArt(enabled) }
 
     // ── Experimental: 15-band equalizer ──
 

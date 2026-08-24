@@ -12,6 +12,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.lastwave.app.data.local.MiscSettings
+import com.lastwave.app.data.local.SettingsPreferences
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
 sealed interface AlbumUiState {
@@ -25,7 +29,11 @@ class AlbumViewModel @Inject constructor(
     private val repository: AlbumRepository,
     private val musicPlayer: MusicPlayer,
     private val downloadManager: TrackDownloadManager,
+    private val settingsPreferences: SettingsPreferences,
 ) : ViewModel() {
+
+    val settings: StateFlow<MiscSettings> = settingsPreferences.settings
+        .stateIn(viewModelScope, SharingStarted.Eagerly, MiscSettings())
 
     private val _uiState = MutableStateFlow<AlbumUiState>(AlbumUiState.Loading)
     val uiState: StateFlow<AlbumUiState> = _uiState.asStateFlow()
