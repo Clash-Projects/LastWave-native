@@ -300,8 +300,6 @@ class PlaylistViewModel @Inject constructor(
         val mime = if (format == ExportFormat.CSV) "text/csv" else "audio/x-mpegurl"
         fileExportHelper.shareFile(filename, content, mime)
         _uiState.update { it.copy(exportSheetForPlaylistId = null) }
-    }
-
     private fun exportFilename(playlist: SavedPlaylist, format: ExportFormat): String {
         val safeTitle = fileExportHelper.sanitizeFilename(playlist.title)
         return when (format) {
@@ -322,14 +320,17 @@ class PlaylistViewModel @Inject constructor(
      *  existing one, matching the original: regenerate always creates a
      *  new saved entry, it's not an in-place update). */
     fun regenerate(id: Long) {
-        val playlist = _uiState.value.playlists.firstOrNull { it.id == id } ?: return
         viewModelScope.launch {
-            _uiState.update { it.copy(regeneratingId = id, toastMessage = "Regenerating playlist\u2026") }
+            val playlist = _uiState.value.playlists.firstOrNull { it.id == id }
+                ?: _uiState.value.detailPlaylist?.takeIf { it.id == id }
+                ?: try { playlistRepository.getById(id) } catch (_: Exception) { null }
+                ?: return@launch
+
+            _uiState.update { it.copy(regeneratingId = id, toastMessage = "Regenerating taste mix\u2026") }
             try {
                 val targetCount = (30..35).random()
-                val playlistArtists = playlist.tracks.map { it.artist }.filter { it.isNotBlank() }.distinct()
-                val finalTracks = if (playlistArtists.isNotEmpty()) {
-                    generateRepository.fetchTasteMixForArtists(playlistArtists, targetCount)
+                val finalTracks = if (playlist.tracks.isNotEmpty()) {
+                    generateRepository.fetchTasteMixForPlaylist(playlist.tracks, targetCount)
                 } else {
                     when (playlist.mode) {
                         "top", "library" -> generateRepository.fetchTopTracks(targetCount, "overall")
@@ -348,7 +349,7 @@ class PlaylistViewModel @Inject constructor(
                 }
 
                 val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())
-                val saved = playlistRepository.save(title, playlist.subtitle.ifBlank { "Regenerated Mix" }, playlist.mode, finalTracks)
+                val saved = playlistRepository.save(title, playlist.subtitle.ifBlank { "Taste Mix" }, playlist.mode, finalTracks)
                 _uiState.update { it.copy(regeneratingId = null, toastMessage = "Regenerated \"$title\" (${finalTracks.size} tracks)") }
                 load(justGeneratedId = saved.id)
             } catch (e: Exception) {

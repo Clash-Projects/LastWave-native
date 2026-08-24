@@ -466,26 +466,120 @@ class GenerateRepository @Inject constructor(
         return filterPlayable(deduplicate(filterRecommendationExclusions(pool))).take(total)
     }
 
-    suspend fun fetchTasteMixForArtists(artists: List<String>, count: Int): List<GeneratedTrack> {
-        var pool = mutableListOf<GeneratedTrack>()
-        val seeds = artists.shuffled().take(6)
-        for (artist in seeds) {
-            try {
-                val sim = call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "10"))
-                val simArtists = GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(3)
-                for (sa in simArtists) {
-                    try {
-                        val page = (1..3).random()
-                        val d = call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "6", "page" to page.toString()))
-                        pool = (pool + GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))).toMutableList()
-                    } catch (_: Exception) {}
+    suspend fun fetchTasteMixForPlaylist(playlistTracks: List<GeneratedTrack>, count: Int): List<GeneratedTrack> = coroutineScope {
+        val pool = mutableListOf<GeneratedTrack>()
+        val distinctArtists = playlistTracks.map { it.artist.trim() }.filter { it.isNotBlank() }.distinct()
+        val seedArtists = distinctArtists.shuffled().take(6)
+        val seedTracks = playlistTracks.filter { it.name.isNotBlank() && it.artist.isNotBlank() }.shuffled().take(4)
+
+        // 1. Fetch similar artists and their top tracks concurrently
+        val simArtistTracksDeferred = seedArtists.map { artist ->
+            async(Dispatchers.IO) {
+                try {
+                    val sim = call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "12"))
+                    val simArtists = GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(3)
+                    coroutineScope {
+                        simArtists.map { sa ->
+                            async(Dispatchers.IO) {
+                                try {
+                                    val page = (1..3).random()
+                                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "6", "page" to page.toString()))
+                                    GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
+                                } catch (_: Exception) {
+                                    emptyList()
+                                }
+                            }
+                        }.awaitAll().flatten()
+                    }
+                } catch (_: Exception) {
+                    emptyList()
                 }
+            }
+        }
+
+        // 2. Fetch similar tracks for seed tracks concurrently
+        val simTracksDeferred = seedTracks.map { seed ->
+            async(Dispatchers.IO) {
+                try {
+                    val d = call(mapOf("method" to "track.getsimilar", "track" to seed.name, "artist" to seed.artist, "limit" to "12"))
+                    GenerateJson.normalise(d["similartracks"]?.jsonObject?.get("track"))
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }
+
+        // 3. Fetch top tracks directly for seed artists concurrently
+        val directArtistTracksDeferred = seedArtists.take(4).map { artist ->
+            async(Dispatchers.IO) {
+                try {
+                    val page = (1..2).random()
+                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to artist, "limit" to "6", "page" to page.toString()))
+                    GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }
+
+        val simArtistTracks = simArtistTracksDeferred.awaitAll().flatten()
+        val simTracks = simTracksDeferred.awaitAll().flatten()
+        val directArtistTracks = directArtistTracksDeferred.awaitAll().flatten()
+
+        pool.addAll(simArtistTracks)
+        pool.addAll(simTracks)
+        pool.addAll(directArtistTracks)
+
+        if (pool.size < count) {
+            try {
+                val mix = fetchMix(count)
+                pool.addAll(mix)
             } catch (_: Exception) {}
         }
-        val mix = fetchMix(count)
-        pool = (pool + mix).toMutableList()
+
         val allowed = filterRecommendationExclusions(pool)
-        return precheck(shuffle(allowed)).take(count).ifEmpty { deduplicate(allowed).take(count) }
+        val result = precheck(shuffle(allowed)).take(count).ifEmpty {
+            deduplicate(allowed).shuffled().take(count)
+        }
+        if (result.size >= 10) result else pool.distinctBy { it.key }.shuffled().take(count)
+    }
+
+    suspend fun fetchTasteMixForArtists(artists: List<String>, count: Int): List<GeneratedTrack> = coroutineScope {
+        val pool = mutableListOf<GeneratedTrack>()
+        val seeds = artists.shuffled().take(6)
+        val deferred = seeds.map { artist ->
+            async(Dispatchers.IO) {
+                try {
+                    val sim = call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "10"))
+                    val simArtists = GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(3)
+                    coroutineScope {
+                        simArtists.map { sa ->
+                            async(Dispatchers.IO) {
+                                try {
+                                    val page = (1..3).random()
+                                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "6", "page" to page.toString()))
+                                    GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
+                                } catch (_: Exception) {
+                                    emptyList()
+                                }
+                            }
+                        }.awaitAll().flatten()
+                    }
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+        }
+        val tracks = deferred.awaitAll().flatten()
+        pool.addAll(tracks)
+        if (pool.size < count) {
+            try {
+                val mix = fetchMix(count)
+                pool.addAll(mix)
+            } catch (_: Exception) {}
+        }
+        val allowed = filterRecommendationExclusions(pool)
+        precheck(shuffle(allowed)).take(count).ifEmpty { deduplicate(allowed).take(count) }
     }
 
     // ── My Recommendations — delegates the heavy scoring/pipeline logic to
@@ -495,13 +589,6 @@ class GenerateRepository @Inject constructor(
         onProgress("Building your taste profile\u2026")
         val profile = tasteProfileProvider.get()
 
-        // Hard blacklist: everything heard (top+recent), all loved tracks,
-        // every track already in any saved playlist, every track in the
-        // current session playlist (session playlist isn't tracked at the
-        // repository layer here, so this covers the persisted equivalents —
-        // saved playlists — exactly as the original's _plLoad() pass does).
-        // Last.fm's source endpoints have no per-request exclusion list, so
-        // Every user-selected recommendation exclusion is a hard blacklist.
         val blacklist = (profile.recentTrackKeys + profile.topTrackKeys).toMutableSet()
         blacklist.addAll(recommendationExclusionKeys())
         try {
@@ -520,6 +607,7 @@ class GenerateRepository @Inject constructor(
         )
         val recommended = engine.run(total, profile, blacklist)
         return filterPlayable(filterRecommendationExclusions(recommended)).take(total)
+    }dationExclusions(recommended)).take(total)
     }
 
     // ── Start Mix From Track — exact port of startMixFromTrack()'s 3-source blend ──

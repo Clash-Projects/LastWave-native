@@ -121,7 +121,6 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.FilterChip
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -163,8 +162,16 @@ fun PlaylistDetailScreen(
     val haptic = LocalHapticFeedback.current
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
+
     LaunchedEffect(playlistId) {
         viewModel.loadDetail(playlistId)
+    }
+
+    LaunchedEffect(state.toastMessage) {
+        state.toastMessage?.let { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+            viewModel.dismissToast()
+        }
     }
 
     val playlist = state.detailPlaylist?.takeIf { it.id == playlistId }
@@ -182,7 +189,6 @@ fun PlaylistDetailScreen(
     }
 
     val isThisPlaylistPlaying = playbackState.isPlaying && playbackState.sourceLabel == playlist.title
-
     var coverEditorOpen by remember { mutableStateOf(false) }
     var coverPickerPending by remember { mutableStateOf(false) }
     val coverPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
