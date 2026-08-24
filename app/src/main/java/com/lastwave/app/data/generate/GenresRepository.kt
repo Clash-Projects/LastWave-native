@@ -67,6 +67,7 @@ class GenresRepository @Inject constructor(
         }
 
         // Tier 2: derive from top artists' own top tags, weighted by artist playcount
+        val tasteProfile = runCatching { tasteProfileProvider.get() }.getOrNull()
         return try {
             val artistsD = call(mapOf("method" to "user.gettopartists", "user" to username(), "period" to period, "limit" to "30"))
             val artists = GenerateJson.asObjectList(artistsD["topartists"]?.jsonObject?.get("artist"))
@@ -76,19 +77,35 @@ class GenresRepository @Inject constructor(
                     name to playcount
                 }
 
+            val profileArtists = (tasteProfile?.topArtistsRaw.orEmpty() +
+                tasteProfile?.ytMusicFeedRaw.orEmpty().map { it.artist })
+                .filter(String::isNotBlank)
+                .distinctBy { it.trim().lowercase() }
+                .mapIndexed { index, artist -> artist to (24L - index).coerceAtLeast(1L) }
             val weighted = mutableMapOf<String, Long>()
-            for ((artistName, playcount) in artists.take(12)) {
-                try {
-                    val td = call(mapOf("method" to "artist.gettoptags", "artist" to artistName))
-                    val tags = GenerateJson.asObjectList(td["toptags"]?.jsonObject?.get("tag"))
-                        .mapNotNull { (it["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content }
-                        .take(5)
+            coroutineScope {
+                val artistTagResults = (artists + profileArtists)
+                    .distinctBy { it.first.trim().lowercase() }
+                    .take(14)
+                    .map { (artistName, playcount) ->
+                        async(Dispatchers.IO) {
+                            val tags = try {
+                                val td = call(mapOf("method" to "artist.gettoptags", "artist" to artistName))
+                                GenerateJson.asObjectList(td["toptags"]?.jsonObject?.get("tag"))
+                                    .mapNotNull { (it["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content }
+                                    .take(5)
+                            } catch (e: Exception) {
+                                Log.d(TAG, "artist.gettoptags miss for $artistName", e)
+                                emptyList()
+                            }
+                            (artistName to playcount) to tags
+                        }
+                    }.awaitAll()
+                for ((artistWeight, tags) in artistTagResults) {
                     for (tag in tags) {
                         val key = tag.lowercase()
-                        weighted[key] = (weighted[key] ?: 0L) + playcount
+                        weighted[key] = (weighted[key] ?: 0L) + artistWeight.second
                     }
-                } catch (e: Exception) {
-                    Log.d(TAG, "artist.gettoptags miss for $artistName", e)
                 }
             }
             val sorted = weighted.entries.sortedByDescending { it.value }.take(15).map { it.key to it.value }
@@ -141,30 +158,48 @@ class GenresRepository @Inject constructor(
             val userTracks = (profile.topTracksRaw + profile.recentTracksRaw).distinctBy { it.key }
 
             // Find top artists in user's profile that match this genre
-            val genreMatchedArtists = mutableSetOf<String>()
-            for (artistName in userTopArtists.take(12)) {
-                try {
-                    val td = call(mapOf("method" to "artist.gettoptags", "artist" to artistName))
-                    val tags = GenerateJson.namesOf(td["toptags"]?.jsonObject?.get("tag")).map { it.lowercase() }
-                    if (tags.any { it.contains(targetTag) || targetTag.contains(it) }) {
-                        genreMatchedArtists += artistName.lowercase()
+            val candidateArtists = (profile.topArtistsRaw +
+                profile.ytMusicFeedRaw.map { it.artist } + userTopArtists)
+                .filter(String::isNotBlank)
+                .distinctBy { it.trim().lowercase() }
+                .take(14)
+            val genreMatchedArtists = coroutineScope {
+                candidateArtists.map { artistName ->
+                    async(Dispatchers.IO) {
+                        try {
+                            val td = call(mapOf("method" to "artist.gettoptags", "artist" to artistName))
+                            val tags = GenerateJson.namesOf(td["toptags"]?.jsonObject?.get("tag"))
+                                .map { it.lowercase() }
+                            artistName to tags.any { it.contains(targetTag) || targetTag.contains(it) }
+                        } catch (_: Exception) {
+                            artistName to false
+                        }
                     }
-                } catch (_: Exception) {}
+                }.awaitAll()
+                    .filter { it.second }
+                    .map { it.first.lowercase() }
+                    .toSet()
             }
 
             // Include user's tracks for those artists
             for (track in userTracks) {
-                if (track.artist.lowercase() in genreMatchedArtists) {
+                if (track.artist.trim().lowercase() in genreMatchedArtists) {
                     pool += track
                 }
             }
 
             // Fetch top tracks for user's favorite artists in this genre
-            for (artist in genreMatchedArtists.take(4)) {
-                try {
-                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to artist, "limit" to "10"))
-                    pool += GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
-                } catch (_: Exception) {}
+            pool += coroutineScope {
+                genreMatchedArtists.take(4).map { artist ->
+                    async(Dispatchers.IO) {
+                        try {
+                            val d = call(mapOf("method" to "artist.gettoptracks", "artist" to artist, "limit" to "10"))
+                            GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track")).toList()
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                }.awaitAll().flatten()
             }
         }
 
@@ -180,19 +215,34 @@ class GenresRepository @Inject constructor(
         val userTopArtistSet = profile?.topArtistNames ?: emptySet()
         val userRecentArtistSet = profile?.recentArtists ?: emptySet()
         val userHeardKeys = (profile?.topTrackKeys ?: emptySet()) + (profile?.recentTrackKeys ?: emptySet())
+        val ytFeedKeys = profile?.ytMusicFeedRaw?.map { it.key }?.toSet().orEmpty()
+        val ytLikedKeys = profile?.ytMusicLikedRaw?.map { it.key }?.toSet().orEmpty()
+        val artistAffinity = profile?.artistAffinity.orEmpty()
+        val normalizedBoostArtists = sourceBoostArtists.map { it.trim().lowercase() }.toSet()
 
-        // Score based on user's Last.fm taste
+        // Blend explicit Last.fm history, YT Music feed/likes, and learned
+        // artist affinity. This keeps genre results personal without making
+        // every page a copy of the user's listening history.
         val scored = deduped.map { track ->
-            val aKey = track.artist.lowercase()
-            var score = 0
-            if (track.key in userHeardKeys) score += 10 // User's own scrobbled track
-            if (aKey in userTopArtistSet) score += 6   // User's top artist
-            if (aKey in userRecentArtistSet) score += 4// User's recent artist
+            val aKey = track.artist.trim().lowercase()
+            var score = ((artistAffinity[aKey] ?: 0.0) * 20.0).toInt()
+            if (track.key in userHeardKeys) score += 8
+            if (track.key in ytFeedKeys) score += 10
+            if (track.key in ytLikedKeys) score += 8
+            if (aKey in userTopArtistSet) score += 7
+            if (aKey in userRecentArtistSet) score += 5
+            if (aKey in normalizedBoostArtists) score += 5
             track to score
         }
 
-        val sorted = scored.sortedByDescending { it.second }.map { it.first }
-        return generateRepository.filterPlayable(sorted).take(30)
+        val sorted = scored
+            .groupBy { it.second }
+            .entries
+            .sortedByDescending { it.key }
+            .flatMap { it.value.shuffled() }
+            .map { it.first }
+        val allowed = generateRepository.filterRecommendationExclusions(sorted)
+        return generateRepository.filterPlayable(allowed).take(30)
     }
 
     /** Port of §5.5 Discover More: tag.gettoptracks (fresh random page) +
@@ -233,7 +283,11 @@ class GenresRepository @Inject constructor(
         pool += tagTracks
 
         // 3. Concurrently fetch top tracks for top genre artists
-        val artistSeeds = (profile?.topArtistNames?.toList()?.shuffled()?.take(3) ?: emptyList()) + tagArtists.shuffled().take(5)
+        val profileArtists = (profile?.topArtistsRaw.orEmpty() +
+            profile?.ytMusicFeedRaw.orEmpty().map { it.artist })
+            .filter(String::isNotBlank)
+                .distinctBy { it.trim().lowercase() }
+        val artistSeeds = profileArtists.shuffled().take(3) + tagArtists.shuffled().take(5)
         val artistTopTracks = artistSeeds.distinct().take(6).map { artistName ->
             async(Dispatchers.IO) {
                 try {
@@ -264,9 +318,24 @@ class GenresRepository @Inject constructor(
         val heardKeys = (profile?.topTracksRaw ?: emptyList()).map { it.key }.toSet()
         val deduped = generateRepository.deduplicate(pool)
         val filtered = deduped.filterNot { it.key in heardKeys }
-        val finalPool = if (filtered.size >= 12) filtered else deduped
+        // Keep this surface genuinely exploratory whenever possible. Only
+        // fall back to heard tracks if the provider returned no alternatives.
+        val finalPool = filtered.ifEmpty { deduped }
 
-        generateRepository.filterPlayable(finalPool.shuffled()).take(35)
+        val affinity = profile?.artistAffinity.orEmpty()
+        val ytFeedKeys = profile?.ytMusicFeedRaw?.map { it.key }?.toSet().orEmpty()
+        val personalized = finalPool
+            .groupBy { track ->
+                val artist = track.artist.trim().lowercase()
+                ((affinity[artist] ?: 0.0) * 20.0).toInt() +
+                    if (track.key in ytFeedKeys) 10 else 0
+            }
+            .entries
+            .sortedByDescending { it.key }
+            .flatMap { it.value.shuffled() }
+
+        val allowed = generateRepository.filterRecommendationExclusions(personalized)
+        generateRepository.filterPlayable(allowed).take(35)
     }
 
     /**
@@ -277,7 +346,7 @@ class GenresRepository @Inject constructor(
      * context) — optional, empty by default for contexts with no special
      * source framing.
      */
-    suspend fun explorePersonalizedGenre(genre: String, sourceBoostArtists: Set<String> = emptySet()): List<GeneratedTrack> {
+    suspend fun explorePersonalizedGenre(genre: String, sourceBoostArtists: Set<String> = emptySet()): List<GeneratedTrack> = coroutineScope {
         val profile = try { tasteProfileProvider.get() } catch (e: Exception) { null }
         val pool = mutableListOf<GeneratedTrack>()
 
@@ -287,27 +356,47 @@ class GenresRepository @Inject constructor(
             pool += GenerateJson.normalise(d["tracks"]?.jsonObject?.get("track"))
         } catch (e: Exception) { Log.d(TAG, "explorePersonalizedGenre tag.gettoptracks miss", e) }
 
-        val knownArtists = profile?.topArtistNames?.toList()?.shuffled()?.take(5) ?: emptyList()
-        for (artistName in knownArtists) {
-            try {
-                val sim = call(mapOf("method" to "artist.getsimilar", "artist" to artistName, "limit" to "10"))
-                for (sa in GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(2)) {
-                    try {
-                        val d = call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "6"))
-                        pool += GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
-                    } catch (e: Exception) { Log.d(TAG, "explorePersonalizedGenre similar-artist toptracks miss", e) }
+        val knownArtists = (profile?.topArtistsRaw.orEmpty() +
+            profile?.ytMusicFeedRaw.orEmpty().map { it.artist })
+            .filter(String::isNotBlank)
+            .distinctBy { it.trim().lowercase() }
+            .shuffled()
+            .take(5)
+        val similarArtists = knownArtists.map { artistName ->
+            async(Dispatchers.IO) {
+                try {
+                    val sim = call(mapOf("method" to "artist.getsimilar", "artist" to artistName, "limit" to "10"))
+                    GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist"))
+                        .shuffled().take(2)
+                } catch (e: Exception) {
+                    Log.d(TAG, "explorePersonalizedGenre artist.getsimilar miss", e)
+                    emptyList()
                 }
-            } catch (e: Exception) { Log.d(TAG, "explorePersonalizedGenre artist.getsimilar miss", e) }
-        }
+            }
+        }.awaitAll().flatten().distinctBy { it.trim().lowercase() }.take(10)
+        pool += similarArtists.map { artistName ->
+            async(Dispatchers.IO) {
+                try {
+                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to artistName, "limit" to "6"))
+                    GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
+                } catch (e: Exception) {
+                    Log.d(TAG, "explorePersonalizedGenre similar-artist toptracks miss", e)
+                    emptyList()
+                }
+            }
+        }.awaitAll().flatten()
 
         val deduped = generateRepository.deduplicate(pool)
+        val normalizedSourceBoostArtists = sourceBoostArtists.map { it.trim().lowercase() }.toSet()
 
         val scored = deduped.map { track ->
-            val artistKey = track.artist.lowercase()
+            val artistKey = track.artist.trim().lowercase()
             var score = 0
-            if (profile?.topArtistNames?.contains(artistKey) == true) score += 3
-            if (profile?.recentArtists?.contains(artistKey) == true) score += 2
-            if (artistKey in sourceBoostArtists) score += 4
+            score += ((profile?.artistAffinity?.get(artistKey) ?: 0.0) * 18.0).toInt()
+            if (profile?.topArtistNames?.contains(artistKey) == true) score += 4
+            if (profile?.recentArtists?.contains(artistKey) == true) score += 3
+            if (profile?.ytMusicFeedRaw?.any { it.key == track.key } == true) score += 8
+            if (artistKey in normalizedSourceBoostArtists) score += 4
             track to score
         }
 
@@ -318,6 +407,7 @@ class GenresRepository @Inject constructor(
             }
             .map { it.first }
 
-        return generateRepository.filterPlayable(sorted).take(30)
+        val allowed = generateRepository.filterRecommendationExclusions(sorted)
+        generateRepository.filterPlayable(allowed).take(30)
     }
 }

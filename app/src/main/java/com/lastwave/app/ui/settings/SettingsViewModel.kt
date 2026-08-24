@@ -36,7 +36,7 @@ data class SettingsScreenState(
     val session: SessionData = SessionData(),
     val theme: ThemeUiState? = null,
     val misc: MiscSettings = MiscSettings(),
-    val seenTracksCount: Int = 0,
+    val recommendationExclusionCount: Int = 0,
     val toastMessage: String? = null,
     val showColorWheel: Boolean = false,
     val showClearAllConfirm: Boolean = false,
@@ -57,6 +57,7 @@ class SettingsViewModel @Inject constructor(
     private val themeRepository: ThemeRepository,
     private val settingsPreferences: SettingsPreferences,
     private val generateRepository: GenerateRepository,
+    private val discoverRepository: com.lastwave.app.data.discover.DiscoverRepository,
     private val backupRepository: BackupRepository,
     private val playlistRepository: PlaylistRepository,
     private val fileExportHelper: FileExportHelper,
@@ -120,13 +121,13 @@ class SettingsViewModel @Inject constructor(
     val uiState: StateFlow<SettingsScreenState> = _uiState.asStateFlow()
 
     init {
-        refreshSeenTracksCount()
+        refreshRecommendationExclusionCount()
     }
 
-    fun refreshSeenTracksCount() {
+    fun refreshRecommendationExclusionCount() {
         viewModelScope.launch {
-            val count = generateRepository.seenTracksCount()
-            _uiState.update { it.copy(seenTracksCount = count) }
+            val count = generateRepository.recommendationExclusionCount()
+            _uiState.update { it.copy(recommendationExclusionCount = count) }
         }
     }
 
@@ -167,6 +168,8 @@ class SettingsViewModel @Inject constructor(
     fun setQobuzQuality(quality: Int) = viewModelScope.launch { settingsPreferences.setQobuzQuality(quality) }
     fun setMusicEnhancer(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setMusicEnhancer(enabled) }
     fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = viewModelScope.launch { settingsPreferences.setLyricsAnimation(animation) }
+    fun setVolumeBoostEnabled(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setVolumeBoostEnabled(enabled) }
+    fun setVolumeBoostPercent(percent: Int) = viewModelScope.launch { settingsPreferences.setVolumeBoostPercent(percent) }
 
     // ── Experimental: 15-band equalizer ──
 
@@ -187,11 +190,11 @@ class SettingsViewModel @Inject constructor(
 
     // ── Data management (§8.5) ──
 
-    fun clearDiscoveryHistory() {
+    fun clearRecommendationExclusions() {
         viewModelScope.launch {
-            generateRepository.clearSeenTracks()
-            refreshSeenTracksCount()
-            _uiState.update { it.copy(toastMessage = "Discovery history cleared") }
+            discoverRepository.clearRecommendationExclusions()
+            refreshRecommendationExclusionCount()
+            _uiState.update { it.copy(toastMessage = "Exclusion history cleared") }
         }
     }
 
@@ -200,7 +203,7 @@ class SettingsViewModel @Inject constructor(
     fun confirmClearAllData(onComplete: () -> Unit) {
         viewModelScope.launch {
             sessionPreferences.clearAll()
-            generateRepository.clearSeenTracks()
+            discoverRepository.clearRecommendationExclusions()
             playlistRepository.clearAll()
             _uiState.update { it.copy(showClearAllConfirm = false) }
             onComplete()
@@ -335,12 +338,15 @@ class SettingsViewModel @Inject constructor(
 
             when (val result = backupRepository.restore(content)) {
                 is RestoreResult.Success -> {
-                    val historyNote = if (result.seenTrackCount > 0) " and discovery history" else ""
+                    generateRepository.invalidateRecommendationExclusionCache()
+                    discoverRepository.reset()
+                    refreshRecommendationExclusionCount()
+                    val exclusionNote = if (result.exclusionCount > 0) " and recommendation exclusions" else ""
                     _uiState.update {
                         it.copy(
                             showRestoreConfirm = false,
                             pendingRestoreContent = null,
-                            toastMessage = "Restored ${result.playlistCount} playlist(s)$historyNote",
+                            toastMessage = "Restored ${result.playlistCount} playlist(s)$exclusionNote",
                         )
                     }
                     kotlinx.coroutines.delay(900)

@@ -1,20 +1,10 @@
 package com.lastwave.app.ui.player
 
-import android.graphics.RenderEffect
-import android.graphics.Shader
-import android.os.Build
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -73,12 +63,9 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lastwave.app.data.local.LyricsAnimation
@@ -116,18 +103,9 @@ fun LyricsPanel(
     val track = state.current ?: return
     val liquidGlass = LocalLiquidGlass.current
 
-    // Ambient liquid glass backdrop glow
+    // Static ambient glass glow: depth without continuously invalidating the
+    // full lyrics viewport while text is scrolling and animating.
     val ambientModifier = if (liquidGlass) {
-        val transition = rememberInfiniteTransition(label = "lyricsLiquidAmbient")
-        val drift by transition.animateFloat(
-            initialValue = -1f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 16000, easing = LinearEasing),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "lyricsAmbientDrift",
-        )
         val primary = MaterialTheme.colorScheme.primary
         val tertiary = MaterialTheme.colorScheme.tertiary
 
@@ -140,7 +118,7 @@ fun LyricsPanel(
                         primary.copy(alpha = 0.04f),
                         Color.Transparent,
                     ),
-                    center = Offset(size.width * (0.30f + 0.10f * drift), size.height * 0.25f),
+                    center = Offset(size.width * 0.28f, size.height * 0.25f),
                     radius = maxDim * 0.80f,
                 ),
             )
@@ -151,7 +129,7 @@ fun LyricsPanel(
                         tertiary.copy(alpha = 0.03f),
                         Color.Transparent,
                     ),
-                    center = Offset(size.width * (0.80f - 0.08f * drift), size.height * 0.70f),
+                    center = Offset(size.width * 0.82f, size.height * 0.70f),
                     radius = maxDim * 0.75f,
                 ),
             )
@@ -420,11 +398,13 @@ private fun SyncedLyricsList(
             )
 
             val primaryColor = MaterialTheme.colorScheme.primary
-            val tertiaryColor = MaterialTheme.colorScheme.tertiary
             val textColor by animateColorAsState(
                 targetValue = if (isActive) {
-                    if (animationStyle == LyricsAnimation.LOSSLESS_GLOW && !liquidGlass) primaryColor
-                    else MaterialTheme.colorScheme.onSurface
+                    when {
+                        liquidGlass -> MaterialTheme.colorScheme.onPrimaryContainer
+                        animationStyle == LyricsAnimation.LOSSLESS_GLOW -> primaryColor
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
@@ -435,10 +415,10 @@ private fun SyncedLyricsList(
             // Container Background & Border (Liquid Glass and Card Pop integration)
             val pillShape = RoundedCornerShape(18.dp)
             val cardBg = when {
-                isActive && liquidGlass -> primaryColor.copy(alpha = 0.16f)
+                isActive && liquidGlass -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.90f)
                 isActive && animationStyle == LyricsAnimation.CARD_POP -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f)
                 isActive -> primaryColor.copy(alpha = 0.08f)
-                liquidGlass && animationStyle == LyricsAnimation.CARD_POP -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.30f)
+                liquidGlass && animationStyle == LyricsAnimation.CARD_POP -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.90f)
                 else -> Color.Transparent
             }
 
@@ -476,6 +456,10 @@ private fun SyncedLyricsList(
                         }
                     }
                     .clip(pillShape)
+                    .liquidGlassChrome(
+                        pillShape,
+                        liquidGlass && (isActive || animationStyle == LyricsAnimation.CARD_POP),
+                    )
                     .background(cardBg, pillShape)
                     .then(if (strokeBorder != null) Modifier.border(strokeBorder, pillShape) else Modifier)
                     .clickable(
@@ -529,7 +513,7 @@ private fun PlainLyricsView(
     ) {
         Surface(
             shape = pillShape,
-            color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.50f)
+            color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
             else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f),
             border = if (liquidGlass) BorderStroke(
                 1.dp,
@@ -540,7 +524,9 @@ private fun PlainLyricsView(
                     ),
                 ),
             ) else null,
-            modifier = Modifier.padding(bottom = 20.dp),
+            modifier = Modifier
+                .padding(bottom = 20.dp)
+                .liquidGlassChrome(pillShape, liquidGlass),
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
@@ -594,7 +580,7 @@ private fun EmptyLyricsView(
             val iconShape = CircleShape
             Surface(
                 shape = iconShape,
-                color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.60f)
+                color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
                 else MaterialTheme.colorScheme.surfaceContainerHigh,
                 border = if (liquidGlass) BorderStroke(
                     1.dp,
@@ -602,7 +588,9 @@ private fun EmptyLyricsView(
                         listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.08f)),
                     ),
                 ) else null,
-                modifier = Modifier.size(72.dp),
+                modifier = Modifier
+                    .size(72.dp)
+                    .liquidGlassChrome(iconShape, liquidGlass),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
@@ -656,7 +644,7 @@ private fun LyricsBottomControls(
 ) {
     val barShape = RoundedCornerShape(26.dp)
     val barBg = if (liquidGlass) {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f)
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
     } else {
         MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
     }

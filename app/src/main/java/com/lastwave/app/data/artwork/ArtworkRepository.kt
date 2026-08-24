@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,6 +25,9 @@ private const val CRASH_TAG = "ArtworkCrash"
 
 /** 30 days — same TTL as the original's _ART_DISK_TTL. */
 private const val DISK_CACHE_TTL_MILLIS = 30L * 24 * 60 * 60 * 1000
+private const val MAX_ARTWORK_DB_ENTRIES = 1_000
+private const val ARTWORK_DB_CLEANUP_INTERVAL = 100
+private const val MAX_ARTWORK_MEMORY_ENTRIES = 600
 
 /** 30s per-track cooldown for the "Refresh Cover Art" force-refresh action —
  *  matches §1.7's spec exactly. */
@@ -53,12 +57,15 @@ class ArtworkRepository @Inject constructor(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    private val savesSinceTrim = AtomicInteger(0)
 
     init {
         scope.launch {
             try {
-                val cachedEntities = cacheDao.getAll()
                 val now = System.currentTimeMillis()
+                cacheDao.deleteOlderThan(now - DISK_CACHE_TTL_MILLIS)
+                cacheDao.trimToNewest(MAX_ARTWORK_DB_ENTRIES)
+                val cachedEntities = cacheDao.getAll()
                 val validMap = cachedEntities
                     .filter { it.url.isNotBlank() && now - it.timestampMillis < DISK_CACHE_TTL_MILLIS }
                     .associate { it.cacheKey to it.url }
@@ -197,6 +204,12 @@ class ArtworkRepository @Inject constructor(
     private suspend fun save(key: String, provider: String, url: String) {
         try {
             cacheDao.upsert(ArtworkCacheEntity(key, url, provider, System.currentTimeMillis()))
+            if (savesSinceTrim.incrementAndGet() >= ARTWORK_DB_CLEANUP_INTERVAL &&
+                savesSinceTrim.getAndSet(0) >= ARTWORK_DB_CLEANUP_INTERVAL
+            ) {
+                cacheDao.deleteOlderThan(System.currentTimeMillis() - DISK_CACHE_TTL_MILLIS)
+                cacheDao.trimToNewest(MAX_ARTWORK_DB_ENTRIES)
+            }
         } catch (e: Exception) {
             Log.e(CRASH_TAG, "Room write failed | Cache key: $key | Provider: $provider", e)
         }
@@ -204,7 +217,11 @@ class ArtworkRepository @Inject constructor(
     }
 
     private fun publish(key: String, url: String) {
-        _resolved.update { it + (key to url) }
+        _resolved.update { current ->
+            val next = current + (key to url)
+            if (next.size <= MAX_ARTWORK_MEMORY_ENTRIES) next
+            else next.entries.drop(next.size - MAX_ARTWORK_MEMORY_ENTRIES).associate { it.key to it.value }
+        }
     }
 
     // ── Additions for §1.7 "Refresh Cover Art" + §4.2/§4.7 batch pre-warm ──

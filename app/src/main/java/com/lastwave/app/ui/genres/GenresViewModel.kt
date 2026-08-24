@@ -170,7 +170,6 @@ class GenresViewModel @Inject constructor(
                     )
                 }
                 val finalTracks = generateRepository.precheck(tracks).take(35).ifEmpty { tracks.take(35) }
-                generateRepository.markAsSeen(finalTracks)
                 val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())
                 val subtitle = PlaylistNamer.subtitleFor("tag", tagInput = genre)
                 playlistRepository.save(title, subtitle, "tag", finalTracks)

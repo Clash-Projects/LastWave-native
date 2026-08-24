@@ -14,8 +14,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.lastwave.app.data.artwork.ArtworkNormalizer
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -40,12 +42,18 @@ fun ArtworkImage(
     embeddedUrl: String?,
     fallbackIcon: ImageVector,
     modifier: Modifier = Modifier,
+    decodeSizePx: Int? = null,
     artworkViewModel: ArtworkViewModel = hiltViewModel(),
 ) {
+    val context = LocalContext.current
     if (!embeddedUrl.isNullOrBlank()) {
+        val model = remember(embeddedUrl, decodeSizePx, context) {
+            if (decodeSizePx == null) embeddedUrl
+            else ImageRequest.Builder(context).data(embeddedUrl).size(decodeSizePx).build()
+        }
         Box(modifier = modifier, contentAlignment = Alignment.Center) {
             AsyncImage(
-                model = embeddedUrl,
+                model = model,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
@@ -71,12 +79,18 @@ fun ArtworkImage(
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         when {
-            !resolvedUrl.isNullOrBlank() -> AsyncImage(
-                model = resolvedUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
+            !resolvedUrl.isNullOrBlank() -> {
+                val model = remember(resolvedUrl, decodeSizePx, context) {
+                    if (decodeSizePx == null) resolvedUrl
+                    else ImageRequest.Builder(context).data(resolvedUrl).size(decodeSizePx).build()
+                }
+                AsyncImage(
+                    model = model,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             else -> Icon(
                 fallbackIcon,
                 contentDescription = null,

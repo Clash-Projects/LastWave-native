@@ -19,4 +19,13 @@ data class TasteProfile(
     val recentTracksRaw: List<GeneratedTrack>,
     val topArtistsRaw: List<String>,
     val builtAtMillis: Long,
+    /** Normalized 0..1 artist strength. Last.fm history remains the strongest
+     * signal; connected YT Music history, likes, and Home-feed picks blend in
+     * with bounded weights. */
+    val artistAffinity: Map<String, Double> = emptyMap(),
+    val ytMusicRecentRaw: List<GeneratedTrack> = emptyList(),
+    val ytMusicLikedRaw: List<GeneratedTrack> = emptyList(),
+    /** Actual playable cards selected by the signed-in YT Music Home feed. */
+    val ytMusicFeedRaw: List<GeneratedTrack> = emptyList(),
+    val hasPersonalSignals: Boolean = false,
 )

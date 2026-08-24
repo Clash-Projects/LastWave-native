@@ -30,7 +30,6 @@ data class SavedPlaylistEntity(
     val createdAtMillis: Long,
     val discoverSignature: String? = null,
     val customCoverUri: String? = null,
-    val isCompleted: Boolean = false,
     val isPinned: Boolean = false,
 )
 

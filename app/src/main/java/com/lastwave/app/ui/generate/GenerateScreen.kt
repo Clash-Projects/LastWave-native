@@ -179,7 +179,7 @@ fun GenerateScreen(
                                     GenerateMode.TAG -> TagOptions(state.tagInput, viewModel::setTagInput, viewModel::setGenreChip)
                                     GenerateMode.MIX -> HintText("Mix includes: top tracks, recent plays & similar artists' tracks.")
                                     GenerateMode.RECOMMENDATIONS -> HintText(
-                                        "$RECOMMENDATION_TRACK_COUNT tracks, all outside Discovery History",
+                                        "$RECOMMENDATION_TRACK_COUNT tracks, respecting your exclusions",
                                     )
                                 }
 

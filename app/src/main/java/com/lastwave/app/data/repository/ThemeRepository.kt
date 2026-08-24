@@ -128,7 +128,8 @@ class ThemeRepository @Inject constructor(
                     },
                     Handler(Looper.getMainLooper()),
                 )
-            } catch (e: SecurityException) {
+            } catch (e: Exception) {
+                android.util.Log.w("ThemeRepository", "Wallpaper listener unavailable", e)
                 // Some OEM configurations restrict this — Dynamic Color
                 // simply won't live-update on those devices; the
                 // startup/toggle-time refresh above still works.

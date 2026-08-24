@@ -28,7 +28,6 @@ data class PlaylistMirrorEntry(
     val createdAtMillis: Long,
     val discoverSignature: String? = null,
     val customCoverUri: String? = null,
-    val isCompleted: Boolean = false,
     val isPinned: Boolean = false,
 )
 
@@ -124,7 +123,6 @@ class PlaylistPublicMirror @Inject constructor(
                     createdAtMillis = entity.createdAtMillis,
                     discoverSignature = entity.discoverSignature,
                     customCoverUri = entity.customCoverUri,
-                    isCompleted = entity.isCompleted,
                     isPinned = entity.isPinned,
                 )
             },
@@ -141,7 +139,6 @@ class PlaylistPublicMirror @Inject constructor(
         createdAtMillis = createdAtMillis,
         discoverSignature = discoverSignature,
         customCoverUri = customCoverUri,
-        isCompleted = isCompleted,
         isPinned = isPinned,
     )
 }

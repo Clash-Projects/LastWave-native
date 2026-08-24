@@ -20,9 +20,9 @@ import com.lastwave.app.data.repository.ThemeUiState
  * light/dark scheme resolution.
  *
  * When the experimental Liquid Glass setting is on, [LocalLiquidGlass] is
- * provided to everything below and a set of faint drifting accent glows is
- * painted directly behind all content (pure drawBehind — no layout change)
- * so the translucent containers have depth to show.
+ * provided to everything below and a set of faint cached accent glows is
+ * painted directly behind all content (cached drawing, no layout change)
+ * so translucent containers gain depth without a permanent animation loop.
  */
 @Composable
 fun LastWaveTheme(
@@ -33,10 +33,11 @@ fun LastWaveTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? Activity)?.window ?: return@SideEffect
-            window.statusBarColor = android.graphics.Color.TRANSPARENT
-            window.navigationBarColor = android.graphics.Color.TRANSPARENT
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
-            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
+            runCatching {
+                window.statusBarColor = android.graphics.Color.TRANSPARENT
+                window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
+                WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
             // Setting navigationBarColor to TRANSPARENT above is not enough on
             // its own: Android 10+ automatically draws its own translucent
             // black scrim over a transparent nav bar ("contrast enforcement")
@@ -45,9 +46,10 @@ fun LastWaveTheme(
             // here is what actually removes it; without this line the app
             // background never reaches the true bottom of the display no
             // matter what padding or Surface backgrounds are added elsewhere.
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                window.isStatusBarContrastEnforced = false
-                window.isNavigationBarContrastEnforced = false
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    window.isStatusBarContrastEnforced = false
+                    window.isNavigationBarContrastEnforced = false
+                }
             }
         }
     }

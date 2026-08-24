@@ -2,11 +2,13 @@ package com.lastwave.app.playback
 
 import android.media.audiofx.DynamicsProcessing
 import android.media.audiofx.Equalizer
+import android.media.audiofx.LoudnessEnhancer
 import android.os.Build
 import android.util.Log
 import androidx.media3.common.C
 import com.lastwave.app.data.local.EQ_BAND_FREQS_HZ
 import com.lastwave.app.data.local.EqualizerPreferences
+import com.lastwave.app.data.local.EqualizerPresets
 import com.lastwave.app.data.local.EqualizerSettings
 import com.lastwave.app.data.local.SettingsPreferences
 import kotlinx.coroutines.CoroutineScope
@@ -14,6 +16,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.math.ln
+import kotlin.math.log10
+import kotlin.math.roundToInt
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -39,9 +44,12 @@ class AudioEffectsEngine @Inject constructor(
 
     private var equalizer: Equalizer? = null
     private var dynamicsProcessor: DynamicsProcessing? = null
+    private var loudnessEnhancer: LoudnessEnhancer? = null
 
     @Volatile private var eqSettings = EqualizerSettings()
     @Volatile private var enhancerEnabled = false
+    @Volatile private var volumeBoostEnabled = false
+    @Volatile private var volumeBoostPercent = 100
 
     init {
         applicationScope.launch(Dispatchers.Default) {
@@ -53,6 +61,8 @@ class AudioEffectsEngine @Inject constructor(
         applicationScope.launch(Dispatchers.Default) {
             settingsPreferences.settings.collect { misc ->
                 enhancerEnabled = misc.musicEnhancerEnabled
+                volumeBoostEnabled = misc.volumeBoostEnabled
+                volumeBoostPercent = misc.volumeBoostPercent.coerceIn(100, 200)
                 applyProcessing()
             }
         }
@@ -93,29 +103,56 @@ class AudioEffectsEngine @Inject constructor(
 
         val activeGains: List<Float> = when {
             eqSettings.enabled -> eqSettings.gainsDb
-            enhancerEnabled -> STUDIO_CLARITY_CURVE
+            enhancerEnabled -> EqualizerPresets.STUDIO_MASTER.gainsDb
             else -> List(EQ_BAND_FREQS_HZ.size) { 0f }
         }
 
-        val needsProcessing = eqSettings.enabled || enhancerEnabled
+        val volumeBoostActive = volumeBoostEnabled && volumeBoostPercent > 100
+        val needsToneProcessing = eqSettings.enabled || enhancerEnabled
+        val needsProcessing = needsToneProcessing || volumeBoostActive
 
         if (!needsProcessing) {
             releaseAllInternal()
             return
         }
 
-        // Prefer modern DynamicsProcessing with brickwall limiter on Android 9+
+        val boostDb = if (volumeBoostActive) {
+            (20.0 * log10(volumeBoostPercent / 100.0)).toFloat().coerceIn(0f, 6.1f)
+        } else 0f
+
+        // Prefer modern DynamicsProcessing with a brickwall limiter on Android 9+.
+        // The gain is applied before the limiter, so 200% does not silently
+        // become a clipped digital signal on supported devices.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            applyDynamicsProcessing(activeGains)
+            applyDynamicsProcessing(
+                gainsDb = activeGains,
+                requestedOutputGainDb = boostDb,
+                toneProcessingActive = needsToneProcessing,
+            )
         } else {
-            applyEqualizer(activeGains)
+            if (needsToneProcessing) applyEqualizer(activeGains) else releaseToneProcessingInternal()
+            if (volumeBoostActive) applyLegacyVolumeBoost(boostDb) else releaseLoudnessInternal()
         }
     }
 
     // ── DynamicsProcessing (API 28+ Studio Precision) ──
 
-    private fun applyDynamicsProcessing(gainsDb: List<Float>) {
+    private fun applyDynamicsProcessing(
+        gainsDb: List<Float>,
+        requestedOutputGainDb: Float,
+        toneProcessingActive: Boolean,
+    ) {
         runCatching {
+            // Leave at most a small bounded boost before the safety limiter.
+            // This retains perceived energy while avoiding constant gain
+            // reduction on already-loud masters.
+            val toneHeadroomDb = if (toneProcessingActive) {
+                calculateHeadroomDb(gainsDb)
+            } else {
+                0f
+            }
+            val stagedInputGainDb = requestedOutputGainDb + toneHeadroomDb
+
             var dp = dynamicsProcessor
             if (dp == null) {
                 val config = DynamicsProcessing.Config.Builder(
@@ -128,12 +165,17 @@ class AudioEffectsEngine @Inject constructor(
                     /* enablePostEq = */ false,
                     /* postEqBandCount = */ 0,
                     /* enableLimiter = */ true
-                ).build()
+                )
+                    .setInputGainAllChannelsTo(stagedInputGainDb)
+                    .build()
 
                 dp = DynamicsProcessing(EFFECT_PRIORITY, sessionId, config).also { dynamicsProcessor = it }
             }
 
-            // Apply 15-band PreEQ curve with linear phase transparency
+            // Update the existing processor when only the slider changed.
+            dp.setInputGainAllChannelsTo(stagedInputGainDb)
+
+            // Apply the shared 15-band Studio Master / user EQ curve.
             val preEq = DynamicsProcessing.Eq(true, true, EQ_BAND_FREQS_HZ.size)
             for (i in EQ_BAND_FREQS_HZ.indices) {
                 val band = DynamicsProcessing.EqBand(
@@ -145,22 +187,48 @@ class AudioEffectsEngine @Inject constructor(
             }
             dp.setPreEqAllChannelsTo(preEq)
 
-            // Transparent studio limiter: catches inter-sample peaks at -0.1 dBFS to eliminate distortion
+            // Fast safety ceiling with recovery slow enough to avoid audible
+            // pumping. It should stay idle during normal clarity playback and
+            // engage mainly for hot masters or an explicit volume boost.
             val limiter = DynamicsProcessing.Limiter(
                 /* inUse = */ true,
                 /* enabled = */ true,
                 /* linkGroup = */ 0,
                 /* attackTime = */ 1.0f,
-                /* releaseTime = */ 60.0f,
-                /* ratio = */ 10.0f,
-                /* threshold = */ -0.1f,
+                /* releaseTime = */ 80.0f,
+                /* ratio = */ 20.0f,
+                /* threshold = */ -0.8f,
                 /* postGain = */ 0.0f
             )
             dp.setLimiterAllChannelsTo(limiter)
             dp.enabled = true
+            // A prior vendor-DSP failure may have created the legacy fallbacks.
+            // Never leave two independent tone/gain effects active together.
+            releaseEqualizerInternal()
+            releaseLoudnessInternal()
         }.onFailure { e ->
             Log.w(TAG, "DynamicsProcessing unavailable, falling back to legacy Equalizer: ${e.message}")
+            releaseDynamicsProcessorInternal()
             applyEqualizer(gainsDb)
+            if (requestedOutputGainDb > 0f) {
+                applyLegacyVolumeBoost(requestedOutputGainDb)
+            } else {
+                releaseLoudnessInternal()
+            }
+        }
+    }
+
+    /** Pre-Android 9 fallback for the same bounded gain control. */
+    private fun applyLegacyVolumeBoost(boostDb: Float) {
+        if (sessionId == C.AUDIO_SESSION_ID_UNSET) return
+        runCatching {
+            val enhancer = loudnessEnhancer ?: LoudnessEnhancer(EFFECT_PRIORITY, sessionId).also {
+                loudnessEnhancer = it
+            }
+            enhancer.setTargetGain((boostDb * MB_PER_DB).roundToInt().coerceIn(0, 610))
+            enhancer.enabled = true
+        }.onFailure {
+            Log.w(TAG, "LoudnessEnhancer unavailable; volume boost was not applied", it)
         }
     }
 
@@ -180,9 +248,9 @@ class AudioEffectsEngine @Inject constructor(
             val minMb = range.first().toInt()
             val maxMb = range.last().toInt()
 
-            // Calculate safe headroom offset if positive boost exists to prevent hardware clipping
-            val maxBoost = gainsDb.maxOrNull() ?: 0f
-            val headroomOffsetDb = if (maxBoost > 2.0f) -(maxBoost - 2.0f) else 0f
+            // Use the same clean gain staging as the modern path. Older
+            // Equalizer implementations do not provide a reliable limiter.
+            val headroomOffsetDb = calculateHeadroomDb(gainsDb)
 
             for (band in 0 until eq.numberOfBands.toInt()) {
                 val centerHz = eq.getCenterFreq(band.toShort()) / MILLIHERTZ_PER_HZ
@@ -206,26 +274,55 @@ class AudioEffectsEngine @Inject constructor(
             val lo = freqs[i]
             val hi = freqs[i + 1]
             if (hz in lo..hi) {
-                val t = (hz - lo).toFloat() / (hi - lo)
+                // EQ centers are logarithmically spaced; interpolating in log
+                // frequency preserves the intended curve on 5/7/10-band OEMs.
+                val t = (ln(hz.toFloat()) - ln(lo.toFloat())) /
+                    (ln(hi.toFloat()) - ln(lo.toFloat()))
                 return gains[i] + (gains[i + 1] - gains[i]) * t
             }
         }
         return 0f
     }
 
+    private fun calculateHeadroomDb(gainsDb: List<Float>): Float {
+        val maxBoostDb = (gainsDb.maxOrNull() ?: 0f).coerceAtLeast(0f)
+        return -(maxBoostDb - MAX_PRE_LIMITER_BOOST_DB).coerceAtLeast(0f)
+    }
+
     // ── Lifecycle Cleanup ──
 
     private fun releaseAllInternal() {
+        releaseToneProcessingInternal()
+        releaseLoudnessInternal()
+    }
+
+    private fun releaseToneProcessingInternal() {
+        releaseEqualizerInternal()
+        releaseDynamicsProcessorInternal()
+    }
+
+    private fun releaseEqualizerInternal() {
         runCatching {
             equalizer?.enabled = false
             equalizer?.release()
         }
+        equalizer = null
+    }
+
+    private fun releaseDynamicsProcessorInternal() {
         runCatching {
             dynamicsProcessor?.enabled = false
             dynamicsProcessor?.release()
         }
-        equalizer = null
         dynamicsProcessor = null
+    }
+
+    private fun releaseLoudnessInternal() {
+        runCatching {
+            loudnessEnhancer?.enabled = false
+            loudnessEnhancer?.release()
+        }
+        loudnessEnhancer = null
     }
 
     private companion object {
@@ -233,28 +330,6 @@ class AudioEffectsEngine @Inject constructor(
         const val EFFECT_PRIORITY = 0
         const val MILLIHERTZ_PER_HZ = 1000
         const val MB_PER_DB = 100f
-
-        /**
-         * Studio Master Clarity Curve:
-         * Crisp vocal articulation, open high-frequency air, controlled clean sub-bass,
-         * with zero mid-bass bloat or comb-filtering distortion.
-         */
-        val STUDIO_CLARITY_CURVE = listOf(
-            1.0f,  // 25 Hz
-            1.0f,  // 40 Hz
-            0.5f,  // 63 Hz
-            0.0f,  // 100 Hz
-            -0.5f, // 160 Hz (De-muds mid-bass)
-            -0.5f, // 250 Hz (Vocal separation)
-            0.0f,  // 400 Hz
-            0.5f,  // 630 Hz
-            1.0f,  // 1000 Hz
-            1.5f,  // 1600 Hz (Vocal core)
-            2.0f,  // 2500 Hz (Presence & clarity)
-            2.2f,  // 4000 Hz (Upper harmonic sparkle)
-            2.0f,  // 6300 Hz
-            2.5f,  // 10000 Hz (Air & transparency)
-            2.5f   // 16000 Hz (Top-end openness)
-        )
+        const val MAX_PRE_LIMITER_BOOST_DB = 0.6f
     }
 }

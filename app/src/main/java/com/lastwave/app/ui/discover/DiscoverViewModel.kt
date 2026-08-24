@@ -44,8 +44,10 @@ class DiscoverViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             repository.feed.collect { feed ->
-                if (feed.isNotEmpty()) {
-                    _uiState.update { it.copy(isLoading = false, tracks = feed) }
+                if (feed.isNotEmpty() || _uiState.value.tracks.isNotEmpty()) {
+                    _uiState.update {
+                        it.copy(isLoading = if (feed.isNotEmpty()) false else it.isLoading, tracks = feed)
+                    }
                 }
             }
         }
@@ -56,7 +58,7 @@ class DiscoverViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                val cached = repository.freshCachedFeed()
+                val cached = repository.allowedCachedFeed()
                 val needed = (INITIAL_BATCH_SIZE - cached.size).coerceAtLeast(0)
                 val batch = if (needed > 0) repository.nextBatch(needed) else emptyList()
                 val feed = repository.getCachedFeed()

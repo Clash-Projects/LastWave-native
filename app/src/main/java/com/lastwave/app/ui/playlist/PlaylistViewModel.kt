@@ -125,10 +125,7 @@ class PlaylistViewModel @Inject constructor(
     fun load(justGeneratedId: Long? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            val all = sortPlaylists(
-                playlistRepository.getAll().filterNot { it.isCompleted },
-                _uiState.value.sortMode,
-            )
+            val all = sortPlaylists(playlistRepository.getAll(), _uiState.value.sortMode)
             val newest = justGeneratedId ?: all.maxByOrNull { it.createdAtMillis }?.id
             _uiState.update { current ->
                 val currentDetailId = current.detailPlaylist?.id
@@ -249,29 +246,6 @@ class PlaylistViewModel @Inject constructor(
         }
     }
 
-    fun completePlaylist(id: Long) {
-        val playlist = _uiState.value.playlists.firstOrNull { it.id == id } ?: return
-        viewModelScope.launch {
-            try {
-                // Persist every track first. If this fails, the playlist stays
-                // visible so completing it can be retried safely.
-                generateRepository.rememberInDiscoveryHistory(playlist.tracks)
-                playlistRepository.setCompleted(id)
-                _uiState.update {
-                    it.copy(
-                        playlists = it.playlists.filterNot { item -> item.id == id },
-                        expandedIds = it.expandedIds - id,
-                        toastMessage = "${playlist.title} completed · ${playlist.tracks.size} tracks added to Discovery History",
-                    )
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(toastMessage = e.message ?: "Couldn't complete playlist")
-                }
-            }
-        }
-    }
-
     fun togglePinned(id: Long) {
         val playlist = _uiState.value.playlists.firstOrNull { it.id == id } ?: return
         viewModelScope.launch {
@@ -373,7 +347,6 @@ class PlaylistViewModel @Inject constructor(
                     throw IllegalStateException("No tracks found to mix for this playlist.")
                 }
 
-                generateRepository.markAsSeen(finalTracks)
                 val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())
                 val saved = playlistRepository.save(title, playlist.subtitle.ifBlank { "Regenerated Mix" }, playlist.mode, finalTracks)
                 _uiState.update { it.copy(regeneratingId = null, toastMessage = "Regenerated \"$title\" (${finalTracks.size} tracks)") }

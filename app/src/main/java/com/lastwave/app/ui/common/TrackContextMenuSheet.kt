@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.QueuePlayNext
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sell
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -67,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.lastwave.app.ui.generate.MixLauncher
 import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.ui.navigation.ArtistAlbumNavigator
@@ -74,6 +76,7 @@ import com.lastwave.app.ui.player.LocalMusicPlayer
 import com.lastwave.app.ui.player.LocalAddToPlaylist
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.launch
 
 /** Which optional rows this instance of the sheet should show — matches the
  *  reference's per-screen menu variance (§1.7 / §6.5 / home.js's reduced
@@ -119,6 +122,17 @@ class DownloadMenuViewModel @Inject constructor(
 ) : ViewModel() {
     fun download(title: String, artist: String, album: String? = null, artworkUrl: String? = null) {
         downloadManager.downloadTrack(title, artist, album, artworkUrl)
+    }
+}
+
+@HiltViewModel
+class RecommendationExclusionMenuViewModel @Inject constructor(
+    private val discoverRepository: com.lastwave.app.data.discover.DiscoverRepository,
+) : ViewModel() {
+    fun exclude(trackName: String, artistName: String) {
+        viewModelScope.launch {
+            discoverRepository.excludeFromRecommendations(trackName, artistName)
+        }
     }
 }
 
@@ -207,6 +221,7 @@ fun TrackContextMenuSheet(
     startMixViewModel: StartMixMenuViewModel = hiltViewModel(),
     exploreGenreViewModel: ExploreGenreMenuViewModel = hiltViewModel(),
     downloadViewModel: DownloadMenuViewModel = hiltViewModel(),
+    exclusionViewModel: RecommendationExclusionMenuViewModel = hiltViewModel(),
     artistAlbumViewModel: ArtistAlbumMenuViewModel = hiltViewModel(),
 ) {
     val context = LocalContext.current
@@ -334,6 +349,12 @@ fun TrackContextMenuSheet(
                     add { pos ->
                         MenuActionRow(Icons.Filled.Info, "Details & Audio Specs", position = pos) {
                             showDetailsSheet = true
+                        }
+                    }
+                    add { pos ->
+                        MenuActionRow(Icons.Filled.ThumbDown, "Don't recommend again", danger = true, position = pos) {
+                            exclusionViewModel.exclude(t.name, t.artist)
+                            onDismiss()
                         }
                     }
                     if (onRemoveFromPlaylist != null) {

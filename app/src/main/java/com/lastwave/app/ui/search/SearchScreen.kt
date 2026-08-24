@@ -57,7 +57,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,6 +78,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.search.SearchResultItem
 import com.lastwave.app.data.search.SearchTab
 import com.lastwave.app.ui.common.ArtworkImage
@@ -123,9 +123,9 @@ fun SearchScreen(
     onOpenAlbum: (title: String, artist: String, browseId: String?) -> Unit = { _, _, _ -> },
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
-    val playbackState by musicPlayer.state.collectAsState()
+    val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     var menuTarget by remember { mutableStateOf<TrackMenuTarget?>(null) }
     val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
     val focusManager = LocalFocusManager.current
@@ -158,7 +158,7 @@ fun SearchScreen(
                     Spacer(Modifier.width(10.dp))
 
                     val pillBg = if (liquidGlass) {
-                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f)
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.90f)
                     } else {
                         MaterialTheme.colorScheme.surfaceContainerHighest
                     }
@@ -201,6 +201,7 @@ fun SearchScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .clip(CircleShape)
+                                    .liquidGlassChrome(CircleShape, liquidGlass)
                                     .background(pillBg)
                                     .border(BorderStroke(1.dp, pillBorder), CircleShape)
                                     .padding(horizontal = 14.dp),
@@ -226,7 +227,7 @@ fun SearchScreen(
                                             text = if (state.tab == SearchTab.USERS) "Search Last.fm users\u2026"
                                             else "Search YouTube Music\u2026",
                                             style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.60f),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.74f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
@@ -534,14 +535,28 @@ private fun TopResultCard(
     onPlay: () -> Unit,
     onMenu: () -> Unit,
 ) {
+    val liquidGlass = LocalLiquidGlass.current
+    val shape = RoundedCornerShape(20.dp)
+    val containerColor = if (isPlaying) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (liquidGlass) 0.92f else 0.45f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = if (liquidGlass) 0.90f else 0.65f)
+    }
+    val cardContentColor = if (isPlaying && liquidGlass) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
     Card(
-        shape = RoundedCornerShape(20.dp),
+        shape = shape,
         colors = CardDefaults.cardColors(
-            containerColor = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f),
+            containerColor = containerColor,
+            contentColor = cardContentColor,
         ),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
+            .liquidGlassChrome(shape, liquidGlass)
             .clickable(onClick = onPlay),
     ) {
         Row(
@@ -611,7 +626,11 @@ private fun TopResultCard(
                     Text(
                         subtitle,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (isPlaying && liquidGlass) {
+                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -870,14 +889,14 @@ private fun SearchFilterPills(
             val interactionSource = remember { MutableInteractionSource() }
 
             val pillBg = when {
-                selected && liquidGlass -> MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                selected && liquidGlass -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
                 selected -> MaterialTheme.colorScheme.primary
-                liquidGlass -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f)
+                liquidGlass -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.90f)
                 else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
             }
 
             val contentColor = when {
-                selected && liquidGlass -> MaterialTheme.colorScheme.primary
+                selected && liquidGlass -> MaterialTheme.colorScheme.onPrimaryContainer
                 selected -> MaterialTheme.colorScheme.onPrimary
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             }
@@ -914,6 +933,7 @@ private fun SearchFilterPills(
                 border = stroke,
                 modifier = Modifier
                     .clip(CircleShape)
+                    .liquidGlassChrome(CircleShape, liquidGlass)
                     .clickable(
                         interactionSource = interactionSource,
                         indication = null,

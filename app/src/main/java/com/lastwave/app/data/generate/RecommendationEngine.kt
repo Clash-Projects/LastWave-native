@@ -80,8 +80,8 @@ private class RecoContext(
 
 /**
  * Port of app.js's scoring/interleave machinery and 7-source pipeline.
- * Selection is intentionally stricter here: history freshness never
- * relaxes, and the source pipeline refills instead of using heard tracks.
+ * Selection is intentionally strict: explicit recommendation exclusions
+ * never relax, and the source pipeline refills instead of returning them.
  *
  * [rawCall] is GenerateRepository's authenticated Last.fm call primitive —
  * injected rather than duplicated so this engine and the simple fetch
@@ -107,15 +107,15 @@ class RecommendationEngine(
     // ── Scoring — exact port of _recoGemScore / _recoCommunityScore / _recoMatchBonus / _recoScore ──
 
     private fun gemScore(track: GeneratedTrack): Int {
-        val n = track.listeners ?: return 10
+        val n = track.listeners ?: return 0
         return when {
-            n < 3000 -> 36
-            n < 10000 -> 30
-            n < 30000 -> 22
-            n < 100000 -> 12
-            n < 400000 -> 0
-            n < 1500000 -> -14
-            else -> -28
+            n < 3_000 -> 4
+            n < 10_000 -> 7
+            n < 30_000 -> 9
+            n < 100_000 -> 6
+            n < 400_000 -> 2
+            n < 1_500_000 -> 0
+            else -> -2
         }
     }
 
@@ -125,37 +125,41 @@ class RecommendationEngine(
         if (listeners == 0L) return 0
         val ratio = playcount.toDouble() / listeners.toDouble()
         return when {
-            ratio >= 6 -> 14
-            ratio >= 3 -> 8
-            ratio >= 1.5 -> 3
+            ratio >= 6 -> 8
+            ratio >= 3 -> 5
+            ratio >= 1.5 -> 2
             else -> 0
         }
     }
 
     private fun matchBonus(track: GeneratedTrack): Int =
-        track.match?.let { (it * 26).roundToInt() } ?: 0
+        track.match?.let { (it * 34).roundToInt() } ?: 0
 
     private fun recoScore(track: GeneratedTrack, profile: TasteProfile, bucketWeight: Int, isPrimaryGenre: Boolean, sourceCount: Int, fresh: Boolean): Double {
         var score = 0.0
         val bw = if (bucketWeight <= 0) 1 else bucketWeight
 
-        if (bw >= 4) score += 34 else if (bw >= 3) score += 26 else if (bw >= 2) score += 18
+        if (bw >= 4) score += 50 else if (bw >= 3) score += 38 else if (bw >= 2) score += 26 else score += 12
 
-        val artistKey = track.artist.lowercase()
+        val artistKey = track.artist.trim().lowercase()
         val knownArtist = profile.topArtistNames.contains(artistKey) || profile.recentArtists.contains(artistKey)
-        if (profile.topArtistNames.contains(artistKey)) score += 22
-        if (profile.recentArtists.contains(artistKey)) score += 10
-        if (!knownArtist) score += 9
-        if (isPrimaryGenre) score += 6
+        score += (profile.artistAffinity[artistKey] ?: 0.0) * 30.0
+        if (profile.topArtistNames.contains(artistKey)) score += 16
+        if (profile.recentArtists.contains(artistKey)) score += 8
+        if (profile.ytMusicFeedRaw.any { it.key == track.key }) score += 8
+        if (profile.ytMusicLikedRaw.any { it.key == track.key }) score += 6
+        if (profile.ytMusicRecentRaw.any { it.key == track.key }) score += 4
+        if (!knownArtist) score += 3
+        if (isPrimaryGenre) score += 4
 
-        if (sourceCount >= 3) score += 18 else if (sourceCount == 2) score += 9
+        if (sourceCount >= 3) score += 20 else if (sourceCount == 2) score += 10
 
         score += matchBonus(track)
         score += gemScore(track)
         score += communityScore(track)
 
         score += if (fresh) 6 else -20
-        score += Random.nextDouble() * 6
+        score += Random.nextDouble() * 2
 
         return score
     }
@@ -164,30 +168,49 @@ class RecommendationEngine(
 
     private suspend fun srcSimilarTracks(ctx: RecoContext, cycle: Int) = coroutineScope {
         val pool = if (cycle == 1) ctx.profile.recentTracksRaw else ctx.profile.topTracksRaw
-        val seeds = pool.shuffled().drop((cycle - 1) * 3).take(3)
+        data class Seed(val track: GeneratedTrack, val weight: Int, val source: String)
+        val seeds = buildList {
+            addAll(
+                pool.shuffled().drop((cycle - 1) * 3).take(3).map {
+                    Seed(it, if (cycle == 1) 4 else 3, if (cycle == 1) "mood" else "taste")
+                },
+            )
+            if (cycle <= 2) {
+                val ytPool = (ctx.profile.ytMusicRecentRaw + ctx.profile.ytMusicLikedRaw + ctx.profile.ytMusicFeedRaw)
+                    .distinctBy(GeneratedTrack::key)
+                val ytFeedKeys = ctx.profile.ytMusicFeedRaw.mapTo(mutableSetOf(), GeneratedTrack::key)
+                ytPool.shuffled().drop((cycle - 1) * 2).firstOrNull()?.let {
+                    add(Seed(it, 3, if (it.key in ytFeedKeys) "yt-feed-similar" else "yt-taste"))
+                }
+            }
+        }.distinctBy { it.track.key }
         val deferreds = seeds.map { s ->
             async {
-                if (s.name.isNotBlank() && s.artist.isNotBlank()) {
+                if (s.track.name.isNotBlank() && s.track.artist.isNotBlank()) {
                     try {
-                        val d = rawCall(mapOf("method" to "track.getsimilar", "track" to s.name, "artist" to s.artist, "limit" to "30"))
-                        jsonTracks(d, "similartracks", "track")
+                        val d = rawCall(mapOf("method" to "track.getsimilar", "track" to s.track.name, "artist" to s.track.artist, "limit" to "30"))
+                        s to jsonTracks(d, "similartracks", "track")
                     } catch (e: Exception) {
-                        Log.d(RTAG, "srcSimilarTracks miss for ${s.name}", e)
-                        emptyList()
+                        Log.d(RTAG, "srcSimilarTracks miss for ${s.track.name}", e)
+                        s to emptyList()
                     }
-                } else emptyList()
+                } else s to emptyList()
             }
         }
         val results = deferreds.awaitAll()
-        for (tracks in results) {
+        for ((seed, tracks) in results) {
             if (tracks.isNotEmpty()) {
-                ctx.addAll(tracks, if (cycle == 1) 4 else 3, if (cycle == 1) "mood" else "taste")
+                ctx.addAll(tracks, seed.weight, seed.source)
             }
         }
     }
 
     private suspend fun srcSimilarArtists(ctx: RecoContext, cycle: Int) = coroutineScope {
-        val artists = ctx.profile.topArtistNames.shuffled().drop((cycle - 1) * 3).take(3)
+        val artists = ctx.profile.topArtistsRaw
+            .distinctBy { it.trim().lowercase() }
+            .sortedByDescending { ctx.profile.artistAffinity[it.trim().lowercase()] ?: 0.0 }
+            .drop((cycle - 1) * 3)
+            .take(3)
         val deferreds = artists.map { artistName ->
             async {
                 try {
@@ -202,7 +225,7 @@ class RecommendationEngine(
         val results = deferreds.awaitAll()
         for (sims in results) {
             for (sa in sims.take(5)) {
-                val ak = sa.lowercase()
+                val ak = sa.trim().lowercase()
                 if (ctx.exploredArtists.contains(ak)) continue
                 ctx.exploredArtists.add(ak)
                 ctx.pendingArtists.add(sa)
@@ -229,7 +252,7 @@ class RecommendationEngine(
         val results = deferreds.awaitAll()
         for ((artistName, tracks) in results) {
             if (tracks.isNotEmpty()) {
-                ctx.addAll(tracks, 2, "artist:${artistName.lowercase()}")
+                ctx.addAll(tracks, 2, "artist:${artistName.trim().lowercase()}")
             }
         }
     }
@@ -299,7 +322,7 @@ class RecommendationEngine(
         val results = deferreds.awaitAll()
         for (sims in results) {
             for (sa in sims) {
-                val ak = sa.lowercase()
+                val ak = sa.trim().lowercase()
                 if (ctx.exploredArtists.contains(ak)) continue
                 ctx.exploredArtists.add(ak)
                 ctx.pendingArtists.add(sa)
@@ -309,7 +332,12 @@ class RecommendationEngine(
     }
 
     private suspend fun srcDiscoveryPool(ctx: RecoContext) = coroutineScope {
-        val wide = ctx.profile.topArtistNames.shuffled().take(3)
+        val wide = ctx.profile.topArtistsRaw
+            .distinctBy { it.trim().lowercase() }
+            .sortedByDescending { ctx.profile.artistAffinity[it.trim().lowercase()] ?: 0.0 }
+            .take(8)
+            .shuffled()
+            .take(3)
         val deferreds = wide.map { artistName ->
 
             async {
@@ -326,7 +354,7 @@ class RecommendationEngine(
         val results = deferreds.awaitAll()
         for ((artistName, tracks) in results) {
             if (tracks.isNotEmpty()) {
-                ctx.addAll(tracks, 2, "artist:${artistName.lowercase()}")
+                ctx.addAll(tracks, 2, "artist:${artistName.trim().lowercase()}")
             }
         }
     }
@@ -337,7 +365,11 @@ class RecommendationEngine(
     private suspend fun srcFreshRefill(ctx: RecoContext, attempt: Int) {
         val limit = maxOf(50, ctx.total * 2).coerceAtMost(200).toString()
         val tag = ctx.profile.topTags.randomOrNull()
-        val artist = ctx.profile.topArtistNames.randomOrNull()
+        val artist = ctx.profile.topArtistsRaw
+            .distinctBy { it.trim().lowercase() }
+            .sortedByDescending { ctx.profile.artistAffinity[it.trim().lowercase()] ?: 0.0 }
+            .take(12)
+            .randomOrNull()
         val useTag = tag != null && (attempt % 2 == 0 || artist == null)
 
         if (useTag) {
@@ -374,7 +406,7 @@ class RecommendationEngine(
                         "page" to page.toString(),
                     ),
                 )
-                ctx.addAll(tracks = jsonTracks(data, "toptracks", "track"), weight = 2, tag = "artist:${candidateArtist.lowercase()}")
+                ctx.addAll(tracks = jsonTracks(data, "toptracks", "track"), weight = 2, tag = "artist:${candidateArtist.trim().lowercase()}")
             } catch (e: Exception) {
                 Log.d(RTAG, "fresh artist refill miss for $artist", e)
             }
@@ -396,7 +428,7 @@ class RecommendationEngine(
                 val key = c.track.key
                 if (key in pickedKeys) continue
                 if (freshOnly && !c.fresh) continue
-                val ak = c.track.artist.lowercase()
+                val ak = c.track.artist.trim().lowercase()
                 if ((artistCount[ak] ?: 0) >= artistCap) continue
                 if (albumCapOn && !c.track.album.isNullOrBlank()) {
                     val alK = c.track.album.lowercase()
@@ -421,8 +453,7 @@ class RecommendationEngine(
             return picked
         }
 
-        // Diversity may relax, freshness never does. A recommendation track
-        // already present in Discovery History must never fill a thin pool.
+        // Diversity may relax, but an explicitly excluded song never does.
         var result = attempt(RECO_ARTIST_CAP, true, true, true)
         if (result.size < total) result = attempt(3, true, true, true)
         if (result.size < total) result = attempt(3, true, false, true)
@@ -460,9 +491,10 @@ class RecommendationEngine(
     suspend fun run(total: Int, profile: TasteProfile, blacklist: Set<String>): List<GeneratedTrack> {
         onProgress("Reading your listening mood\u2026")
         val ctx = RecoContext(total, profile, blacklist)
+        ctx.addAll(profile.ytMusicFeedRaw.take(40), 3, "yt-feed")
 
         var cycle = 1
-        while (cycle <= RECO_MAX_CYCLES && ctx.pool.size < total) {
+        while (cycle <= RECO_MAX_CYCLES && (cycle == 1 || ctx.pool.size < total)) {
             onProgress(if (cycle == 1) "Reading your listening mood\u2026" else "Digging deeper for more discoveries (round $cycle)\u2026")
 
             srcSimilarTracks(ctx, cycle)
@@ -506,9 +538,6 @@ class RecommendationEngine(
         }.sortedWith(compareByDescending<Scored> { it.fresh }.thenByDescending { it.score })
 
         var final = selectFinal(scored, total)
-        if (final.isEmpty() && ctx.pool.isNotEmpty()) {
-            final = ctx.pool.values.map { it.track }.take(total)
-        }
         Log.d(RTAG, "selected ${final.size}/$total from candidate pool")
 
         // Dedup + cap

@@ -59,6 +59,19 @@ data class YouTubeAudioStream(
     val bitrate: Int,
 )
 
+data class YtMusicTasteSignals(
+    val recentTracks: List<YouTubeMusicTrack> = emptyList(),
+    val likedTracks: List<YouTubeMusicTrack> = emptyList(),
+    val feedTracks: List<YouTubeMusicTrack> = emptyList(),
+)
+
+/** A provider explicitly identified the media as unavailable, rather than a
+ * request merely failing because the network or extractor was slow. */
+class ConfirmedUnplayableMediaException(
+    message: String,
+    cause: Throwable? = null,
+) : IOException(message, cause)
+
 data class YouTubePlaylistResult(
     val id: String,
     val title: String,
@@ -262,6 +275,47 @@ class InnerTubeMusicApi @Inject constructor(
             page++
         }
         summaries.distinctBy { it.id }.filter { it.id.isNotBlank() }
+    }
+
+    /** Read-only signals and playable Home-feed candidates from a connected
+     * account. Each request is isolated so a missing surface cannot break the
+     * remaining signals or the normal recommendation fallback. */
+    suspend fun fetchTasteSignals(
+        recentLimit: Int = 30,
+        likedLimit: Int = 24,
+        feedLimit: Int = 40,
+    ): YtMusicTasteSignals = withContext(Dispatchers.IO) {
+        if (!ytAuth.connection.value.isConnected) return@withContext YtMusicTasteSignals()
+        kotlinx.coroutines.coroutineScope {
+            val recent = async {
+                runCatching { parseSongRenderers(browseRoot(YT_HISTORY_BROWSE_ID, authenticated = true)) }
+                    .getOrDefault(emptyList())
+                    .filterNot { it.artist.equals("Unknown artist", ignoreCase = true) }
+                    .distinctBy { it.videoId }
+                    .take(recentLimit.coerceIn(0, 50))
+            }
+            val liked = async {
+                runCatching { parseSongRenderers(browseRoot(YT_LIKED_BROWSE_ID, authenticated = true)) }
+                    .getOrDefault(emptyList())
+                    .filterNot { it.artist.equals("Unknown artist", ignoreCase = true) }
+                    .distinctBy { it.videoId }
+                    .take(likedLimit.coerceIn(0, 50))
+            }
+            val feed = async {
+                runCatching {
+                    parseHomeFeedSongs(browseRoot(YT_HOME_BROWSE_ID, authenticated = true))
+                }
+                    .getOrDefault(emptyList())
+                    .filterNot { it.artist.equals("Unknown artist", ignoreCase = true) }
+                    .distinctBy { it.videoId }
+                    .take(feedLimit.coerceIn(0, 60))
+            }
+            YtMusicTasteSignals(
+                recentTracks = recent.await(),
+                likedTracks = liked.await(),
+                feedTracks = feed.await(),
+            )
+        }
     }
 
     /** Identity of the signed-in account (account_menu endpoint). */
@@ -995,6 +1049,7 @@ class InnerTubeMusicApi @Inject constructor(
 
         val channel = kotlinx.coroutines.channels.Channel<YouTubeAudioStream>(2)
         val jobs = mutableListOf<kotlinx.coroutines.Job>()
+        val confirmedUnavailableReasons = ConcurrentHashMap.newKeySet<String>()
 
         // 1. Primary: High-speed NewPipe Extractor (direct audio format with JS signature deciphering)
         jobs += launch(Dispatchers.IO) {
@@ -1004,6 +1059,8 @@ class InnerTubeMusicApi @Inject constructor(
                     if (npStream.url.contains("?")) "${npStream.url}&pot=$poToken" else "${npStream.url}?pot=$poToken"
                 } else npStream.url
                 channel.trySend(npStream.copy(url = finalUrl))
+            }.onFailure { error ->
+                error.confirmedUnavailableReasonOrNull()?.let(confirmedUnavailableReasons::add)
             }
         }
 
@@ -1072,6 +1129,13 @@ class InnerTubeMusicApi @Inject constructor(
                     if (bestStream != null) {
                         delivered = channel.trySend(bestStream).isSuccess
                     }
+                } else if (state != null) {
+                    val reason = status?.string("reason").orEmpty()
+                    val confirmedReason = when {
+                        state in PERMANENT_PLAYABILITY_STATES -> reason.ifBlank { state }
+                        else -> IOException(reason).confirmedUnavailableReasonOrNull()
+                    }
+                    confirmedReason?.let(confirmedUnavailableReasons::add)
                 }
             }
             // Circuit breaker: a client that threw or produced nothing sits
@@ -1092,15 +1156,30 @@ class InnerTubeMusicApi @Inject constructor(
                 streamCache[videoId] = Pair(now, winner)
                 winner
             } else {
+                val confirmedReason = confirmedUnavailableReasons.firstOrNull()
+                if (confirmedReason != null) {
+                    throw ConfirmedUnplayableMediaException(confirmedReason)
+                }
                 throw IOException("Timed out resolving an audio stream for $videoId")
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
+            if (e is ConfirmedUnplayableMediaException) throw e
             // Last-resort direct NewPipe extraction — bounded as well so a
             // stalled socket can never wedge the player's loader thread.
-            val npStream = kotlinx.coroutines.withTimeoutOrNull(FALLBACK_EXTRACT_TIMEOUT_MS) {
-                streamExtractor.resolveAudioStream(videoId)
-            } ?: throw IOException("No audio stream available for $videoId")
+            val npStream = runCatching {
+                kotlinx.coroutines.withTimeoutOrNull(FALLBACK_EXTRACT_TIMEOUT_MS) {
+                    streamExtractor.resolveAudioStream(videoId)
+                } ?: throw IOException("Timed out during fallback extraction for $videoId")
+            }.getOrElse { fallbackFailure ->
+                fallbackFailure.confirmedUnavailableReasonOrNull()
+                    ?.let(confirmedUnavailableReasons::add)
+                val confirmedReason = confirmedUnavailableReasons.firstOrNull()
+                if (confirmedReason != null) {
+                    throw ConfirmedUnplayableMediaException(confirmedReason, fallbackFailure)
+                }
+                throw IOException("Unable to resolve audio stream for $videoId", fallbackFailure)
+            }
             val result = npStream.copy(
                 url = if (!poToken.isNullOrBlank() && !npStream.url.contains("&pot=")) {
                     if (npStream.url.contains("?")) "${npStream.url}&pot=$poToken" else "${npStream.url}?pot=$poToken"
@@ -1112,6 +1191,26 @@ class InnerTubeMusicApi @Inject constructor(
         } finally {
             runCatching { channel.close() }
             jobs.forEach { runCatching { it.cancel() } }
+        }
+    }
+
+    private fun Throwable.confirmedUnavailableReasonOrNull(): String? {
+        val causes = generateSequence(this) { it.cause }.take(10).toList()
+        val diagnostic = causes.joinToString(" ") {
+            "${it::class.java.simpleName} ${it.message.orEmpty()}"
+        }.lowercase()
+        val confirmedMarkers = listOf(
+            "agerestricted", "age restricted", "confirm your age",
+            "geographicrestriction", "not available in your country",
+            "contentnotavailable", "video is unavailable", "video unavailable",
+            "privatecontent", "this video is private", "paidcontent",
+            "members-only", "login required", "sign in to watch",
+        )
+        return if (confirmedMarkers.any(diagnostic::contains)) {
+            causes.firstNotNullOfOrNull { it.message?.takeIf(String::isNotBlank) }
+                ?: "Media is unavailable"
+        } else {
+            null
         }
     }
 
@@ -1134,14 +1233,14 @@ class InnerTubeMusicApi @Inject constructor(
         matchCache[cacheKey]?.let { return it }
         val results = searchSongs(listOf(title, artist).filter { it.isNotBlank() }.joinToString(" "), 30)
         val best = results.maxByOrNull { candidate -> matchScore(candidate, title, artist) }
-            ?: throw IOException("No YouTube Music match found for $title")
+            ?: throw ConfirmedUnplayableMediaException("No YouTube Music match found for $title")
         val titleSimilarity = maxOf(
             similarity(best.title, title),
             similarity(baseTitle(best.title), baseTitle(title)),
         )
         val artistSimilarity = similarity(best.artist, artist)
         if (titleSimilarity < 72 || (artist.isNotBlank() && artistSimilarity < 50)) {
-            throw IOException("No reliable YouTube Music match found for $title by $artist")
+            throw ConfirmedUnplayableMediaException("No reliable YouTube Music match found for $title by $artist")
         }
         return best.also {
             if (matchCache.size > MAX_MATCH_CACHE_ENTRIES) matchCache.clear()
@@ -1257,6 +1356,62 @@ class InnerTubeMusicApi @Inject constructor(
         return songs.distinctBy { it.videoId }
     }
 
+    /** Home carousels use compact two-row cards. Only cards whose own
+     * navigation is a direct watch endpoint are songs; album, artist and
+     * playlist cards are deliberately ignored. */
+    private fun parseHomeFeedSongs(root: JsonElement): List<YouTubeMusicTrack> {
+        val rows = mutableListOf<JsonObject>()
+        collectObjects(root, "musicResponsiveListItemRenderer", rows)
+        val songs = rows.filter { row ->
+            directWatchVideoId(row) != null
+        }.mapNotNull(::parseSong).toMutableList()
+        val renderers = mutableListOf<JsonObject>()
+        collectObjects(root, "musicTwoRowItemRenderer", renderers)
+        songs += renderers.mapNotNull(::parseTwoRowSong)
+        return songs.distinctBy { it.videoId }
+    }
+
+    private fun directWatchVideoId(renderer: JsonObject): String? =
+        renderer.obj("playlistItemData")?.string("videoId")
+            ?: renderer.obj("navigationEndpoint")?.obj("watchEndpoint")?.string("videoId")
+            ?: renderer.obj("thumbnailOverlay")
+                ?.obj("musicItemThumbnailOverlayRenderer")
+                ?.obj("content")?.obj("musicPlayButtonRenderer")
+                ?.obj("playNavigationEndpoint")?.obj("watchEndpoint")?.string("videoId")
+
+    private fun parseTwoRowSong(renderer: JsonObject): YouTubeMusicTrack? {
+        val titleRuns = renderer.obj("title")?.array("runs")
+        val videoId = directWatchVideoId(renderer)
+            ?: titleRuns?.firstOrNull()?.asObject()
+                ?.obj("navigationEndpoint")?.obj("watchEndpoint")?.string("videoId")
+            ?: return null
+        val title = titleRuns?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+            ?.trim()?.takeIf(String::isNotBlank)
+            ?: renderer.obj("title")?.string("simpleText")?.trim()?.takeIf(String::isNotBlank)
+            ?: return null
+        val details = renderer.obj("subtitle")?.array("runs")
+            ?.mapNotNull { it.asObject() }.orEmpty()
+        val artist = details.firstOrNull { run ->
+            run.obj("navigationEndpoint")?.obj("browseEndpoint")
+                ?.string("browseId")?.startsWith("UC") == true
+        }?.string("text") ?: details.mapNotNull { it.string("text") }
+            .firstOrNull { it.isLikelyArtistDetail() }
+            ?: return null
+        val album = details.firstOrNull { run ->
+            run.obj("navigationEndpoint")?.obj("browseEndpoint")
+                ?.string("browseId")?.startsWith("MPRE") == true
+        }?.string("text")
+        val duration = details.mapNotNull { it.string("text") }.firstNotNullOfOrNull(::parseDuration)
+        val thumbnails = renderer.obj("thumbnailRenderer")?.obj("musicThumbnailRenderer")
+            ?.obj("thumbnail")?.array("thumbnails")
+            ?: renderer.obj("thumbnail")?.obj("musicThumbnailRenderer")
+                ?.obj("thumbnail")?.array("thumbnails")
+        val artwork = thumbnails?.lastOrNull()?.asObject()?.string("url")?.let {
+            if (it.startsWith("//")) "https:$it" else it
+        }?.highResolutionArtwork()
+        return YouTubeMusicTrack(videoId, title, artist, album, artwork, duration)
+    }
+
     private fun parsePlaylistVideoRenderer(renderer: JsonObject): YouTubeMusicTrack? {
         val videoId = renderer.string("videoId") ?: return null
         val title = renderer.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
@@ -1271,7 +1426,7 @@ class InnerTubeMusicApi @Inject constructor(
     }
 
     private fun parseSong(renderer: JsonObject): YouTubeMusicTrack? {
-        val videoId = renderer.obj("playlistItemData")?.string("videoId")
+        val videoId = directWatchVideoId(renderer)
             ?: findString(renderer, "videoId")
             ?: return null
         val columns = renderer.array("flexColumns")
@@ -1407,6 +1562,17 @@ class InnerTubeMusicApi @Inject constructor(
     private fun String.isUsefulDetail(): Boolean =
         trim().isNotBlank() && trim() !in setOf("•", "·", "Song", "Video")
 
+    private fun String.isLikelyArtistDetail(): Boolean {
+        val value = trim()
+        if (!value.isUsefulDetail()) return false
+        if (value.equals("Album", true) || value.equals("Single", true) ||
+            value.equals("EP", true) || value.equals("Playlist", true)
+        ) return false
+        if (parseDuration(value) != null || value.matches(Regex("^(19|20)\\d{2}$"))) return false
+        if (value.contains(" view", ignoreCase = true) || value.contains(" song", ignoreCase = true)) return false
+        return true
+    }
+
     private fun parseDuration(value: String): Int? {
         val parts = value.trim().split(':').mapNotNull(String::toIntOrNull)
         if (parts.size !in 2..3) return null
@@ -1502,6 +1668,9 @@ class InnerTubeMusicApi @Inject constructor(
         const val MUSIC_API = "https://music.youtube.com/youtubei/v1"
         const val YOUTUBE_API = "https://www.youtube.com/youtubei/v1"
         const val LIBRARY_PLAYLISTS_BROWSE_ID = "FEmusic_liked_playlists"
+        const val YT_HISTORY_BROWSE_ID = "FEmusic_history"
+        const val YT_LIKED_BROWSE_ID = "VLLM"
+        const val YT_HOME_BROWSE_ID = "FEmusic_home"
         const val MAX_CONTINUATION_PAGES = 600
         const val WRITE_ACTIONS_PER_REQUEST = 50
 
@@ -1511,6 +1680,13 @@ class InnerTubeMusicApi @Inject constructor(
 
         /** Upper bound for the last-resort direct NewPipe extraction. */
         const val FALLBACK_EXTRACT_TIMEOUT_MS = 12_000L
+        val PERMANENT_PLAYABILITY_STATES = setOf(
+            "UNPLAYABLE",
+            "LOGIN_REQUIRED",
+            "AGE_CHECK_REQUIRED",
+            "CONTENT_CHECK_REQUIRED",
+            "LIVE_STREAM_OFFLINE",
+        )
 
         /** How long a failed player client is skipped by the racer. */
         const val CLIENT_COOLDOWN_MS = 60_000L

@@ -7,7 +7,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -16,7 +15,6 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Velocity
-import kotlinx.coroutines.launch
 
 /**
  * A small rubber-band "squeeze" for scrollable content dragged past its
@@ -45,8 +43,6 @@ import kotlinx.coroutines.launch
 fun Modifier.wobbleOverscroll(): Modifier {
     var raw by remember { mutableFloatStateOf(0f) }
     val settleAnim = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
-
     val connection = remember {
         object : NestedScrollConnection {
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {

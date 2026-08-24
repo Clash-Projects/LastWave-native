@@ -56,6 +56,10 @@ data class MiscSettings(
     val musicEnhancerEnabled: Boolean = true,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
+    /** Experimental output gain. Disabled by default; when enabled the DSP
+     *  can raise track level from 100% up to a bounded 200%. */
+    val volumeBoostEnabled: Boolean = false,
+    val volumeBoostPercent: Int = 100,
 )
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
@@ -72,6 +76,8 @@ class SettingsPreferences @Inject constructor(
         val QOBUZ_QUALITY = androidx.datastore.preferences.core.intPreferencesKey("lw_qobuz_quality")
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
         val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
+        val VOLUME_BOOST_ENABLED = booleanPreferencesKey("lw_volume_boost_enabled")
+        val VOLUME_BOOST_PERCENT = androidx.datastore.preferences.core.intPreferencesKey("lw_volume_boost_percent")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data.map { p ->
@@ -83,6 +89,8 @@ class SettingsPreferences @Inject constructor(
             qobuzQuality = p[Keys.QOBUZ_QUALITY] ?: 27,
             musicEnhancerEnabled = p[Keys.MUSIC_ENHANCER] ?: true,
             lyricsAnimation = LyricsAnimation.fromId(p[Keys.LYRICS_ANIMATION]),
+            volumeBoostEnabled = p[Keys.VOLUME_BOOST_ENABLED] ?: false,
+            volumeBoostPercent = (p[Keys.VOLUME_BOOST_PERCENT] ?: 100).coerceIn(100, 200),
         )
     }
 
@@ -108,6 +116,14 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setLyricsAnimation(animation: LyricsAnimation) {
         dataStore.edit { it[Keys.LYRICS_ANIMATION] = animation.id }
+    }
+
+    suspend fun setVolumeBoostEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.VOLUME_BOOST_ENABLED] = enabled }
+    }
+
+    suspend fun setVolumeBoostPercent(percent: Int) {
+        dataStore.edit { it[Keys.VOLUME_BOOST_PERCENT] = percent.coerceIn(100, 200) }
     }
 
     suspend fun toggleFriendPinned(username: String) {

@@ -66,6 +66,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FormatListBulleted
@@ -206,7 +207,7 @@ private fun SettingsGroup(rowCount: Int, content: @Composable (index: Int, posit
  * Faithful port of settings.js (par 8): Last.fm account management, appearance
  * (AMOLED / Dynamic Color / Monochrome / accent presets / custom color
  * wheel), iTunes/ListenBrainz artwork toggles, data management (clear
- * discovery history, clear all data), backup & restore, and app info.
+ * recommendation exclusions, clear all data), backup & restore, and app info.
  *
  * Visuals only: restyled into a Material 3 Expressive presentation
  * (larger touch targets, per-row cards, tonal icon badges, spring-based
@@ -242,6 +243,7 @@ fun SettingsScreen(
     var showQualityDialog by remember { mutableStateOf(false) }
     var showEqSheet by remember { mutableStateOf(false) }
     var showLyricsAnimationSheet by remember { mutableStateOf(false) }
+    var showVolumeBoostSheet by remember { mutableStateOf(false) }
     var showSyncPlaylistsSheet by remember { mutableStateOf(false) }
     var showYtDisconnectConfirm by remember { mutableStateOf(false) }
 
@@ -524,7 +526,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Experimental")
-                    SettingsGroup(rowCount = 4) { index, position ->
+                    SettingsGroup(rowCount = 5) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.BubbleChart,
@@ -558,18 +560,23 @@ fun SettingsScreen(
                                 onClick = { showEqSheet = true },
                                 position = position,
                             )
-                            3 -> SettingsToggleCard(
-                                icon = Icons.Filled.AutoAwesome,
-                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Studio Master Clarity",
-                                subtitle = if (misc.musicEnhancerEnabled) {
-                                    "Crisp vocals, open soundstage, anti-clipping limiter"
-                                } else {
-                                    "Bit-perfect flat direct pass-through"
-                                },
-                                checked = misc.musicEnhancerEnabled,
+                            3 -> StudioMasterClarityCard(
+                                enabled = misc.musicEnhancerEnabled,
+                                equalizerOverrides = eq.enabled,
                                 onCheckedChange = viewModel::setMusicEnhancer,
+                                position = position,
+                            )
+                            4 -> SettingsActionCard(
+                                icon = Icons.Filled.VolumeUp,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Volume Boost",
+                                subtitle = if (misc.volumeBoostEnabled) {
+                                    "On • ${misc.volumeBoostPercent}% output • use carefully"
+                                } else {
+                                    "Optional clean gain up to 200%"
+                                },
+                                onClick = { showVolumeBoostSheet = true },
                                 position = position,
                             )
                         }
@@ -690,9 +697,9 @@ fun SettingsScreen(
                                 icon = Icons.Filled.RestartAlt,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Clear Discovery History",
-                                subtitle = "${state.seenTracksCount} tracks remembered",
-                                onClick = viewModel::clearDiscoveryHistory,
+                                title = "Clear Exclusion History",
+                                subtitle = "${state.recommendationExclusionCount} songs excluded",
+                                onClick = viewModel::clearRecommendationExclusions,
                                 position = position,
                             )
                             1 -> SettingsActionCard(
@@ -883,6 +890,17 @@ fun SettingsScreen(
             onSetEnabled = viewModel::setEqualizerEnabled,
             onPickPreset = viewModel::applyEqPreset,
             onBandChange = viewModel::setEqBandGain,
+        )
+    }
+
+    // -- Experimental volume boost --
+    if (showVolumeBoostSheet) {
+        VolumeBoostSheet(
+            enabled = misc.volumeBoostEnabled,
+            percent = misc.volumeBoostPercent,
+            onSetEnabled = viewModel::setVolumeBoostEnabled,
+            onSetPercent = viewModel::setVolumeBoostPercent,
+            onDismiss = { showVolumeBoostSheet = false },
         )
     }
 
@@ -1142,10 +1160,12 @@ private fun SettingsToggleCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val scale = rememberPressScale(interactionSource)
+    val shape = groupShape(position)
+    val liquidGlass = LocalLiquidGlass.current
 
     Card(
         onClick = { onCheckedChange(!checked) },
-        shape = groupShape(position),
+        shape = shape,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         // Pinned at 0dp: Material3's Card blends an extra primary-tinted
         // alpha layer on top of containerColor whenever tonalElevation is
@@ -1155,7 +1175,10 @@ private fun SettingsToggleCard(
         // behind the label. Same root cause as ModeCard's fix below.
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         interactionSource = interactionSource,
-        modifier = Modifier.fillMaxWidth().scale(scale),
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .liquidGlassChrome(shape, liquidGlass),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -1200,10 +1223,15 @@ private fun SettingsToggleCard(
 @Composable
 private fun ScrobbleThresholdRow(percent: Int, onPercentChange: (Int) -> Unit, position: GroupPosition = GroupPosition.SINGLE) {
     var sliderValue by remember(percent) { mutableStateOf(percent.toFloat()) }
+    val shape = groupShape(position)
+    val liquidGlass = LocalLiquidGlass.current
     Card(
-        shape = groupShape(position),
+        shape = shape,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassChrome(shape, liquidGlass),
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1244,14 +1272,19 @@ private fun SettingsActionCard(
     val interactionSource = remember { MutableInteractionSource() }
     val scale = rememberPressScale(interactionSource)
     val titleColor = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+    val shape = groupShape(position)
+    val liquidGlass = LocalLiquidGlass.current
 
     Card(
         onClick = onClick,
-        shape = groupShape(position),
+        shape = shape,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         interactionSource = interactionSource,
-        modifier = Modifier.fillMaxWidth().scale(scale),
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .liquidGlassChrome(shape, liquidGlass),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -1279,11 +1312,16 @@ private fun YouTubeAccountRow(
     onDisconnect: () -> Unit,
     position: GroupPosition,
 ) {
+    val shape = groupShape(position)
+    val liquidGlass = LocalLiquidGlass.current
     Card(
-        shape = groupShape(position),
+        shape = shape,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        modifier = Modifier.fillMaxWidth().animateContentSize(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize()
+            .liquidGlassChrome(shape, liquidGlass),
     ) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -2519,6 +2557,275 @@ private fun SyncPlaylistsSheet(
     }
 }
 
+/** Experimental output gain control. The DSP keeps the player volume at its
+ * normal level and applies a bounded, session-scoped gain instead. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun VolumeBoostSheet(
+    enabled: Boolean,
+    percent: Int,
+    onSetEnabled: (Boolean) -> Unit,
+    onSetPercent: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var sliderValue by remember(percent) { mutableStateOf(percent.toFloat()) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp + safeDrawingBottomPadding()),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconBadge(
+                    Icons.Filled.VolumeUp,
+                    MaterialTheme.colorScheme.tertiaryContainer,
+                    MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Volume Boost", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Raise quiet tracks up to 200% with bounded gain",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = enabled, onCheckedChange = onSetEnabled)
+            }
+
+            Text(
+                "${sliderValue.toInt()}% output",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Slider(
+                value = sliderValue,
+                onValueChange = { sliderValue = it },
+                onValueChangeFinished = { onSetPercent(sliderValue.toInt()) },
+                valueRange = 100f..200f,
+                steps = 19,
+                enabled = enabled,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Higher gain can reveal clipping on heavily mastered songs. It is off by default.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(
+                onClick = onDismiss,
+                shape = CircleShape,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+            ) {
+                Text("Done", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+/**
+ * A dedicated visual control for the default Studio Master signal path. The
+ * compact response meter previews the actual house curve instead of reducing
+ * this audio mode to a generic settings switch.
+ */
+@Composable
+private fun StudioMasterClarityCard(
+    enabled: Boolean,
+    equalizerOverrides: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    position: GroupPosition = GroupPosition.SINGLE,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val scale = rememberPressScale(interactionSource)
+    val shape = groupShape(position)
+    val liquidGlass = LocalLiquidGlass.current
+    val isActive = enabled && !equalizerOverrides
+    val responseStrength by animateFloatAsState(
+        targetValue = if (isActive) 1f else 0.28f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "studioClarityStrength",
+    )
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+
+    Card(
+        onClick = { onCheckedChange(!enabled) },
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        interactionSource = interactionSource,
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .liquidGlassChrome(shape, liquidGlass),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            primary.copy(alpha = if (isActive) 0.16f else 0.05f),
+                            tertiary.copy(alpha = if (isActive) 0.08f else 0.02f),
+                            Color.Transparent,
+                        ),
+                    ),
+                ),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 15.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconBadge(
+                        icon = Icons.Filled.AutoAwesome,
+                        container = if (isActive) primary else MaterialTheme.colorScheme.surfaceContainerHighest,
+                        tint = if (isActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Studio Master Clarity",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            when {
+                                !enabled -> "OFF  •  ORIGINAL OUTPUT"
+                                equalizerOverrides -> "READY  •  EQUALIZER HAS PRIORITY"
+                                else -> "ACTIVE  •  CLEAN STUDIO DSP"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isActive) primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = onCheckedChange,
+                        thumbContent = if (enabled) {
+                            {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(SwitchDefaults.IconSize),
+                                )
+                            }
+                        } else null,
+                    )
+                }
+
+                StudioClarityResponseMeter(
+                    strength = responseStrength,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                )
+
+                Text(
+                    when {
+                        !enabled -> "Turn on for cleaner separation and a protected output ceiling."
+                        equalizerOverrides -> "The 15-band equalizer is currently shaping the sound."
+                        else -> "Tighter bass • focused vocals • smooth detail • open air"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    ClarityFeaturePill("STUDIO CURVE", isActive, Modifier.weight(1f))
+                    ClarityFeaturePill("PEAK SAFE", isActive, Modifier.weight(1f))
+                    ClarityFeaturePill("LOW LATENCY", isActive, Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StudioClarityResponseMeter(
+    strength: Float,
+    modifier: Modifier = Modifier,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val baseline = MaterialTheme.colorScheme.outlineVariant
+    val gains = EqualizerPresets.STUDIO_MASTER.gainsDb
+
+    Canvas(modifier = modifier) {
+        val centerY = size.height * 0.58f
+        val horizontalPadding = 5.dp.toPx()
+        val step = (size.width - horizontalPadding * 2f) / gains.size
+        val barWidth = (step * 0.48f).coerceAtLeast(2.dp.toPx())
+
+        drawLine(
+            color = baseline.copy(alpha = 0.55f),
+            start = Offset(horizontalPadding, centerY),
+            end = Offset(size.width - horizontalPadding, centerY),
+            strokeWidth = 1.dp.toPx(),
+        )
+
+        gains.forEachIndexed { index, gainDb ->
+            val x = horizontalPadding + step * (index + 0.5f)
+            val endY = centerY - gainDb * 12.dp.toPx() * strength
+            drawLine(
+                color = (if (gainDb >= 0f) primary else tertiary).copy(
+                    alpha = 0.30f + 0.70f * strength,
+                ),
+                start = Offset(x, centerY),
+                end = Offset(x, endY),
+                strokeWidth = barWidth,
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ClarityFeaturePill(
+    label: String,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = if (active) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f)
+        },
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = if (active) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+        )
+    }
+}
+
 /**
  * Bottom sheet to pick from 8 experimental lyrics animation physics profiles.
  */
@@ -2593,10 +2900,10 @@ private fun LyricsAnimationSheet(
                     Surface(
                         shape = cardShape,
                         color = if (isSelected) {
-                            if (liquidGlass) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                            if (liquidGlass) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
                             else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.70f)
                         } else {
-                            if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.35f)
+                            if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.90f)
                             else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.50f)
                         },
                         border = if (isSelected) {
@@ -2622,6 +2929,7 @@ private fun LyricsAnimationSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(cardShape)
+                            .liquidGlassChrome(cardShape, liquidGlass)
                             .clickable {
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                                 onSelect(anim)
@@ -2657,13 +2965,18 @@ private fun LyricsAnimationSheet(
                                     text = anim.title,
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                    color = if (isSelected) MaterialTheme.colorScheme.primary
+                                    color = if (isSelected && liquidGlass) MaterialTheme.colorScheme.onPrimaryContainer
+                                    else if (isSelected) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurface,
                                 )
                                 Text(
                                     text = anim.description,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = if (isSelected && liquidGlass) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
                                 )
                             }
                         }

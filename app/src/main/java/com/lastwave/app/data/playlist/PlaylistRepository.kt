@@ -41,7 +41,6 @@ data class SavedPlaylist(
     val createdAtMillis: Long,
     val discoverSignature: String? = null,
     val customCoverUri: String? = null,
-    val isCompleted: Boolean = false,
     val isPinned: Boolean = false,
 )
 
@@ -111,8 +110,7 @@ class PlaylistRepository @Inject constructor(
         val playableTracks = if (mode == "custom" && tracks.isEmpty()) emptyList() else filterPlayable(tracks)
         val firstKey = playableTracks.firstOrNull()?.key
         existing.firstOrNull {
-            !it.isCompleted &&
-                it.mode == mode &&
+            it.mode == mode &&
                 it.title.equals(title, ignoreCase = true) &&
                 it.tracks.firstOrNull()?.key == firstKey
         }
@@ -151,7 +149,7 @@ class PlaylistRepository @Inject constructor(
     suspend fun createCustom(title: String): SavedPlaylist {
         val cleanTitle = title.trim()
         getAll().firstOrNull {
-            !it.isCompleted && it.mode == "custom" && it.title.equals(cleanTitle, ignoreCase = true)
+            it.mode == "custom" && it.title.equals(cleanTitle, ignoreCase = true)
         }
             ?.let { return it }
         return save(
@@ -179,19 +177,6 @@ class PlaylistRepository @Inject constructor(
         val entity = dao.getById(id) ?: return null
         val cleanUri = uri?.trim()?.takeIf { it.isNotBlank() }
         val updated = entity.copy(customCoverUri = cleanUri)
-        dao.upsert(updated)
-        syncPublicMirror()
-        _changes.tryEmit(Unit)
-        return updated.toDomain()
-    }
-
-    /** Archives a finished playlist. It remains in backups/public storage,
-     *  but playlist-facing UI can omit it from the active list. */
-    suspend fun setCompleted(id: Long, completed: Boolean = true): SavedPlaylist? {
-        awaitStartupSync()
-        val entity = dao.getById(id) ?: return null
-        if (entity.isCompleted == completed) return entity.toDomain()
-        val updated = entity.copy(isCompleted = completed)
         dao.upsert(updated)
         syncPublicMirror()
         _changes.tryEmit(Unit)
@@ -271,7 +256,7 @@ class PlaylistRepository @Inject constructor(
         tracks.joinToString("|") { it.key }
 
     suspend fun findByDiscoverSignature(signature: String): SavedPlaylist? =
-        getAll().firstOrNull { !it.isCompleted && it.discoverSignature == signature }
+        getAll().firstOrNull { it.discoverSignature == signature }
 
     private suspend fun syncPublicMirror() {
         publicMirror.writeFromDatabase().onFailure { e ->
@@ -294,7 +279,6 @@ class PlaylistRepository @Inject constructor(
             createdAtMillis = createdAtMillis,
             discoverSignature = discoverSignature,
             customCoverUri = customCoverUri,
-            isCompleted = isCompleted,
             isPinned = isPinned,
         )
     }

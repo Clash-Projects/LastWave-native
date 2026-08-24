@@ -9,8 +9,8 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.lastwave.app.data.local.db.SavedPlaylistDao
 import com.lastwave.app.data.local.db.SavedPlaylistEntity
-import com.lastwave.app.data.local.db.SeenTrackDao
-import com.lastwave.app.data.local.db.SeenTrackEntity
+import com.lastwave.app.data.local.db.RecommendationExclusionDao
+import com.lastwave.app.data.local.db.RecommendationExclusionEntity
 import com.lastwave.app.data.playlist.PlaylistPublicMirror
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
@@ -20,7 +20,7 @@ import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val SCHEMA_VERSION = 6
+private const val SCHEMA_VERSION = 7
 private const val BACKUP_TYPE = "lastwave-backup"
 
 @Serializable
@@ -41,14 +41,15 @@ data class BackupPlaylistSnapshot(
     val createdAtMillis: Long,
     val discoverSignature: String? = null,
     val customCoverUri: String? = null,
-    val isCompleted: Boolean = false,
     val isPinned: Boolean = false,
 )
 
-/** Added in schema v2. Absent/empty on older backup files — restoring one
- *  of those just leaves discovery history untouched rather than failing. */
+/** Explicit recommendation exclusions were added to backup schema v7. */
 @Serializable
-data class BackupSeenTrackSnapshot(val trackKey: String, val lastSeenMillis: Long)
+data class BackupRecommendationExclusionSnapshot(
+    val trackKey: String,
+    val excludedAtMillis: Long,
+)
 
 @Serializable
 data class BackupFile(
@@ -58,11 +59,11 @@ data class BackupFile(
     val appVersion: String,
     val prefs: BackupPrefsSnapshot,
     val playlists: List<BackupPlaylistSnapshot>,
-    val seenTracks: List<BackupSeenTrackSnapshot> = emptyList(),
+    val recommendationExclusions: List<BackupRecommendationExclusionSnapshot> = emptyList(),
 )
 
 sealed interface RestoreResult {
-    data class Success(val playlistCount: Int, val seenTrackCount: Int) : RestoreResult
+    data class Success(val playlistCount: Int, val exclusionCount: Int) : RestoreResult
     data object UnsupportedSchema : RestoreResult
     data object InvalidFile : RestoreResult
     data class Failed(val message: String) : RestoreResult
@@ -76,22 +77,19 @@ sealed interface BackupCheck {
 
 /**
  * Faithful port of settings.js's Backup & Restore (§8.6): serializes the
- * entire local storage (all DataStore prefs, all saved playlists, and
- * discovery history) into one JSON file, and restores it with a
+ * entire local storage (all DataStore prefs, saved playlists, and explicit
+ * recommendation exclusions) into one JSON file, and restores it with a
  * pre-restore snapshot so any failure mid-apply rolls back automatically
  * rather than leaving a half-restored state.
  *
- * v2 fix: v1 only captured DataStore prefs + playlists. Discovery history
- * (seen_tracks, the same data Settings' "Clear Discovery History" row
- * operates on) was silently left out of every backup — restoring a v1
- * backup still works today, it just won't have discovery history to bring
- * back, which is expected for a file that never contained it.
+ * Older backups remain compatible; their former automatic history is
+ * intentionally ignored and never converted into explicit dislikes.
  */
 @Singleton
 class BackupRepository @Inject constructor(
     private val dataStore: DataStore<Preferences>,
     private val playlistDao: SavedPlaylistDao,
-    private val seenTrackDao: SeenTrackDao,
+    private val recommendationExclusionDao: RecommendationExclusionDao,
     private val playlistPublicMirror: PlaylistPublicMirror,
 ) {
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true; encodeDefaults = true }
@@ -131,11 +129,12 @@ class BackupRepository @Inject constructor(
                 createdAtMillis = it.createdAtMillis,
                 discoverSignature = it.discoverSignature,
                 customCoverUri = it.customCoverUri,
-                isCompleted = it.isCompleted,
                 isPinned = it.isPinned,
             )
         }
-        val seenTracks = seenTrackDao.getAll().map { BackupSeenTrackSnapshot(it.trackKey, it.lastSeenMillis) }
+        val exclusions = recommendationExclusionDao.getAll().map {
+            BackupRecommendationExclusionSnapshot(it.trackKey, it.excludedAtMillis)
+        }
         val backup = BackupFile(
             createdAt = System.currentTimeMillis(),
             appVersion = appVersionName,
@@ -146,7 +145,7 @@ class BackupRepository @Inject constructor(
                 stringSets = stringSets,
             ),
             playlists = playlists,
-            seenTracks = seenTracks,
+            recommendationExclusions = exclusions,
         )
         json.encodeToString(backup)
     }
@@ -174,7 +173,7 @@ class BackupRepository @Inject constructor(
 
         val previousPrefsSnapshot = try { buildBackup("rollback") } catch (e: Exception) { null }
         val previousPlaylists = try { playlistDao.getAll() } catch (e: Exception) { emptyList() }
-        val previousSeenTracks = try { seenTrackDao.getAll() } catch (e: Exception) { emptyList() }
+        val previousExclusions = try { recommendationExclusionDao.getAll() } catch (e: Exception) { emptyList() }
 
         return try {
             dataStore.edit { mutablePrefs ->
@@ -200,22 +199,25 @@ class BackupRepository @Inject constructor(
                     createdAtMillis = p.createdAtMillis,
                     discoverSignature = p.discoverSignature,
                     customCoverUri = p.customCoverUri,
-                    isCompleted = p.isCompleted,
                     isPinned = p.isPinned,
                 )
             })
-            if (backup.seenTracks.isNotEmpty()) {
-                seenTrackDao.clear()
-                seenTrackDao.upsertAll(backup.seenTracks.map { SeenTrackEntity(it.trackKey, it.lastSeenMillis) })
+            if (backup.schemaVersion >= 7) {
+                recommendationExclusionDao.clear()
+                recommendationExclusionDao.upsertAll(
+                    backup.recommendationExclusions.map {
+                        RecommendationExclusionEntity(it.trackKey, it.excludedAtMillis)
+                    },
+                )
             }
             playlistPublicMirror.writeFromDatabase()
-            RestoreResult.Success(backup.playlists.size, backup.seenTracks.size)
+            RestoreResult.Success(backup.playlists.size, backup.recommendationExclusions.size)
         } catch (e: Exception) {
             try {
                 previousPrefsSnapshot?.let { rollback(it) }
                 playlistDao.replaceAll(previousPlaylists)
-                seenTrackDao.clear()
-                seenTrackDao.upsertAll(previousSeenTracks)
+                recommendationExclusionDao.clear()
+                recommendationExclusionDao.upsertAll(previousExclusions)
             } catch (rollbackError: Exception) {
                 // Nothing more we can safely do — surface the original failure.
             }

@@ -243,7 +243,6 @@ class GenerateViewModel @Inject constructor(
                     }
                     throw IllegalStateException(message)
                 }
-                repository.markAsSeen(finalTracks)
 
                 onProgress("Saving playlist\u2026")
                 val existingTitles = playlistRepository.titles()

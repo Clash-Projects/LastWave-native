@@ -44,8 +44,6 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -74,7 +72,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,6 +86,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.ui.common.ArtworkImage
@@ -117,10 +115,10 @@ fun PlaylistScreen(
     onOpenPlaylist: (Long) -> Unit = {},
     viewModel: PlaylistViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
-    val playbackState by musicPlayer.state.collectAsState()
+    val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
     var coverEditorPlaylistId by remember { mutableStateOf<Long?>(null) }
     var coverPickerPlaylistId by remember { mutableStateOf<Long?>(null) }
@@ -257,7 +255,6 @@ fun PlaylistScreen(
                                     onExport = { viewModel.openExportSheet(playlist.id) },
                                     onRename = { viewModel.requestRename(playlist.id) },
                                     onEditCover = { coverEditorPlaylistId = playlist.id },
-                                    onComplete = { viewModel.completePlaylist(playlist.id) },
                                     onTogglePin = { viewModel.togglePinned(playlist.id) },
                                     onDelete = { viewModel.requestDelete(playlist.id) },
                                     onPlay = {
@@ -498,7 +495,6 @@ private fun PlaylistCard(
     onExport: () -> Unit,
     onRename: () -> Unit,
     onEditCover: () -> Unit,
-    onComplete: () -> Unit,
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
     onPlay: () -> Unit,
@@ -660,11 +656,6 @@ private fun PlaylistCard(
                         text = { Text("Export") },
                         leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
                         onClick = { onExport(); menuExpanded = false },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Complete") },
-                        leadingIcon = { Icon(Icons.Filled.Check, contentDescription = null) },
-                        onClick = { onComplete(); menuExpanded = false },
                     )
                     DropdownMenuItem(
                         text = { Text("Delete", color = MaterialTheme.colorScheme.error) },

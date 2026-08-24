@@ -45,7 +45,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -59,6 +58,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.playback.toPlayableTrack
@@ -122,9 +122,9 @@ private fun shimmerBrush(): Brush {
 
 @Composable
 fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltViewModel()) {
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val musicPlayer = LocalMusicPlayer.current
-    val playbackState by musicPlayer.state.collectAsState()
+    val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var menuTrack by remember { mutableStateOf<GeneratedTrack?>(null) }
     val playbackQueue = remember(state.tracks) { state.tracks.map(GeneratedTrack::toPlayableTrack) }
@@ -155,13 +155,16 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
         )
 
         Box(Modifier.fillMaxSize().safeHorizontalContentPadding()) {
-            val shimmer = shimmerBrush()
             Crossfade(
                 targetState = state.isLoading && state.tracks.isEmpty(),
                 animationSpec = tween(ExpressiveMotion.Standard, easing = FastOutSlowInEasing),
                 label = "discoverState",
             ) { isLoading ->
                 if (isLoading) {
+                    // Keep the infinite transition out of composition once
+                    // loading finishes; otherwise an invisible shimmer keeps
+                    // scheduling frames for the lifetime of this screen.
+                    val shimmer = shimmerBrush()
                     LazyColumn(
                         contentPadding = PaddingValues(
                             start = 16.dp,

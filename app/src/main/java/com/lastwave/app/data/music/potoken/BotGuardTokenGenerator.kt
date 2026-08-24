@@ -2,6 +2,7 @@ package com.lastwave.app.data.music.potoken
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -81,7 +82,7 @@ object BotGuardTokenGenerator {
 
     suspend fun preWarm(sessionId: String = "lastwave_session") {
         val ctx = appContext ?: return
-        if (permanentlyBroken || sessionId.isBlank()) return
+        if (permanentlyBroken || sessionId.isBlank() || !hasUsableWebView()) return
         runCatching {
             withTimeoutOrNull(COLD_START_TIMEOUT_MS) {
                 ensureEngineReady(ctx, sessionId)
@@ -94,7 +95,7 @@ object BotGuardTokenGenerator {
         sessionId: String = "lastwave_session",
     ): PoTokenResult? {
         val ctx = appContext ?: return null
-        if (permanentlyBroken) return null
+        if (permanentlyBroken || !hasUsableWebView()) return null
 
         mutex.withLock {
             if (isEngineReadyForSession(sessionId)) {
@@ -182,6 +183,13 @@ object BotGuardTokenGenerator {
 
     private fun isEngineReadyForSession(sessionId: String): Boolean =
         engineReady && engineSessionId == sessionId && cachedSessionToken != null && engine?.isExpired == false
+
+    private fun hasUsableWebView(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
+        return runCatching { WebView.getCurrentWebViewPackage() != null }
+            .onFailure { Log.w(TAG, "Unable to inspect WebView provider", it) }
+            .getOrDefault(false)
+    }
 
     private class BotGuardEngine private constructor(
         private val webView: WebView,

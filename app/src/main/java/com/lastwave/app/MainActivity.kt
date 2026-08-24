@@ -9,12 +9,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.repository.LastFmAuthCallbackCoordinator
 import com.lastwave.app.ui.navigation.LastWaveNavHost
 import com.lastwave.app.ui.navigation.Screen
@@ -32,7 +32,7 @@ class MainActivity : ComponentActivity() {
     lateinit var lastFmAuthCallback: LastFmAuthCallbackCoordinator
 
     @Inject
-    lateinit var linkPlaybackResolver: com.lastwave.app.playback.LinkPlaybackResolver
+    lateinit var linkPlaybackResolver: dagger.Lazy<com.lastwave.app.playback.LinkPlaybackResolver>
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity() {
         val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         lastFmAuthCallback.capture(intent)
-        linkPlaybackResolver.handleIntent(intent)
+        handlePlaybackIntent(intent)
         splashScreen.setOnExitAnimationListener { provider ->
             provider.view.animate()
                 .alpha(0f)
@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
                 .withEndAction { provider.remove() }
                 .start()
         }
-        enableEdgeToEdge()
+        runCatching { enableEdgeToEdge() }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val themeViewModel: ThemeViewModel = hiltViewModel()
-            val themeState by themeViewModel.uiState.collectAsState()
+            val themeState by themeViewModel.uiState.collectAsStateWithLifecycle()
 
             LastWaveTheme(themeState = themeState) {
                 val navController = rememberNavController()
@@ -77,10 +77,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        requestHighestSupportedRefreshRate()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            val hasAccess = androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
-            if (hasAccess) {
-                runCatching {
+            runCatching {
+                val hasAccess = androidx.core.app.NotificationManagerCompat
+                    .getEnabledListenerPackages(this)
+                    .contains(packageName)
+                if (hasAccess) {
                     android.service.notification.NotificationListenerService.requestRebind(
                         android.content.ComponentName(this, com.lastwave.app.service.MediaScrobbleListenerService::class.java),
                     )
@@ -89,10 +92,54 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Ask the window scheduler for the panel's fastest supported rate. This is
+     * a preference, not a forced mode: Android can still lower it for battery,
+     * thermals or a user's display setting, and 60 Hz panels remain at 60 Hz.
+     */
+    @Suppress("DEPRECATION")
+    private fun requestHighestSupportedRefreshRate() {
+        // OEM display services occasionally expose invalid/transient modes.
+        // A high-refresh preference is optional and must never block launch.
+        runCatching {
+            val display = windowManager.defaultDisplay
+            val currentMode = display.mode
+            // Before Android 14 the preference must match a rate supported by
+            // the default resolution. Do not select a rate from another mode.
+            val highest = display.supportedModes
+                .asSequence()
+                .filter {
+                    it.physicalWidth == currentMode.physicalWidth &&
+                        it.physicalHeight == currentMode.physicalHeight
+                }
+                .maxOfOrNull { it.refreshRate }
+                ?: currentMode.refreshRate
+            val attributes = window.attributes
+            if (attributes.preferredRefreshRate != highest) {
+                attributes.preferredRefreshRate = highest
+                window.attributes = attributes
+            }
+        }
+    }
+
+    private fun handlePlaybackIntent(intent: Intent?) {
+        val uri = intent?.data
+        val host = uri?.host.orEmpty().lowercase()
+        val isSupportedMusicLink = intent?.action == Intent.ACTION_VIEW &&
+            (uri?.scheme == "http" || uri?.scheme == "https") &&
+            (host == "youtube.com" || host == "www.youtube.com" ||
+                host == "m.youtube.com" || host == "music.youtube.com" || host == "youtu.be" ||
+                host == "open.spotify.com" || host == "spotify.link")
+        val hasPlaybackTarget = isSupportedMusicLink || intent?.action == Intent.ACTION_SEND
+        if (hasPlaybackTarget) {
+            runCatching { linkPlaybackResolver.get().handleIntent(intent) }
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         lastFmAuthCallback.capture(intent)
-        linkPlaybackResolver.handleIntent(intent)
+        handlePlaybackIntent(intent)
     }
 }

@@ -48,7 +48,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.CloudSync
@@ -80,7 +79,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -126,6 +124,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.FilterChip
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
@@ -159,11 +158,11 @@ fun PlaylistDetailScreen(
     viewModel: PlaylistViewModel = hiltViewModel(),
     downloadViewModel: PlaylistDownloadHelperViewModel = hiltViewModel(),
 ) {
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
-    val playbackState by musicPlayer.state.collectAsState()
+    val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     LaunchedEffect(playlistId) {
         viewModel.loadDetail(playlistId)
     }
@@ -198,7 +197,7 @@ fun PlaylistDetailScreen(
 
     var menuTarget by remember { mutableStateOf<GeneratedTrack?>(null) }
     var overflowMenuOpen by remember { mutableStateOf(false) }
-    val syncedPlaylistIds by viewModel.syncedPlaylistIds.collectAsState()
+    val syncedPlaylistIds by viewModel.syncedPlaylistIds.collectAsStateWithLifecycle()
     var sortMenuOpen by remember { mutableStateOf(false) }
     var currentSort by remember { mutableStateOf(PlaylistTrackSort.CUSTOM) }
     var sortAscending by remember { mutableStateOf(true) }
@@ -800,15 +799,6 @@ fun PlaylistDetailScreen(
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 viewModel.toggleYtSync(playlistId)
                                 overflowMenuOpen = false
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Mark as completed") },
-                            leadingIcon = { Icon(Icons.Filled.Check, contentDescription = null) },
-                            onClick = {
-                                viewModel.completePlaylist(playlistId)
-                                overflowMenuOpen = false
-                                onBack()
                             },
                         )
                         DropdownMenuItem(

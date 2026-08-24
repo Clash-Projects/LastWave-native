@@ -12,6 +12,16 @@ interface ArtworkCacheDao {
     @Query("SELECT * FROM artwork_cache")
     suspend fun getAll(): List<ArtworkCacheEntity>
 
+    @Query("DELETE FROM artwork_cache WHERE timestampMillis < :cutoffMillis")
+    suspend fun deleteOlderThan(cutoffMillis: Long)
+
+    @Query(
+        """DELETE FROM artwork_cache
+           WHERE cacheKey NOT IN
+           (SELECT cacheKey FROM artwork_cache ORDER BY timestampMillis DESC LIMIT :maxEntries)""",
+    )
+    suspend fun trimToNewest(maxEntries: Int)
+
     @Upsert
     suspend fun upsert(entity: ArtworkCacheEntity)
 }

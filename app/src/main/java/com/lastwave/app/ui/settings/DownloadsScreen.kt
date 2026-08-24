@@ -55,7 +55,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,6 +69,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.download.DownloadProgress
 import com.lastwave.app.data.local.db.DownloadedTrackEntity
 import com.lastwave.app.ui.common.ArtworkImage
@@ -102,14 +102,14 @@ fun DownloadsScreen(
     onBack: () -> Unit,
     viewModel: DownloadsViewModel = hiltViewModel(),
 ) {
-    val tracks by viewModel.downloadedTracks.collectAsState()
-    val totalBytes by viewModel.totalBytes.collectAsState()
-    val activeDownloadsMap by viewModel.activeDownloads.collectAsState()
+    val tracks by viewModel.downloadedTracks.collectAsStateWithLifecycle()
+    val totalBytes by viewModel.totalBytes.collectAsStateWithLifecycle()
+    val activeDownloadsMap by viewModel.activeDownloads.collectAsStateWithLifecycle()
     val activeDownloads = activeDownloadsMap.values.filter { !it.isFinished && it.error == null }
 
     val haptic = LocalHapticFeedback.current
     val musicPlayer = LocalMusicPlayer.current
-    val playbackState by musicPlayer.state.collectAsState()
+    val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
 
     var showClearAllConfirm by remember { mutableStateOf(false) }
     var showClearHistoryConfirm by remember { mutableStateOf(false) }

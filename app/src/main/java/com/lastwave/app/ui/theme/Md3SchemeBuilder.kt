@@ -159,9 +159,6 @@ object Md3SchemeBuilder {
      *  card/label text, icons, or progress bars. */
     private const val GLASS_CONTAINER_ALPHA = 0.94f
 
-    /** Accent containers stay fully solid for maximum contrast and legibility. */
-    private const val GLASS_ACCENT_ALPHA = 1.0f
-
     /**
      * HSL(h in 0-360, s in 0-100, l in 0-100) -> Compose Color.
      * Standard conversion — must match browsers' CSS hsl() exactly so every

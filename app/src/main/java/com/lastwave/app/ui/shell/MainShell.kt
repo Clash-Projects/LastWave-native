@@ -138,7 +138,10 @@ fun MainShell(
         val homeIndex = tabs.indexOf(MainTab.HOME)
         HorizontalPager(
             state = pagerState,
-            beyondViewportPageCount = 2,
+            // Pager prefetches the gesture destination itself. Keeping all
+            // three tabs composed made off-screen lists, image loaders and
+            // infinite animations compete with the visible page for frames.
+            beyondViewportPageCount = 0,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
             // Predictive back on a non-Home tab returns to Home (with the

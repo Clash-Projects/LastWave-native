@@ -87,7 +87,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -105,6 +104,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -121,6 +121,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
 import com.lastwave.app.data.generate.GeneratedTrack
@@ -130,6 +131,8 @@ import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
+import com.lastwave.app.playback.PlaybackChromeState
+import com.lastwave.app.playback.PlaybackProgressState
 import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator
@@ -174,6 +177,8 @@ class PlayerViewModel @Inject constructor(
     private val navigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator,
 ) : ViewModel() {
     val state = player.state
+    val chromeState = player.chromeState
+    val progressState = player.progressState
     val settings: StateFlow<com.lastwave.app.data.local.MiscSettings> = settingsPreferences.settings
         .stateIn(viewModelScope, SharingStarted.Eagerly, com.lastwave.app.data.local.MiscSettings())
     private val _customPlaylists = MutableStateFlow<List<SavedPlaylist>>(emptyList())
@@ -198,7 +203,7 @@ class PlayerViewModel @Inject constructor(
             playlistRepository.changes.collect { refreshCustomPlaylists() }
         }
         viewModelScope.launch {
-            player.state.collect { playerState ->
+            player.chromeState.collect { playerState ->
                 val track = playerState.current
                 val key = track?.let { "${it.artist}|${it.title}" }
                 if (key != currentTrackLyricsKey) {
@@ -214,7 +219,7 @@ class PlayerViewModel @Inject constructor(
     }
 
     private suspend fun refreshCustomPlaylists() {
-        _customPlaylists.value = playlistRepository.getAll().filter { it.mode == "custom" && !it.isCompleted }
+        _customPlaylists.value = playlistRepository.getAll().filter { it.mode == "custom" }
     }
 
     fun loadLyrics(track: PlayableTrack, forceRefresh: Boolean = false) {
@@ -274,10 +279,7 @@ fun PlayerHost(
     hasBottomNavigation: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    val state by viewModel.state.collectAsState()
-    val customPlaylists by viewModel.customPlaylists.collectAsState()
-    val lyricsState by viewModel.lyricsState.collectAsState()
-    val settings by viewModel.settings.collectAsState()
+    val state by viewModel.chromeState.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf(false) }
     var currentTab by rememberSaveable { mutableStateOf(FullPlayerTab.NOW_PLAYING) }
     var playlistTrack by remember { mutableStateOf<PlayableTrack?>(null) }
@@ -312,6 +314,7 @@ fun PlayerHost(
             if (state.current != null && !expanded) {
                 MiniPlayer(
                     state = state,
+                    progressState = viewModel.progressState,
                     onExpand = { expanded = true },
                     onToggle = viewModel.player::togglePlayPause,
                     onPrevious = viewModel.player::previous,
@@ -333,11 +336,8 @@ fun PlayerHost(
                     targetOffsetY = { it / 5 },
                 ) + fadeOut(tween(ExpressiveMotion.Quick)),
             ) {
-                FullPlayer(
-                    state = state,
-                    player = viewModel.player,
-                    lyricsState = lyricsState,
-                    lyricsAnimation = settings.lyricsAnimation,
+                ExpandedPlayer(
+                    viewModel = viewModel,
                     currentTab = currentTab,
                     onTabChange = { currentTab = it },
                     onRetryLyrics = viewModel::retryLyrics,
@@ -350,9 +350,9 @@ fun PlayerHost(
             }
         }
         playlistTrack?.let { track ->
-            AddToPlaylistDialog(
+            AddToPlaylistDialogHost(
+                viewModel = viewModel,
                 track = track,
-                playlists = customPlaylists,
                 onDismiss = { playlistTrack = null },
                 onAdd = { playlistId, allowDuplicate ->
                     viewModel.addToPlaylist(playlistId, track, allowDuplicate)
@@ -365,6 +365,49 @@ fun PlayerHost(
             )
         }
     }
+}
+
+@Composable
+private fun ExpandedPlayer(
+    viewModel: PlayerViewModel,
+    currentTab: FullPlayerTab,
+    onTabChange: (FullPlayerTab) -> Unit,
+    onRetryLyrics: () -> Unit,
+    onCollapse: () -> Unit,
+    onOpenArtist: (String) -> Unit,
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    FullPlayer(
+        state = state,
+        player = viewModel.player,
+        lyricsState = lyricsState,
+        lyricsAnimation = settings.lyricsAnimation,
+        currentTab = currentTab,
+        onTabChange = onTabChange,
+        onRetryLyrics = onRetryLyrics,
+        onCollapse = onCollapse,
+        onOpenArtist = onOpenArtist,
+    )
+}
+
+@Composable
+private fun AddToPlaylistDialogHost(
+    viewModel: PlayerViewModel,
+    track: PlayableTrack,
+    onDismiss: () -> Unit,
+    onAdd: (Long, Boolean) -> Unit,
+    onCreate: (String) -> Unit,
+) {
+    val playlists by viewModel.customPlaylists.collectAsStateWithLifecycle()
+    AddToPlaylistDialog(
+        track = track,
+        playlists = playlists,
+        onDismiss = onDismiss,
+        onAdd = onAdd,
+        onCreate = onCreate,
+    )
 }
 
 @Composable
@@ -390,7 +433,8 @@ internal fun AnimatedPlayPauseIcon(isPlaying: Boolean, modifier: Modifier = Modi
 
 @Composable
 private fun MiniPlayer(
-    state: MusicPlayerState,
+    state: PlaybackChromeState,
+    progressState: StateFlow<PlaybackProgressState>,
     onExpand: () -> Unit,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
@@ -471,7 +515,6 @@ private fun MiniPlayer(
                     Modifier
                 },
             ) {
-                val progress = if (state.durationMs > 0) state.positionMs.toFloat() / state.durationMs else 0f
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -523,7 +566,7 @@ private fun MiniPlayer(
                     }
                     IconButton(
                         onClick = onNext,
-                        enabled = state.queue.size > 1,
+                        enabled = state.queueSize > 1,
                         modifier = Modifier
                             .padding(start = 8.dp)
                             .size(44.dp)
@@ -533,29 +576,40 @@ private fun MiniPlayer(
                         Icon(
                             Icons.Filled.SkipNext,
                             "Next",
-                            tint = if (state.queue.size > 1) MaterialTheme.colorScheme.onSecondaryContainer
+                            tint = if (state.queueSize > 1) MaterialTheme.colorScheme.onSecondaryContainer
                             else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
                         )
                     }
                 }
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .height(3.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(progress.coerceIn(0f, 1f))
-                            .height(3.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary),
-                    )
-                }
+                MiniPlayerProgress(progressState)
             }
         }
+    }
+}
+
+@Composable
+private fun MiniPlayerProgress(progressState: StateFlow<PlaybackProgressState>) {
+    val state by progressState.collectAsStateWithLifecycle()
+    val progress = if (state.durationMs > 0) state.positionMs.toFloat() / state.durationMs else 0f
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .height(3.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        // Scale an already measured layer instead of changing its width and
+        // forcing the mini-player through measure/layout on every ticker tick.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = progress.coerceIn(0f, 1f)
+                    transformOrigin = TransformOrigin(0f, 0.5f)
+                }
+                .background(MaterialTheme.colorScheme.primary),
+        )
     }
 }
 
@@ -811,6 +865,9 @@ private fun FullPlayer(
                     .graphicsLayer { alpha = 0.24f; scaleX = 1.25f; scaleY = 1.25f }
                     .blur(72.dp),
                 corner = 0.dp,
+                // The 72dp blur destroys fine detail, so decoding a full-screen
+                // second copy wastes memory and upload time with no visual gain.
+                decodeSizePx = 160,
             )
             Box(
                 Modifier
@@ -981,7 +1038,6 @@ private fun FullPlayer(
                                                                     // Switched sides: immediately dismiss opposite overlay & start new side
                                                                     seekResetJob?.cancel()
                                                                     seekOverlayDirection = null
-                                                                    seekOverlaySeconds = 0
                                                                     lastTapSide = side
                                                                     lastTapTimestamp = now
                                                                 } else if (now - lastTapTimestamp < 450L) {
@@ -998,14 +1054,16 @@ private fun FullPlayer(
                                                                     seekResetJob = coroutineScope.launch {
                                                                         delay(700L)
                                                                         seekOverlayDirection = null
-                                                                        seekOverlaySeconds = 0
                                                                         lastTapSide = null
                                                                     }
                                                                 } else {
                                                                     // First tap on this side
                                                                     lastTapTimestamp = now
                                                                     lastTapSide = side
-                                                                    seekOverlaySeconds = 0
+                                                                    // Hide the previous feedback before waiting for the second tap.
+                                                                    // Keep its value until the exit animation completes so the UI
+                                                                    // can never render a transient "+0s" or "-0s" frame.
+                                                                    seekOverlayDirection = null
                                                                 }
                                                             }
                                                             break
@@ -1493,7 +1551,12 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
 }
 
 @Composable
-private fun PlayerArtwork(track: PlayableTrack, modifier: Modifier, corner: androidx.compose.ui.unit.Dp) {
+private fun PlayerArtwork(
+    track: PlayableTrack,
+    modifier: Modifier,
+    corner: androidx.compose.ui.unit.Dp,
+    decodeSizePx: Int? = null,
+) {
     Box(modifier.clip(RoundedCornerShape(corner)).background(MaterialTheme.colorScheme.surfaceContainerHighest), contentAlignment = Alignment.Center) {
         ArtworkImage(
             name = track.title,
@@ -1501,6 +1564,7 @@ private fun PlayerArtwork(track: PlayableTrack, modifier: Modifier, corner: andr
             embeddedUrl = track.artworkUrl,
             fallbackIcon = Icons.Filled.MusicNote,
             modifier = Modifier.fillMaxSize(),
+            decodeSizePx = decodeSizePx,
         )
     }
 }
