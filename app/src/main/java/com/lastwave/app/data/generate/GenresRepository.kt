@@ -218,7 +218,7 @@ class GenresRepository @Inject constructor(
         val ytFeedKeys = profile?.ytMusicFeedRaw?.map { it.key }?.toSet().orEmpty()
         val ytLikedKeys = profile?.ytMusicLikedRaw?.map { it.key }?.toSet().orEmpty()
         val artistAffinity = profile?.artistAffinity.orEmpty()
-        val normalizedBoostArtists = sourceBoostArtists.map { it.trim().lowercase() }.toSet()
+        val normalizedBoostArtists = userTopArtistSet.map { it.trim().lowercase() }.toSet()
 
         // Blend explicit Last.fm history, YT Music feed/likes, and learned
         // artist affinity. This keeps genre results personal without making

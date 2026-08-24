@@ -222,7 +222,7 @@ class AudioEffectsEngine @Inject constructor(
     private fun applyLegacyVolumeBoost(boostDb: Float) {
         if (sessionId == C.AUDIO_SESSION_ID_UNSET) return
         runCatching {
-            val enhancer = loudnessEnhancer ?: LoudnessEnhancer(EFFECT_PRIORITY, sessionId).also {
+            val enhancer = loudnessEnhancer ?: LoudnessEnhancer(sessionId).also {
                 loudnessEnhancer = it
             }
             enhancer.setTargetGain((boostDb * MB_PER_DB).roundToInt().coerceIn(0, 610))
