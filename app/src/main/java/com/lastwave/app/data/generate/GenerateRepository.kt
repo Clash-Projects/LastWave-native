@@ -607,7 +607,6 @@ class GenerateRepository @Inject constructor(
         )
         val recommended = engine.run(total, profile, blacklist)
         return filterPlayable(filterRecommendationExclusions(recommended)).take(total)
-    }dationExclusions(recommended)).take(total)
     }
 
     // ── Start Mix From Track — exact port of startMixFromTrack()'s 3-source blend ──
