@@ -307,6 +307,9 @@ fun LastWaveNavHost(
                 com.lastwave.app.ui.playlist.PlaylistDetailScreen(
                     playlistId = playlistId,
                     onBack = { navController.popBackStack() },
+                    onOpenPlaylist = { newId ->
+                        navController.navigate(Screen.PlaylistDetail.createRoute(newId))
+                    },
                 )
             }
         }

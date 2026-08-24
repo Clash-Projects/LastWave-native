@@ -98,7 +98,7 @@ LastWave features a lossless streaming and download engine powered directly by t
 ## <img src="https://api.iconify.design/lucide:rocket.svg?color=%23C6F100" width="20" height="20" align="center" /> Getting Started
 
 1. Download the latest APK from the **[Releases](https://github.com/duxtami/LastWave-native/actions)** tab.
-2. Install the single release package (`LastWave-v3.0.0-release.apk`).
+2. Install the single release package (`LastWave-v3.1.0-release.apk`).
 3. Connect your Last.fm account to sync your scrobbles, taste profile, and discovery feed.
 4. Start streaming in bit-perfect lossless quality.
 

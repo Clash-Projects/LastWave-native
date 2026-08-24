@@ -35,17 +35,16 @@ object EqualizerPresets {
 
     val FLAT = EqPreset("Default", List(EQ_BAND_FREQS_HZ.size) { 0f })
     /**
-     * Balanced house curve used by Studio Master Clarity. The restrained
-     * sub-bass lift adds weight, the low-mid cuts remove masking, and the
-     * broad presence/air shelf exposes detail without a narrow, harsh peak.
-     * AudioEffectsEngine supplies the required gain staging and peak ceiling.
+     * Balanced audiophile studio reference curve for Studio Master Clarity.
+     * Clean sub-bass warmth, natural un-scooped midrange body, intimate vocal
+     * presence, and sparkling, silky-smooth treble air without harshness or fatigue.
      */
     val STUDIO_MASTER = EqPreset(
         "Studio Master",
         listOf(
-            1.4f, 1.3f, 1.0f, 0.2f, -0.9f,
-            -1.2f, -0.5f, 0.2f, 0.9f, 1.6f,
-            2.3f, 2.5f, 1.8f, 2.2f, 2.4f,
+            1.2f, 1.0f, 0.8f, 0.4f, 0.0f,
+            0.0f, 0.2f, 0.4f, 0.8f, 1.2f,
+            1.4f, 1.2f, 1.5f, 2.0f, 2.2f,
         ),
     )
 

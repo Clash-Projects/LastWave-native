@@ -14,19 +14,36 @@ android {
         applicationId = "com.lastwave.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 8
-        versionName = "3.1.0-native"
+        versionCode = 9
+        versionName = "3.1.0"
 
         val rawApiKey = System.getenv("QOBUZ_API_KEY") ?: (project.findProperty("QOBUZ_API_KEY") as? String) ?: ""
         val qobuzApiKey = rawApiKey.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
         buildConfigField("String", "QOBUZ_API_KEY", "\"$qobuzApiKey\"")
     }
 
+    signingConfigs {
+        create("release") {
+            val keystoreFile = file("release.keystore")
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
+                storePassword = "lastwave123"
+                keyAlias = "lastwave"
+                keyPassword = "lastwave123"
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            } else {
+                initWith(getByName("debug"))
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         debug {

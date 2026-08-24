@@ -466,24 +466,24 @@ class GenerateRepository @Inject constructor(
         return filterPlayable(deduplicate(filterRecommendationExclusions(pool))).take(total)
     }
 
-    suspend fun fetchTasteMixForPlaylist(playlistTracks: List<GeneratedTrack>, count: Int): List<GeneratedTrack> = coroutineScope {
-        val pool = mutableListOf<GeneratedTrack>()
+    suspend fun fetchTasteMixForPlaylist(playlistTracks: List<GeneratedTrack>, count: Int): List<GeneratedTrack> = kotlinx.coroutines.supervisorScope {
+        val pool = java.util.Collections.synchronizedList(mutableListOf<GeneratedTrack>())
         val distinctArtists = playlistTracks.map { it.artist.trim() }.filter { it.isNotBlank() }.distinct()
-        val seedArtists = distinctArtists.shuffled().take(6)
-        val seedTracks = playlistTracks.filter { it.name.isNotBlank() && it.artist.isNotBlank() }.shuffled().take(4)
+        val seedArtists = distinctArtists.shuffled().take(10)
+        val seedTracks = playlistTracks.filter { it.name.isNotBlank() && it.artist.isNotBlank() }.shuffled().take(8)
 
         // 1. Fetch similar artists and their top tracks concurrently
-        val simArtistTracksDeferred = seedArtists.map { artist ->
+        val simArtistJobs = seedArtists.map { artist ->
             async(Dispatchers.IO) {
                 try {
                     val sim = call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "12"))
-                    val simArtists = GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(3)
-                    coroutineScope {
+                    val simArtists = GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(4)
+                    kotlinx.coroutines.supervisorScope {
                         simArtists.map { sa ->
                             async(Dispatchers.IO) {
                                 try {
                                     val page = (1..3).random()
-                                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "6", "page" to page.toString()))
+                                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to sa, "limit" to "8", "page" to page.toString()))
                                     GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
                                 } catch (_: Exception) {
                                     emptyList()
@@ -498,7 +498,7 @@ class GenerateRepository @Inject constructor(
         }
 
         // 2. Fetch similar tracks for seed tracks concurrently
-        val simTracksDeferred = seedTracks.map { seed ->
+        val simTrackJobs = seedTracks.map { seed ->
             async(Dispatchers.IO) {
                 try {
                     val d = call(mapOf("method" to "track.getsimilar", "track" to seed.name, "artist" to seed.artist, "limit" to "12"))
@@ -509,12 +509,12 @@ class GenerateRepository @Inject constructor(
             }
         }
 
-        // 3. Fetch top tracks directly for seed artists concurrently
-        val directArtistTracksDeferred = seedArtists.take(4).map { artist ->
+        // 3. Fetch top tracks directly for all playlist seed artists
+        val directArtistJobs = seedArtists.map { artist ->
             async(Dispatchers.IO) {
                 try {
-                    val page = (1..2).random()
-                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to artist, "limit" to "6", "page" to page.toString()))
+                    val page = (1..3).random()
+                    val d = call(mapOf("method" to "artist.gettoptracks", "artist" to artist, "limit" to "8", "page" to page.toString()))
                     GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track"))
                 } catch (_: Exception) {
                     emptyList()
@@ -522,26 +522,63 @@ class GenerateRepository @Inject constructor(
             }
         }
 
-        val simArtistTracks = simArtistTracksDeferred.awaitAll().flatten()
-        val simTracks = simTracksDeferred.awaitAll().flatten()
-        val directArtistTracks = directArtistTracksDeferred.awaitAll().flatten()
+        val simArtistTracks = simArtistJobs.awaitAll().flatten()
+        val simTracks = simTrackJobs.awaitAll().flatten()
+        val directArtistTracks = directArtistJobs.awaitAll().flatten()
 
         pool.addAll(simArtistTracks)
         pool.addAll(simTracks)
         pool.addAll(directArtistTracks)
 
+        // 4. If pool is small, extract genre tags from artists and fetch tag top tracks
         if (pool.size < count) {
             try {
-                val mix = fetchMix(count)
-                pool.addAll(mix)
+                val tagJobs = seedArtists.take(3).map { artist ->
+                    async(Dispatchers.IO) {
+                        try {
+                            val td = call(mapOf("method" to "artist.gettoptags", "artist" to artist, "limit" to "5"))
+                            val tags = GenerateJson.namesOf(td["toptags"]?.jsonObject?.get("tag")).shuffled().take(2)
+                            kotlinx.coroutines.supervisorScope {
+                                tags.map { tag ->
+                                    async(Dispatchers.IO) {
+                                        try {
+                                            val page = (1..4).random()
+                                            val td2 = call(mapOf("method" to "tag.gettoptracks", "tag" to tag, "limit" to "10", "page" to page.toString()))
+                                            GenerateJson.normalise(td2["tracks"]?.jsonObject?.get("track"))
+                                        } catch (_: Exception) {
+                                            emptyList()
+                                        }
+                                    }
+                                }.awaitAll().flatten()
+                            }
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    }
+                }
+                pool.addAll(tagJobs.awaitAll().flatten())
             } catch (_: Exception) {}
         }
 
-        val allowed = filterRecommendationExclusions(pool)
+        // 5. If still small, blend in the source playlist tracks as base inspiration
+        if (pool.size < count) {
+            pool.addAll(playlistTracks)
+        }
+
+        // 6. Last-resort fallback to ensure generator never fails
+        if (pool.isEmpty()) {
+            try {
+                pool.addAll(fetchChartTracks(count))
+            } catch (_: Exception) {
+                pool.addAll(playlistTracks)
+            }
+        }
+
+        val allowed = filterRecommendationExclusions(pool.toList())
         val result = precheck(shuffle(allowed)).take(count).ifEmpty {
             deduplicate(allowed).shuffled().take(count)
         }
-        if (result.size >= 10) result else pool.distinctBy { it.key }.shuffled().take(count)
+        if (result.isNotEmpty()) result else playlistTracks.shuffled().take(count)
     }
 
     suspend fun fetchTasteMixForArtists(artists: List<String>, count: Int): List<GeneratedTrack> = coroutineScope {

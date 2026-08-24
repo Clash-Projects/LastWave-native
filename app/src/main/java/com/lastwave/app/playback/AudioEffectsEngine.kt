@@ -132,6 +132,9 @@ class AudioEffectsEngine @Inject constructor(
     }
 
     // ── DynamicsProcessing (API 28+ Studio Precision) ──
+    }
+
+    // ── DynamicsProcessing (API 28+ Studio Precision) ──
 
     private fun applyDynamicsProcessing(gainsDb: List<Float>) {
         runCatching {
@@ -143,7 +146,7 @@ class AudioEffectsEngine @Inject constructor(
             var dp = dynamicsProcessor
             if (dp == null) {
                 val config = DynamicsProcessing.Config.Builder(
-                    DynamicsProcessing.VARIANT_FAVOR_FREQUENCY_RESOLUTION,
+                    DynamicsProcessing.VARIANT_FAVOR_TIME_RESOLUTION,
                     /* channelCount = */ 2,
                     /* enablePreEq = */ true,
                     /* preEqBandCount = */ EQ_BAND_FREQS_HZ.size,
@@ -174,22 +177,20 @@ class AudioEffectsEngine @Inject constructor(
             }
             dp.setPreEqAllChannelsTo(preEq)
 
-            // Studio Master only: five broad, gently controlled zones keep
-            // sub-bass firm, vocals present and treble calm. Ratios stay very
-            // low so micro-detail and natural musical dynamics remain intact.
+            // Studio Master: gentle, transparent multi-zone dynamics preserve
+            // micro-detail and acoustic space without squashing or pumping.
             dp.setMbcAllChannelsTo(createStudioMasterDynamics(enhancerEnabled))
 
-            // Fast safety ceiling with recovery slow enough to avoid audible
-            // pumping. It should stay idle during normal clarity playback and
-            // engage mainly for hot masters and rare combined-band peaks.
+            // Transparent safety limiter: catches hot 24-bit inter-sample peaks
+            // with zero audible distortion or breathing.
             val limiter = DynamicsProcessing.Limiter(
                 /* inUse = */ true,
                 /* enabled = */ true,
                 /* linkGroup = */ 0,
-                /* attackTime = */ 1.0f,
-                /* releaseTime = */ 80.0f,
-                /* ratio = */ 20.0f,
-                /* threshold = */ -0.8f,
+                /* attackTime = */ 1.5f,
+                /* releaseTime = */ 120.0f,
+                /* ratio = */ 10.0f,
+                /* threshold = */ -0.5f,
                 /* postGain = */ 0.0f
             )
             dp.setLimiterAllChannelsTo(limiter)
@@ -216,7 +217,7 @@ class AudioEffectsEngine @Inject constructor(
                     /* releaseTime = */ STUDIO_MBC_RELEASE_MS[index],
                     /* ratio = */ STUDIO_MBC_RATIO[index],
                     /* threshold = */ STUDIO_MBC_THRESHOLD_DB[index],
-                    /* kneeWidth = */ 8.0f,
+                    /* kneeWidth = */ 10.0f,
                     /* noiseGateThreshold = */ -90.0f,
                     /* expanderRatio = */ 1.0f,
                     /* preGain = */ 0.0f,
@@ -349,14 +350,14 @@ class AudioEffectsEngine @Inject constructor(
         const val EFFECT_PRIORITY = 0
         const val MILLIHERTZ_PER_HZ = 1000
         const val MB_PER_DB = 100f
-        const val MAX_PRE_LIMITER_BOOST_DB = 0.6f
+        const val MAX_PRE_LIMITER_BOOST_DB = 0.5f
         const val STUDIO_MBC_BAND_COUNT = 5
 
-        val STUDIO_MBC_CUTOFF_HZ = floatArrayOf(120f, 500f, 2_200f, 6_500f, 20_000f)
-        val STUDIO_MBC_ATTACK_MS = floatArrayOf(18f, 13f, 8f, 4f, 3f)
-        val STUDIO_MBC_RELEASE_MS = floatArrayOf(170f, 140f, 115f, 100f, 90f)
-        val STUDIO_MBC_RATIO = floatArrayOf(1.16f, 1.12f, 1.14f, 1.20f, 1.12f)
-        val STUDIO_MBC_THRESHOLD_DB = floatArrayOf(-18f, -20f, -22f, -20f, -18f)
-        val STUDIO_MBC_POST_GAIN_DB = floatArrayOf(0.30f, 0.05f, 0.25f, 0.05f, 0.15f)
+        val STUDIO_MBC_CUTOFF_HZ = floatArrayOf(120f, 600f, 2_400f, 7_500f, 20_000f)
+        val STUDIO_MBC_ATTACK_MS = floatArrayOf(40f, 35f, 25f, 15f, 10f)
+        val STUDIO_MBC_RELEASE_MS = floatArrayOf(200f, 160f, 140f, 120f, 100f)
+        val STUDIO_MBC_RATIO = floatArrayOf(1.06f, 1.05f, 1.05f, 1.06f, 1.05f)
+        val STUDIO_MBC_THRESHOLD_DB = floatArrayOf(-12f, -14f, -14f, -12f, -12f)
+        val STUDIO_MBC_POST_GAIN_DB = floatArrayOf(0.05f, 0.00f, 0.05f, 0.05f, 0.10f)
     }
 }

@@ -312,17 +312,15 @@ class PlaylistViewModel @Inject constructor(
     fun dismissToast() = _uiState.update { it.copy(toastMessage = null) }
 
     /** Port of §4.2's "Generate Fresh" — re-runs the same mode with the
-     *  same inputs and saves a brand-new playlist (does not overwrite the
-     *  existing one, matching the original: regenerate always creates a
-     *  new saved entry, it's not an in-place update). */
-    fun regenerate(id: Long) {
+     *  same inputs and saves a brand-new playlist inspired from the original. */
+    fun regenerate(id: Long, onRegenerated: ((Long) -> Unit)? = null) {
         viewModelScope.launch {
             val playlist = _uiState.value.playlists.firstOrNull { it.id == id }
                 ?: _uiState.value.detailPlaylist?.takeIf { it.id == id }
                 ?: try { playlistRepository.getById(id) } catch (_: Exception) { null }
                 ?: return@launch
 
-            _uiState.update { it.copy(regeneratingId = id, toastMessage = "Regenerating taste mix\u2026") }
+            _uiState.update { it.copy(regeneratingId = id, toastMessage = "Regenerating inspired mix\u2026") }
             try {
                 val targetCount = (30..35).random()
                 val finalTracks = if (playlist.tracks.isNotEmpty()) {
@@ -344,10 +342,24 @@ class PlaylistViewModel @Inject constructor(
                     throw IllegalStateException("No tracks found to mix for this playlist.")
                 }
 
-                val title = PlaylistNamer.generateUniqueName(playlistRepository.titles())
-                val saved = playlistRepository.save(title, playlist.subtitle.ifBlank { "Taste Mix" }, playlist.mode, finalTracks)
-                _uiState.update { it.copy(regeneratingId = null, toastMessage = "Regenerated \"$title\" (${finalTracks.size} tracks)") }
+                val existingTitles = playlistRepository.titles().toSet()
+                val baseTitle = if (playlist.title.endsWith(" Mix", ignoreCase = true) || playlist.title.contains("Inspired", ignoreCase = true)) {
+                    playlist.title
+                } else {
+                    "${playlist.title} Mix"
+                }
+                var title = baseTitle
+                var counter = 2
+                while (title in existingTitles) {
+                    title = "$baseTitle $counter"
+                    counter++
+                }
+
+                val subtitle = "Inspired by ${playlist.title}"
+                val saved = playlistRepository.save(title, subtitle, playlist.mode, finalTracks)
+                _uiState.update { it.copy(regeneratingId = null, toastMessage = "Created \"$title\" (${finalTracks.size} tracks)") }
                 load(justGeneratedId = saved.id)
+                onRegenerated?.invoke(saved.id)
             } catch (e: Exception) {
                 _uiState.update { it.copy(regeneratingId = null, toastMessage = e.message ?: "Couldn't regenerate playlist") }
             }

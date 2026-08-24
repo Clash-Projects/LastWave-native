@@ -154,6 +154,7 @@ private fun formatDate(millis: Long): String =
 fun PlaylistDetailScreen(
     playlistId: Long,
     onBack: () -> Unit,
+    onOpenPlaylist: ((Long) -> Unit)? = null,
     viewModel: PlaylistViewModel = hiltViewModel(),
     downloadViewModel: PlaylistDownloadHelperViewModel = hiltViewModel(),
 ) {
@@ -754,7 +755,9 @@ fun PlaylistDetailScreen(
                             },
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.regenerate(playlistId)
+                                viewModel.regenerate(playlistId) { newId ->
+                                    onOpenPlaylist?.invoke(newId)
+                                }
                                 overflowMenuOpen = false
                             },
                         )
