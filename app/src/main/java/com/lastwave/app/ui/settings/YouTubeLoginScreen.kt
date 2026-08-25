@@ -61,6 +61,7 @@ fun YouTubeLoginScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var loadProgressVisible by remember { mutableStateOf(true) }
+    var webViewError by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.fillMaxSize()) {
         ExpressiveHeader(
@@ -73,7 +74,9 @@ fun YouTubeLoginScreen(
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
-                    WebView(ctx).apply {
+                    var createdWebView: WebView? = null
+                    try {
+                        WebView(ctx).also { createdWebView = it }.apply {
                         @SuppressLint("SetJavaScriptEnabled")
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
@@ -92,8 +95,7 @@ fun YouTubeLoginScreen(
                                 // Read state live — a factory-captured copy would be stale.
                                 val current = viewModel.uiState.value
                                 if (current.verifying || current.connectedName != null) return
-                                val cookies =
-                                    CookieManager.getInstance().getCookie("https://music.youtube.com")
+                                val cookies = readYouTubeCookies()
                                 val hasSession = listOf("__Secure-3PAPISID=", "SAPISID=").any { token ->
                                     cookies?.contains(token) == true
                                 }
@@ -102,10 +104,36 @@ fun YouTubeLoginScreen(
                                 }
                             }
                         }
-                        loadUrl(LOGIN_URL)
+                            loadUrl(LOGIN_URL)
+                        }
+                    } catch (error: Exception) {
+                        runCatching { createdWebView?.destroy() }
+                        loadProgressVisible = false
+                        webViewError = "Android System WebView is unavailable. Install or enable a WebView provider to connect YouTube Music."
+                        android.widget.FrameLayout(ctx)
+                    } catch (error: LinkageError) {
+                        runCatching { createdWebView?.destroy() }
+                        loadProgressVisible = false
+                        webViewError = "This ROM's WebView implementation is incompatible. YouTube Music sign-in is disabled safely."
+                        android.widget.FrameLayout(ctx)
                     }
                 },
             )
+
+            if (webViewError != null) {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                ) {
+                    Text(
+                        webViewError.orEmpty(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(20.dp),
+                    )
+                }
+            }
 
             androidx.compose.animation.AnimatedVisibility(
                 visible = state.connectedName != null,
@@ -193,10 +221,9 @@ fun YouTubeLoginScreen(
                 Spacer(Modifier.height(12.dp))
                 Button(
                     onClick = {
-                        val cookies = CookieManager.getInstance().getCookie("https://music.youtube.com")
-                        viewModel.attemptConnect(cookies)
+                        viewModel.attemptConnect(readYouTubeCookies())
                     },
-                    enabled = !state.verifying && state.connectedName == null,
+                    enabled = webViewError == null && !state.verifying && state.connectedName == null,
                     shape = CircleShape,
                     modifier = Modifier.fillMaxWidth().height(46.dp),
                 ) {
@@ -225,3 +252,11 @@ fun YouTubeLoginScreen(
 
 private const val LOGIN_URL =
     "https://accounts.google.com/ServiceLogin?continue=https%3A%2F%2Fmusic.youtube.com%2F&hl=en"
+
+private fun readYouTubeCookies(): String? = try {
+    CookieManager.getInstance().getCookie("https://music.youtube.com")
+} catch (error: Exception) {
+    null
+} catch (error: LinkageError) {
+    null
+}

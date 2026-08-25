@@ -21,10 +21,13 @@ import com.lastwave.app.data.repository.ThemeUiState
 import com.lastwave.app.playback.NativeAudioEngine
 import com.lastwave.app.util.FileExportHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -34,6 +37,17 @@ import javax.inject.Inject
 enum class PendingRestoreKind { FULL_BACKUP, PLAYLIST_MIRROR }
 
 private val SettingsSharing = SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000)
+private const val SETTINGS_TAG = "SettingsViewModel"
+
+/** Settings aggregates several independent stores. A broken legacy value or
+ * one unreadable Room table must only disable that section, never crash the
+ * entire destination. Flow.catch preserves cancellation and handles only
+ * failures from the upstream source. */
+private fun <T> Flow<T>.withSettingsFallback(source: String, fallback: T): Flow<T> =
+    catch { error ->
+        android.util.Log.e(SETTINGS_TAG, "$source unavailable; using safe defaults", error)
+        emit(fallback)
+    }
 
 data class SettingsScreenState(
     val session: SessionData = SessionData(),
@@ -82,12 +96,16 @@ class SettingsViewModel @Inject constructor(
     val ytConnection: StateFlow<com.lastwave.app.data.ytmusic.YtConnection> = ytAuthManager.connection
     val ytSyncState: StateFlow<com.lastwave.app.data.ytmusic.YtSyncState> = ytMusicSyncManager.state
     val ytSyncEnabled: StateFlow<Boolean> = ytMusicPreferences.syncEnabled
+        .withSettingsFallback("YouTube sync preference", false)
         .stateIn(viewModelScope, SettingsSharing, false)
     val ytLastSyncAt: StateFlow<Long> = ytMusicPreferences.lastSyncAt
+        .withSettingsFallback("YouTube sync timestamp", 0L)
         .stateIn(viewModelScope, SettingsSharing, 0L)
     val syncedPlaylistIds: StateFlow<Set<Long>?> = ytMusicPreferences.syncedPlaylistIds
+        .withSettingsFallback("YouTube playlist selection", null)
         .stateIn(viewModelScope, SettingsSharing, null)
     val allPlaylists: StateFlow<List<com.lastwave.app.data.playlist.SavedPlaylist>> = playlistRepository.playlists
+        .withSettingsFallback("playlists", emptyList())
         .stateIn(viewModelScope, SettingsSharing, emptyList())
 
     val session: StateFlow<SessionData> = kotlinx.coroutines.flow.combine(
@@ -101,61 +119,93 @@ class SettingsViewModel @Inject constructor(
         } else {
             sess
         }
-    }.stateIn(viewModelScope, SettingsSharing, SessionData())
+    }
+        .withSettingsFallback("session", SessionData())
+        .stateIn(viewModelScope, SettingsSharing, SessionData())
 
     val theme: StateFlow<ThemeUiState> = themeRepository.uiState
 
     val misc: StateFlow<MiscSettings> = settingsPreferences.settings
+        .withSettingsFallback("misc preferences", MiscSettings())
         .stateIn(viewModelScope, SettingsSharing, MiscSettings())
 
     val scrobbler: StateFlow<ScrobblerSettings> = scrobblerPreferences.settings
+        .withSettingsFallback("scrobbler preferences", ScrobblerSettings())
         .stateIn(viewModelScope, SettingsSharing, ScrobblerSettings())
 
     /** Experimental 15-band equalizer state (Settings → Experimental). */
     val equalizer: StateFlow<EqualizerSettings> = equalizerPreferences.settings
+        .withSettingsFallback("equalizer preferences", EqualizerSettings())
         .stateIn(viewModelScope, SettingsSharing, EqualizerSettings())
     private var immediateEqGains = EqualizerSettings().gainsDb.toFloatArray()
 
     val downloadCount: StateFlow<Int> = downloadedTrackDao.count()
+        .withSettingsFallback("download count", 0)
         .stateIn(viewModelScope, SettingsSharing, 0)
 
     val downloadTotalBytes: StateFlow<Long?> = downloadedTrackDao.totalBytes()
+        .withSettingsFallback("download size", 0L)
         .stateIn(viewModelScope, SettingsSharing, 0L)
 
     private val _uiState = MutableStateFlow(SettingsScreenState())
     val uiState: StateFlow<SettingsScreenState> = _uiState.asStateFlow()
+
+    /** Prevent DataStore/Room/runtime write failures from escaping as an
+     * uncaught root coroutine and terminating the app. */
+    private fun launchSettingsAction(action: String, block: suspend () -> Unit) =
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                android.util.Log.e(SETTINGS_TAG, "Failed to $action", error)
+                _uiState.update { state ->
+                    state.copy(toastMessage = "Couldn't $action. Please try again.")
+                }
+            } catch (error: LinkageError) {
+                // Missing/altered framework or JNI symbols on a custom ROM
+                // disable only this action, never the Settings destination.
+                android.util.Log.e(SETTINGS_TAG, "Unsupported platform action: $action", error)
+                _uiState.update { state ->
+                    state.copy(toastMessage = "This action isn't supported on this device.")
+                }
+            }
+        }
 
     init {
         viewModelScope.launch {
             equalizer.collect { immediateEqGains = it.gainsDb.toFloatArray() }
         }
         viewModelScope.launch {
-            generateRepository.observeRecommendationExclusions().collect { exclusions ->
-                _uiState.update { it.copy(recommendationExclusionCount = exclusions.size) }
-            }
+            generateRepository.observeRecommendationExclusions()
+                .withSettingsFallback("recommendation exclusions", emptyList())
+                .collect { exclusions ->
+                    _uiState.update { it.copy(recommendationExclusionCount = exclusions.size) }
+                }
         }
     }
 
     fun refreshRecommendationExclusionCount() {
-        viewModelScope.launch {
+        launchSettingsAction("refresh exclusions") {
             val count = generateRepository.recommendationExclusionCount()
             _uiState.update { it.copy(recommendationExclusionCount = count) }
         }
     }
 
     fun saveApiCredentials(apiKey: String, apiSecret: String) {
-        viewModelScope.launch { authRepository.saveApiCredentials(apiKey, apiSecret) }
+        launchSettingsAction("save API credentials") { authRepository.saveApiCredentials(apiKey, apiSecret) }
     }
 
     fun logOut(onComplete: () -> Unit) {
-        viewModelScope.launch {
+        launchSettingsAction("log out") {
             sessionPreferences.logOutApiCredentials()
             onComplete()
         }
     }
 
     fun clearSession(onComplete: () -> Unit) {
-        viewModelScope.launch {
+        launchSettingsAction("clear the session") {
             sessionPreferences.clearAll()
             onComplete()
         }
@@ -163,10 +213,10 @@ class SettingsViewModel @Inject constructor(
 
     // ── Appearance (§8.2 / §8.3 / §8.4) ──
 
-    fun setAmoled(enabled: Boolean) = viewModelScope.launch { themeRepository.setAmoled(enabled) }
-    fun setLiquidGlass(enabled: Boolean) = viewModelScope.launch { themeRepository.setLiquidGlass(enabled) }
-    fun setAccentMode(mode: AccentMode) = viewModelScope.launch { themeRepository.setMode(mode) }
-    fun setManualAccent(color: Color) = viewModelScope.launch { themeRepository.setManualAccent(color) }
+    fun setAmoled(enabled: Boolean) = launchSettingsAction("update AMOLED mode") { themeRepository.setAmoled(enabled) }
+    fun setLiquidGlass(enabled: Boolean) = launchSettingsAction("update Liquid Glass") { themeRepository.setLiquidGlass(enabled) }
+    fun setAccentMode(mode: AccentMode) = launchSettingsAction("update accent mode") { themeRepository.setMode(mode) }
+    fun setManualAccent(color: Color) = launchSettingsAction("update accent color") { themeRepository.setManualAccent(color) }
     fun openColorWheel() = _uiState.update { it.copy(showColorWheel = true) }
     fun dismissColorWheel() = _uiState.update { it.copy(showColorWheel = false) }
     fun applyCustomColor(color: Color) {
@@ -174,32 +224,36 @@ class SettingsViewModel @Inject constructor(
         dismissColorWheel()
     }
 
-    fun setDynamicNowPlaying(enabled: Boolean) = viewModelScope.launch { themeRepository.setDynamicNowPlaying(enabled) }
-    fun setUseCustomFont(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setUseCustomFont(enabled) }
-    fun setPreferQobuzStreaming(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setPreferQobuzStreaming(enabled) }
-    fun setQobuzQuality(quality: Int) = viewModelScope.launch { settingsPreferences.setQobuzQuality(quality) }
+    fun setDynamicNowPlaying(enabled: Boolean) = launchSettingsAction("update dynamic theme") { themeRepository.setDynamicNowPlaying(enabled) }
+    fun setUseCustomFont(enabled: Boolean) = launchSettingsAction("update the app font") { settingsPreferences.setUseCustomFont(enabled) }
+    fun setPreferQobuzStreaming(enabled: Boolean) = launchSettingsAction("update streaming preference") { settingsPreferences.setPreferQobuzStreaming(enabled) }
+    fun setQobuzQuality(quality: Int) = launchSettingsAction("update streaming quality") { settingsPreferences.setQobuzQuality(quality) }
     fun setStudioMasterClarity(enabled: Boolean) {
         // Apply immediately; DataStore persists the same state for future engine instances.
         runCatching { audioEngine.get().setStudioMasterClarity(enabled) }
-        viewModelScope.launch { settingsPreferences.setStudioMasterClarity(enabled) }
+        launchSettingsAction("update Studio Master Clarity") { settingsPreferences.setStudioMasterClarity(enabled) }
     }
-    fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = viewModelScope.launch { settingsPreferences.setLyricsAnimation(animation) }
+    fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
     fun setVolumeBoostEnabled(enabled: Boolean) {
         runCatching { audioEngine.get().setVolumeBoost(enabled, misc.value.volumeBoostPercent) }
-        viewModelScope.launch { settingsPreferences.setVolumeBoostEnabled(enabled) }
+        launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostEnabled(enabled) }
     }
     fun setVolumeBoostPercent(percent: Int) {
         val safePercent = percent.coerceIn(100, 200)
         runCatching { audioEngine.get().setVolumeBoost(misc.value.volumeBoostEnabled, safePercent) }
-        viewModelScope.launch { settingsPreferences.setVolumeBoostPercent(safePercent) }
+        launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostPercent(safePercent) }
     }
-    fun setFullScreenCoverArt(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setFullScreenCoverArt(enabled) }
+    fun setFullScreenCoverArt(enabled: Boolean) = launchSettingsAction("update cover art mode") { settingsPreferences.setFullScreenCoverArt(enabled) }
+    fun setCrossfadeEnabled(enabled: Boolean) = launchSettingsAction("update crossfade") { settingsPreferences.setCrossfadeEnabled(enabled) }
+    fun setCrossfadeSeconds(seconds: Int) = launchSettingsAction("update crossfade duration") {
+        settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 10))
+    }
 
     // ── Experimental: 15-band equalizer ──
 
     fun setEqualizerEnabled(enabled: Boolean) {
         runCatching { audioEngine.get().setEqualizer(enabled, immediateEqGains) }
-        viewModelScope.launch { equalizerPreferences.setEnabled(enabled) }
+        launchSettingsAction("update the equalizer") { equalizerPreferences.setEnabled(enabled) }
     }
 
     /** Selecting a preset also switches the EQ on — an off equalizer with a
@@ -208,7 +262,7 @@ class SettingsViewModel @Inject constructor(
         com.lastwave.app.data.local.EqualizerPresets.byName(name)?.let { preset ->
             immediateEqGains = preset.gainsDb.toFloatArray()
             runCatching { audioEngine.get().setEqualizer(true, immediateEqGains) }
-            viewModelScope.launch { equalizerPreferences.applyPreset(preset) }
+            launchSettingsAction("apply the equalizer preset") { equalizerPreferences.applyPreset(preset) }
         }
     }
 
@@ -217,13 +271,13 @@ class SettingsViewModel @Inject constructor(
         if (bandIndex !in immediateEqGains.indices) return
         immediateEqGains = immediateEqGains.copyOf().also { it[bandIndex] = gainDb }
         runCatching { audioEngine.get().setEqualizer(equalizer.value.enabled, immediateEqGains) }
-        viewModelScope.launch { equalizerPreferences.setBandGain(bandIndex, gainDb) }
+        launchSettingsAction("update the equalizer band") { equalizerPreferences.setBandGain(bandIndex, gainDb) }
     }
 
     // ── Data management (§8.5) ──
 
     fun clearRecommendationExclusions() {
-        viewModelScope.launch {
+        launchSettingsAction("clear exclusions") {
             discoverRepository.clearRecommendationExclusions()
             refreshRecommendationExclusionCount()
             _uiState.update { it.copy(toastMessage = "Exclusion history cleared") }
@@ -233,7 +287,7 @@ class SettingsViewModel @Inject constructor(
     fun requestClearAllData() = _uiState.update { it.copy(showClearAllConfirm = true) }
     fun dismissClearAllConfirm() = _uiState.update { it.copy(showClearAllConfirm = false) }
     fun confirmClearAllData(onComplete: () -> Unit) {
-        viewModelScope.launch {
+        launchSettingsAction("clear saved data") {
             sessionPreferences.clearAll()
             discoverRepository.clearRecommendationExclusions()
             playlistRepository.clearAll()
@@ -307,7 +361,7 @@ class SettingsViewModel @Inject constructor(
      *  stages the restore, showing a confirm dialog with the item count
      *  before actually applying anything (§8.6). */
     fun stagePendingRestore(content: String, uri: android.net.Uri) {
-        viewModelScope.launch {
+        launchSettingsAction("stage the restore") {
             val backup = try {
                 kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
                     .decodeFromString(com.lastwave.app.data.backup.BackupFile.serializer(), content)
@@ -316,7 +370,7 @@ class SettingsViewModel @Inject constructor(
             val mirrorCount = playlistRepository.publicMirrorPlaylistCount(content)
             if (backup == null && mirrorCount == null) {
                 _uiState.update { it.copy(toastMessage = "That isn't a LastWave backup or playlist JSON") }
-                return@launch
+                return@launchSettingsAction
             }
             _uiState.update {
                 it.copy(
@@ -343,7 +397,7 @@ class SettingsViewModel @Inject constructor(
     fun confirmRestore(onComplete: () -> Unit) {
         val pending = _uiState.value
         val content = pending.pendingRestoreContent ?: return
-        viewModelScope.launch {
+        launchSettingsAction("restore the backup") {
             if (pending.pendingRestoreKind == PendingRestoreKind.PLAYLIST_MIRROR) {
                 pending.pendingRestoreUri?.let(fileExportHelper::rememberPlaylistMirrorUri)
                 playlistRepository.importPublicMirror(content)
@@ -365,7 +419,7 @@ class SettingsViewModel @Inject constructor(
                             it.copy(showRestoreConfirm = false, toastMessage = "Playlist sync failed: ${error.message}")
                         }
                     }
-                return@launch
+                return@launchSettingsAction
             }
 
             when (val result = backupRepository.restore(content)) {
@@ -407,11 +461,11 @@ class SettingsViewModel @Inject constructor(
             _uiState.update { it.copy(showSessionKeyDialog = true) }
             return
         }
-        viewModelScope.launch { scrobblerPreferences.setEnabled(enabled) }
+        launchSettingsAction("update scrobbling") { scrobblerPreferences.setEnabled(enabled) }
     }
 
-    fun setSubmitNowPlaying(enabled: Boolean) = viewModelScope.launch { scrobblerPreferences.setSubmitNowPlaying(enabled) }
-    fun setScrobblePercent(percent: Int) = viewModelScope.launch { scrobblerPreferences.setScrobblePercent(percent) }
+    fun setSubmitNowPlaying(enabled: Boolean) = launchSettingsAction("update Now Playing submission") { scrobblerPreferences.setSubmitNowPlaying(enabled) }
+    fun setScrobblePercent(percent: Int) = launchSettingsAction("update the scrobble threshold") { scrobblerPreferences.setScrobblePercent(percent) }
 
     // ── YouTube Music account ──
 
@@ -419,14 +473,14 @@ class SettingsViewModel @Inject constructor(
      *  an immediate first mirror pass instead of waiting for the next tick. */
     fun setYtSyncEnabled(enabled: Boolean) {
         if (enabled && !ytConnection.value.isConnected) return
-        viewModelScope.launch {
+        launchSettingsAction("update YouTube sync") {
             ytMusicPreferences.setSyncEnabled(enabled)
             if (enabled) runCatching { ytMusicSyncManager.syncNow("enabled") }
         }
     }
 
     fun disconnectYouTube() {
-        viewModelScope.launch {
+        launchSettingsAction("disconnect YouTube Music") {
             ytMusicPreferences.setSyncEnabled(false)
             ytAuthManager.signOut()
             _uiState.update { it.copy(toastMessage = "YouTube Music disconnected") }
@@ -434,7 +488,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun togglePlaylistSync(playlistId: Long, enabled: Boolean) {
-        viewModelScope.launch {
+        launchSettingsAction("update playlist sync") {
             val allIds = allPlaylists.value.map { it.id }
             ytMusicPreferences.togglePlaylistSync(allIds, playlistId, enabled)
             if (ytSyncEnabled.value) {
@@ -444,7 +498,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun selectAllPlaylistsForSync(select: Boolean) {
-        viewModelScope.launch {
+        launchSettingsAction("update playlist sync") {
             val allIds = if (select) allPlaylists.value.map { it.id }.toSet() else emptySet()
             ytMusicPreferences.setSyncedPlaylistIds(allIds)
             if (ytSyncEnabled.value) {
@@ -454,14 +508,14 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun syncYouTubeNow() {
-        viewModelScope.launch { runCatching { ytMusicSyncManager.syncNow("manual") } }
+        launchSettingsAction("sync YouTube Music") { ytMusicSyncManager.syncNow("manual") }
     }
 
     fun dismissSessionKeyDialog() = _uiState.update { it.copy(showSessionKeyDialog = false, sessionKeyError = null) }
 
     fun submitPassword(password: String) {
         _uiState.update { it.copy(sessionKeyLoading = true, sessionKeyError = null) }
-        viewModelScope.launch {
+        launchSettingsAction("enable scrobbling") {
             when (val result = authRepository.obtainSessionKey(password)) {
                 AuthRepository.SessionKeyResult.Success -> {
                     scrobblerPreferences.setEnabled(true)

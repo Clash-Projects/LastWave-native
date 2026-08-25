@@ -45,14 +45,18 @@ class ScrobblerPreferences @Inject constructor(
         val PACKAGES = stringSetPreferencesKey("lw_scrobbler_packages")
     }
 
-    val settings: Flow<ScrobblerSettings> = dataStore.data.map { p ->
-        ScrobblerSettings(
-            enabled = p[Keys.ENABLED] ?: false,
-            submitNowPlaying = p[Keys.SUBMIT_NOW_PLAYING] ?: true,
-            scrobblePercent = p[Keys.PERCENT] ?: 50,
-            selectedPackages = p[Keys.PACKAGES] ?: emptySet(),
-        )
-    }
+    val settings: Flow<ScrobblerSettings> = dataStore.data
+        .recoverPreferences("ScrobblerPreferences")
+        .map { p ->
+            ScrobblerSettings(
+                enabled = p.readSafely(Keys.ENABLED) ?: false,
+                submitNowPlaying = p.readSafely(Keys.SUBMIT_NOW_PLAYING) ?: true,
+                // Old/user-edited backups can contain values outside the Slider's
+                // range. Never pass an invalid persisted value into Compose.
+                scrobblePercent = (p.readSafely(Keys.PERCENT) ?: 50).coerceIn(25, 90),
+                selectedPackages = p.readSafely(Keys.PACKAGES) ?: emptySet(),
+            )
+        }
 
     suspend fun setEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.ENABLED] = enabled }
@@ -72,7 +76,7 @@ class ScrobblerPreferences @Inject constructor(
 
     suspend fun togglePackage(packageName: String) {
         dataStore.edit { prefs ->
-            val current = prefs[Keys.PACKAGES] ?: emptySet()
+            val current = prefs.readSafely(Keys.PACKAGES) ?: emptySet()
             prefs[Keys.PACKAGES] = if (packageName in current) current - packageName else current + packageName
         }
     }

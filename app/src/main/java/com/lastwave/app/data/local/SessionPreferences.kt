@@ -37,17 +37,19 @@ class SessionPreferences @Inject constructor(
         val GUEST_MODE = booleanPreferencesKey("lw_guest_mode")
     }
 
-    val session: StateFlow<SessionData> = dataStore.data.map { p ->
-        val storedKey = p[Keys.API_KEY]
-        val storedSecret = p[Keys.API_SECRET]
-        SessionData(
-            apiKey = if (!storedKey.isNullOrBlank()) storedKey else LastFmAppCredentials.API_KEY,
-            apiSecret = if (!storedSecret.isNullOrBlank()) storedSecret else LastFmAppCredentials.API_SECRET,
-            sessionKey = p[Keys.SESSION_KEY] ?: "",
-            username = p[Keys.USERNAME] ?: "",
-            isLoaded = true,
-        )
-    }.stateIn(
+    val session: StateFlow<SessionData> = dataStore.data
+        .recoverPreferences("SessionPreferences")
+        .map { p ->
+            val storedKey = p.readSafely(Keys.API_KEY)
+            val storedSecret = p.readSafely(Keys.API_SECRET)
+            SessionData(
+                apiKey = if (!storedKey.isNullOrBlank()) storedKey else LastFmAppCredentials.API_KEY,
+                apiSecret = if (!storedSecret.isNullOrBlank()) storedSecret else LastFmAppCredentials.API_SECRET,
+                sessionKey = p.readSafely(Keys.SESSION_KEY) ?: "",
+                username = p.readSafely(Keys.USERNAME) ?: "",
+                isLoaded = true,
+            )
+        }.stateIn(
         scope = externalScope,
         started = SharingStarted.Eagerly,
         initialValue = SessionData(

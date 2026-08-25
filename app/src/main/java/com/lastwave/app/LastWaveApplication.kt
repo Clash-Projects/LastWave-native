@@ -27,6 +27,9 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
     @Inject lateinit var ytMusicSyncManager: dagger.Lazy<com.lastwave.app.data.ytmusic.YtMusicSyncManager>
 
     override fun onCreate() {
+        // Installed before anything else (including Hilt's super.onCreate())
+        // so OEM framework threads that throw during startup are contained.
+        CrashGuard.install(this)
         super.onCreate()
         com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.initialize(this)
         applicationScope.launch(Dispatchers.IO) {

@@ -90,8 +90,13 @@ class MusicPlaybackService : Service() {
                 android.util.Log.e("MusicPlaybackService", "Suppressed playback service coroutine failure", error)
             },
     )
-    private lateinit var mediaSession: MediaSession
-    private lateinit var ownController: MediaController
+    // A handful of ROMs ship broken or deliberately crippled media-session
+    // stacks where constructing a MediaSession or MediaController throws, or
+    // the binder calls fail at runtime. Audio playback itself never depends
+    // on either handle, so they stay nullable and every use degrades to
+    // notification-only transport controls instead of crashing the service.
+    private var mediaSession: MediaSession? = null
+    private var ownController: MediaController? = null
     private var settings = ScrobblerSettings()
     private var detectorJob: Job? = null
     private var detectedKey = ""
@@ -119,23 +124,55 @@ class MusicPlaybackService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        mediaSession = MediaSession(this, "LastWavePlayer").apply {
-            setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
-            setCallback(object : MediaSession.Callback() {
-                override fun onPlay() = musicPlayer.resume()
-                override fun onPause() = musicPlayer.pause()
-                override fun onSkipToNext() = musicPlayer.next()
-                override fun onSkipToPrevious() = musicPlayer.previous()
-                override fun onSeekTo(pos: Long) = musicPlayer.seekTo(pos)
-                override fun onStop() = musicPlayer.stopAndClear()
-            })
-            setSessionActivity(openAppPendingIntent())
-            isActive = true
+        runCatching {
+            mediaSession = MediaSession(this, "LastWavePlayer").apply {
+                setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
+                setCallback(object : MediaSession.Callback() {
+                    override fun onPlay() = musicPlayer.resume()
+                    override fun onPause() = musicPlayer.pause()
+                    override fun onSkipToNext() = musicPlayer.next()
+                    override fun onSkipToPrevious() = musicPlayer.previous()
+                    override fun onSeekTo(pos: Long) = musicPlayer.seekTo(pos)
+                    override fun onStop() = musicPlayer.stopAndClear()
+                })
+                setSessionActivity(openAppPendingIntent())
+                isActive = true
+            }
+            ownController = mediaSession?.sessionToken?.let { token -> MediaController(this, token) }
+            ActiveMediaSessionHolder.ownToken = mediaSession?.sessionToken
+        }.onFailure { error ->
+            android.util.Log.e("MusicPlaybackService", "System media integration unavailable; continuing audio-only", error)
+            runCatching { mediaSession?.release() }
+            mediaSession = null
+            ownController = null
+            ActiveMediaSessionHolder.ownToken = null
         }
-        ownController = MediaController(this, mediaSession.sessionToken)
-        ActiveMediaSessionHolder.ownToken = mediaSession.sessionToken
         notificationPalette = NotificationPalette.from(themeRepository.uiState.value.colorScheme)
-        startForeground(NOTIFICATION_ID, buildNotification(musicPlayer.state.value, null))
+        // Android 12+ can reject foreground promotion for background starts
+        // (widget, tile or MediaButton paths on aggressive ROM builds), and a
+        // foreground service that never promotes is killed by the system
+        // timeout. Fall back to a minimal notification first (custom
+        // RemoteViews layouts are another OEM failure point), then stop the
+        // service cleanly if even that is refused.
+        val promotedToForeground = runCatching {
+            startForeground(NOTIFICATION_ID, buildNotification(musicPlayer.state.value, null))
+        }.onFailure { firstError ->
+            android.util.Log.w("MusicPlaybackService", "Rich startup notification rejected; retrying minimal", firstError)
+        }.recoverCatching {
+            startForeground(
+                NOTIFICATION_ID,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    Notification.Builder(this, CHANNEL_ID)
+                } else {
+                    @Suppress("DEPRECATION") Notification.Builder(this)
+                }.build(),
+            )
+        }.isSuccess
+        if (!promotedToForeground) {
+            android.util.Log.w("MusicPlaybackService", "Foreground promotion refused by system; stopping service")
+            stopSelf()
+            return
+        }
         scope.launch { scrobblerPreferences.settings.collect { settings = it } }
         scope.launch {
             themeRepository.uiState.collectLatest { theme ->
@@ -197,10 +234,10 @@ class MusicPlaybackService : Service() {
         artworkJob?.cancel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
         else @Suppress("DEPRECATION") stopForeground(true)
-        val releasedToken = mediaSession.sessionToken
-        mediaSession.isActive = false
-        mediaSession.release()
-        ActiveMediaSessionHolder.clear(ownController)
+        val releasedToken = mediaSession?.sessionToken
+        runCatching { mediaSession?.isActive = false }
+        runCatching { mediaSession?.release() }
+        ownController?.let { controller -> ActiveMediaSessionHolder.clear(controller) }
         ActiveMediaSessionHolder.clearToken(releasedToken)
         scope.cancel()
         super.onDestroy()
@@ -428,36 +465,43 @@ class MusicPlaybackService : Service() {
         systemStateSignature = signature
 
         val artUri = artworkUrl ?: track?.artworkUrl.orEmpty()
-        mediaSession.setMetadata(
-            MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, track?.title.orEmpty())
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, track?.artist.orEmpty())
-                .putString(MediaMetadata.METADATA_KEY_ALBUM, track?.album.orEmpty())
-                .putString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI, artUri)
-                .putString(MediaMetadata.METADATA_KEY_ART_URI, artUri)
-                .putString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI, artUri)
-                .putLong(MediaMetadata.METADATA_KEY_DURATION, state.durationMs)
-                .apply {
-                    val art = artworkBitmap
-                    if (art != null) {
-                        putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, art)
-                        putBitmap(MediaMetadata.METADATA_KEY_ART, art)
-                        putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, art)
+        val session = mediaSession ?: return
+        runCatching {
+            session.setMetadata(
+                MediaMetadata.Builder()
+                    .putString(MediaMetadata.METADATA_KEY_TITLE, track?.title.orEmpty())
+                    .putString(MediaMetadata.METADATA_KEY_ARTIST, track?.artist.orEmpty())
+                    .putString(MediaMetadata.METADATA_KEY_ALBUM, track?.album.orEmpty())
+                    .putString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI, artUri)
+                    .putString(MediaMetadata.METADATA_KEY_ART_URI, artUri)
+                    .putString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI, artUri)
+                    .putLong(MediaMetadata.METADATA_KEY_DURATION, state.durationMs)
+                    .apply {
+                        val art = artworkBitmap
+                        if (art != null) {
+                            putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, art)
+                            putBitmap(MediaMetadata.METADATA_KEY_ART, art)
+                            putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, art)
+                        }
                     }
-                }
-                .build(),
-        )
-        mediaSession.setPlaybackState(
-            PlaybackState.Builder()
-                .setActions(
-                    PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
-                        PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SEEK_TO or
-                        PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                        PlaybackState.ACTION_STOP,
-                )
-                .setState(playbackState, state.positionMs, if (state.isPlaying) state.speed else 0f)
-                .build(),
-        )
+                    .build(),
+            )
+            session.setPlaybackState(
+                PlaybackState.Builder()
+                    .setActions(
+                        PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
+                            PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SEEK_TO or
+                            PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
+                            PlaybackState.ACTION_STOP,
+                    )
+                    .setState(playbackState, state.positionMs, if (state.isPlaying) state.speed else 0f)
+                    .build(),
+            )
+        }.onFailure { error ->
+            // Binder IPC into a broken OEM media stack must not kill the
+            // state collector that also drives notifications and widget.
+            android.util.Log.w("MusicPlaybackService", "Media session publish failed", error)
+        }
     }
 
     private fun publishWidget(state: MusicPlayerState) {
@@ -488,7 +532,14 @@ class MusicPlaybackService : Service() {
         val signature = "${track?.title}|${track?.artist}|${track?.album}|${state.isPlaying}|${state.isBuffering}|$artworkUrl|${artworkBitmap != null}"
         if (!force && signature == notificationSignature) return
         notificationSignature = signature
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(state, artworkBitmap))
+        runCatching {
+            getSystemService(NotificationManager::class.java)
+                ?.notify(NOTIFICATION_ID, buildNotification(state, artworkBitmap))
+        }.onFailure { error ->
+            // Some OEMs throw from notify() for transient binder failures;
+            // the next state emission rebuilds and retries anyway.
+            android.util.Log.w("MusicPlaybackService", "Notification publish failed", error)
+        }
     }
 
     private fun requestArtwork(track: PlayableTrack?) {
@@ -589,8 +640,8 @@ class MusicPlaybackService : Service() {
             expanded = true,
         )
         val style = Notification.DecoratedMediaCustomViewStyle()
-            .setMediaSession(mediaSession.sessionToken)
             .setShowActionsInCompactView(0, 1, 2)
+        mediaSession?.sessionToken?.let(style::setMediaSession)
 
         return builder
             .setSmallIcon(R.drawable.ic_launcher_logo)
@@ -719,12 +770,16 @@ class MusicPlaybackService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Music playback", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Native LastWave playback controls"
-                setShowBadge(false)
-            },
-        )
+        runCatching {
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "Music playback", NotificationManager.IMPORTANCE_LOW).apply {
+                    description = "Native LastWave playback controls"
+                    setShowBadge(false)
+                },
+            )
+        }.onFailure { error ->
+            android.util.Log.w("MusicPlaybackService", "Notification channel unavailable", error)
+        }
     }
 
     private companion object {

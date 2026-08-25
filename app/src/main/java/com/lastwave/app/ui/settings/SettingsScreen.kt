@@ -256,9 +256,11 @@ fun SettingsScreen(
     // so this always opens the picker rather than guessing; picking
     // LastWave again there if it's already on is harmless.
     fun openNotificationAccessSettings() {
-        try {
-            context.startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-        } catch (e: Exception) { }
+        val opened = startActivitySafely(
+            context,
+            Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
+        ) || startActivitySafely(context, Intent(android.provider.Settings.ACTION_SETTINGS))
+        if (!opened) viewModel.showToast("Android Settings is unavailable on this ROM")
     }
 
     // "*/*" rather than "application/json": many document providers (Drive,
@@ -619,7 +621,7 @@ fun SettingsScreen(
                         else -> "Max (Up to 24-bit / 192 kHz)"
                     }
 
-                    SettingsGroup(rowCount = 2) { index, position ->
+                    SettingsGroup(rowCount = if (misc.crossfadeEnabled) 4 else 3) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.HighQuality,
@@ -640,6 +642,25 @@ fun SettingsScreen(
                                 onClick = { showQualityDialog = true },
                                 position = position,
                             )
+                            2 -> SettingsToggleCard(
+                                icon = Icons.Filled.GraphicEq,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Crossfade",
+                                subtitle = if (misc.crossfadeEnabled) {
+                                    "Smooth transition between tracks • ${misc.crossfadeSeconds} sec"
+                                } else {
+                                    "Blend the end of a track into the next one"
+                                },
+                                checked = misc.crossfadeEnabled,
+                                onCheckedChange = viewModel::setCrossfadeEnabled,
+                                position = position,
+                            )
+                            3 -> CrossfadeDurationRow(
+                                seconds = misc.crossfadeSeconds,
+                                onSecondsChange = viewModel::setCrossfadeSeconds,
+                                position = position,
+                            )
                         }
                     }
                 }
@@ -657,7 +678,9 @@ fun SettingsScreen(
                             title = "Import Playlist from File",
                             subtitle = "M3U, M3U8, or CSV exports (Spotify, Soundiiz, Apple Music)",
                             onClick = {
-                                csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
+                                runCatching {
+                                    csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
+                                }.onFailure { viewModel.showToast("No file picker is available") }
                             },
                             position = position,
                         )
@@ -752,7 +775,10 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = "Backup",
                                 subtitle = "Save all your data to a file",
-                                onClick = { backupLauncher.launch("lastwave-backup-${System.currentTimeMillis()}.json") },
+                                onClick = {
+                                    runCatching { backupLauncher.launch("lastwave-backup-${System.currentTimeMillis()}.json") }
+                                        .onFailure { viewModel.showToast("No file picker is available") }
+                                },
                                 position = position,
                             )
                             1 -> SettingsActionCard(
@@ -761,7 +787,10 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = "Restore",
                                 subtitle = "Load a backup or playlist JSON",
-                                onClick = { restoreLauncher.launch(arrayOf("*/*")) },
+                                onClick = {
+                                    runCatching { restoreLauncher.launch(arrayOf("*/*")) }
+                                        .onFailure { viewModel.showToast("No file picker is available") }
+                                },
                                 position = position,
                             )
                         }
@@ -780,7 +809,11 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = "Updates & Support",
                                 subtitle = "Join @clashprojects on Telegram",
-                                onClick = { openTelegramChannel(context, "clashprojects") },
+                                onClick = {
+                                    if (!openTelegramChannel(context, "clashprojects")) {
+                                        viewModel.showToast("No compatible browser or Telegram app is available")
+                                    }
+                                },
                                 position = position,
                             )
                             1 -> SettingsActionCard(
@@ -789,7 +822,11 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 title = "More From Us",
                                 subtitle = "Join @MaterialYouApp on Telegram",
-                                onClick = { openTelegramChannel(context, "MaterialYouApp") },
+                                onClick = {
+                                    if (!openTelegramChannel(context, "MaterialYouApp")) {
+                                        viewModel.showToast("No compatible browser or Telegram app is available")
+                                    }
+                                },
                                 position = position,
                             )
                         }
@@ -804,8 +841,9 @@ fun SettingsScreen(
                         subtitle = "github.com/duxtami/LastWave-native",
                         onClick = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/duxtami/LastWave-native"))
-                            runCatching { context.startActivity(intent) }
-                                .onFailure { viewModel.showToast("No browser is available") }
+                            if (!startActivitySafely(context, intent)) {
+                                viewModel.showToast("No browser is available")
+                            }
                         },
                     )
                 }
@@ -1133,7 +1171,11 @@ fun SettingsScreen(
 
 private fun appVersionName(context: android.content.Context): String = try {
     context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
-} catch (e: Exception) { "1.0" }
+} catch (error: Exception) {
+    "1.0"
+} catch (error: LinkageError) {
+    "1.0"
+}
 
 /** Small tap-scale used across the row-style cards on this screen for a
  *  softer, springier press response than the plain ripple alone gives. */
@@ -1247,7 +1289,7 @@ private fun SettingsToggleCard(
  *  the extra UI here. */
 @Composable
 private fun ScrobbleThresholdRow(percent: Int, onPercentChange: (Int) -> Unit, position: GroupPosition = GroupPosition.SINGLE) {
-    var sliderValue by remember(percent) { mutableStateOf(percent.toFloat()) }
+    var sliderValue by remember(percent) { mutableStateOf(percent.coerceIn(25, 90).toFloat()) }
     val shape = groupShape(position)
     val liquidGlass = LocalLiquidGlass.current
     Card(
@@ -1279,6 +1321,62 @@ private fun ScrobbleThresholdRow(percent: Int, onPercentChange: (Int) -> Unit, p
                 steps = 12,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             )
+        }
+    }
+}
+
+@Composable
+private fun CrossfadeDurationRow(
+    seconds: Int,
+    onSecondsChange: (Int) -> Unit,
+    position: GroupPosition = GroupPosition.SINGLE,
+) {
+    var sliderValue by remember(seconds) { mutableStateOf(seconds.coerceIn(1, 10).toFloat()) }
+    val shape = groupShape(position)
+    val liquidGlass = LocalLiquidGlass.current
+
+    Card(
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .liquidGlassChrome(shape, liquidGlass),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconBadge(
+                    Icons.Filled.Tune,
+                    MaterialTheme.colorScheme.secondaryContainer,
+                    MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Crossfade duration", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                    Text(
+                        "${sliderValue.toInt()} sec blend",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Slider(
+                value = sliderValue,
+                onValueChange = { sliderValue = it },
+                onValueChangeFinished = { onSecondsChange(sliderValue.toInt()) },
+                valueRange = 1f..10f,
+                steps = 8,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("1 sec", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text("10 sec", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+            }
         }
     }
 }
@@ -1774,7 +1872,7 @@ private fun AboutCard(versionName: String) {
     }
 }
 
-private fun openTelegramChannel(context: android.content.Context, handleOrUrl: String) {
+private fun openTelegramChannel(context: android.content.Context, handleOrUrl: String): Boolean {
     val username = handleOrUrl
         .removePrefix("https://t.me/")
         .removePrefix("http://t.me/")
@@ -1785,18 +1883,24 @@ private fun openTelegramChannel(context: android.content.Context, handleOrUrl: S
     }
     val genericTgIntent = Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=$username"))
     val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/$username"))
-    try {
-        context.startActivity(tgIntent)
+    return startActivitySafely(context, tgIntent) ||
+        startActivitySafely(context, genericTgIntent) ||
+        startActivitySafely(context, webIntent)
+}
+
+/** OEM Settings/browser components are optional and occasionally broken on
+ * custom ROMs. Never let an external activity failure escape a click event. */
+private fun startActivitySafely(context: android.content.Context, intent: Intent): Boolean {
+    val safeIntent = Intent(intent).apply {
+        if (context !is android.app.Activity) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    return try {
+        context.startActivity(safeIntent)
+        true
     } catch (_: Exception) {
-        try {
-            context.startActivity(genericTgIntent)
-        } catch (_: Exception) {
-            try {
-                context.startActivity(webIntent)
-            } catch (_: Exception) {
-                // Ignore fallback
-            }
-        }
+        false
+    } catch (_: LinkageError) {
+        false
     }
 }
 
@@ -2012,7 +2116,16 @@ private fun EqualizerSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
 
-    var gains by remember(eq.gainsDb) { mutableStateOf(eq.gainsDb.toFloatArray()) }
+    var gains by remember(eq.gainsDb) {
+        mutableStateOf(
+            FloatArray(EQ_BAND_FREQS_HZ.size) { index ->
+                eq.gainsDb.getOrNull(index)
+                    ?.takeIf { it.isFinite() }
+                    ?.coerceIn(-EQ_MAX_DB, EQ_MAX_DB)
+                    ?: 0f
+            },
+        )
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -2594,7 +2707,7 @@ private fun VolumeBoostSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var sliderValue by remember(percent) { mutableStateOf(percent.toFloat()) }
+    var sliderValue by remember(percent) { mutableStateOf(percent.coerceIn(100, 200).toFloat()) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,

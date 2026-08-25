@@ -1,6 +1,5 @@
 package com.lastwave.app.data.repository
 
-import android.app.WallpaperColors
 import android.app.WallpaperManager
 import android.content.Context
 import android.os.Build
@@ -15,6 +14,7 @@ import com.lastwave.app.data.local.ThemePreferences
 import com.lastwave.app.data.local.ThemePrefs
 import com.lastwave.app.ui.theme.Md3SchemeBuilder
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -92,7 +92,21 @@ class ThemeRepository @Inject constructor(
             combine(nowPlayingTrackKey, artworkRepository.resolved) { key, resolvedMap ->
                 key?.let { resolvedMap[it] }
             }.distinctUntilChanged().collect { url ->
-                nowPlayingHex.value = if (url.isNullOrBlank()) null else paletteExtractor.extractAccentHex(url)
+                nowPlayingHex.value = if (url.isNullOrBlank()) {
+                    null
+                } else {
+                    try {
+                        paletteExtractor.extractAccentHex(url)
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (error: Exception) {
+                        android.util.Log.w("ThemeRepository", "Artwork accent unavailable", error)
+                        null
+                    } catch (error: LinkageError) {
+                        android.util.Log.w("ThemeRepository", "Artwork accent unsupported on this ROM", error)
+                        null
+                    }
+                }
             }
         }
 
@@ -133,6 +147,8 @@ class ThemeRepository @Inject constructor(
                 // Some OEM configurations restrict this — Dynamic Color
                 // simply won't live-update on those devices; the
                 // startup/toggle-time refresh above still works.
+            } catch (error: LinkageError) {
+                android.util.Log.w("ThemeRepository", "Wallpaper listener unsupported on this ROM", error)
             }
         }
     }
@@ -142,6 +158,8 @@ class ThemeRepository @Inject constructor(
             return try {
                 androidx.compose.material3.dynamicDarkColorScheme(context).primary.toHex()
             } catch (e: Exception) {
+                null
+            } catch (error: LinkageError) {
                 null
             }
         }
@@ -156,6 +174,8 @@ class ThemeRepository @Inject constructor(
                 )
             }
         } catch (e: Exception) {
+            null
+        } catch (error: LinkageError) {
             null
         }
     }
@@ -261,7 +281,17 @@ class ThemeRepository @Inject constructor(
         val key = ArtworkNormalizer.cacheKey(trackName, artistName)
         if (key == nowPlayingTrackKey.value) return
         nowPlayingTrackKey.value = key
-        applicationScope.launch { artworkRepository.resolve(trackName, artistName) }
+        applicationScope.launch {
+            try {
+                artworkRepository.resolve(trackName, artistName)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                android.util.Log.w("ThemeRepository", "Artwork resolution unavailable", error)
+            } catch (error: LinkageError) {
+                android.util.Log.w("ThemeRepository", "Artwork resolution unsupported on this ROM", error)
+            }
+        }
     }
 
     private fun Color.toHex(): String = "#%02X%02X%02X".format(

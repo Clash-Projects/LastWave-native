@@ -93,7 +93,15 @@ class TrackDownloadManager @Inject constructor(
         .callTimeout(10, TimeUnit.MINUTES)
         .build()
 
-    private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    // This class is constructed eagerly inside the Hilt graph. A system
+    // service lookup that throws or returns null on a modified ROM would
+    // otherwise fail every injection and take down app launch, so the
+    // manager is resolved lazily and tolerated as absent.
+    private val notificationManager: NotificationManager? by lazy {
+        runCatching {
+            context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        }.getOrNull()
+    }
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val activeUris = ConcurrentHashMap<String, Uri>()
     private val activeFiles = ConcurrentHashMap<String, File>()
@@ -106,7 +114,9 @@ class TrackDownloadManager @Inject constructor(
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = notificationManager ?: return
+        runCatching {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Downloads",
@@ -115,7 +125,9 @@ class TrackDownloadManager @Inject constructor(
                 description = "Download progress and status notifications"
                 setShowBadge(false)
             }
-            notificationManager.createNotificationChannel(channel)
+            manager.createNotificationChannel(channel)
+        }.onFailure { error ->
+            android.util.Log.w("TrackDownloadManager", "Notification channel unavailable", error)
         }
     }
 
@@ -140,7 +152,7 @@ class TrackDownloadManager @Inject constructor(
             runCatching { if (file.exists()) file.delete() }
         }
 
-        notificationManager.cancel(key.hashCode())
+        notificationManager?.cancel(key.hashCode())
         _downloads.update { it - key }
     }
 
@@ -476,7 +488,7 @@ class TrackDownloadManager @Inject constructor(
                 // Cancelled by user — clean up partial file
                 destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
                 destinationFile?.let { runCatching { if (it.exists()) it.delete() } }
-                notificationManager.cancel(notifId)
+                notificationManager?.cancel(notifId)
                 _downloads.update { it - key }
             } catch (error: Exception) {
                 destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
@@ -628,7 +640,7 @@ class TrackDownloadManager @Inject constructor(
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
             .build()
 
-        notificationManager.notify(notificationId, notification)
+        runCatching { notificationManager?.notify(notificationId, notification) }
     }
 
     private fun showCompletedNotification(
@@ -656,7 +668,7 @@ class TrackDownloadManager @Inject constructor(
             .setContentIntent(contentPendingIntent)
             .build()
 
-        notificationManager.notify(notificationId, notification)
+        runCatching { notificationManager?.notify(notificationId, notification) }
     }
 
     private fun showErrorNotification(
@@ -673,7 +685,7 @@ class TrackDownloadManager @Inject constructor(
             .setAutoCancel(true)
             .build()
 
-        notificationManager.notify(notificationId, notification)
+        runCatching { notificationManager?.notify(notificationId, notification) }
     }
 
     private fun writePublicCompanionFile(

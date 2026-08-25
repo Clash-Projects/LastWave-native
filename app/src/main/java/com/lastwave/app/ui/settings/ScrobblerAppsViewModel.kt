@@ -81,6 +81,19 @@ class ScrobblerAppsViewModel @Inject constructor(
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
+    private fun launchPreferenceAction(action: String, block: suspend () -> Unit) =
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                android.util.Log.e("ScrobblerApps", "Failed to $action", error)
+            } catch (error: LinkageError) {
+                android.util.Log.e("ScrobblerApps", "Unsupported platform action: $action", error)
+            }
+        }
+
     val selectedPackages: StateFlow<Set<String>> = scrobblerPreferences.settings
         .map { it.selectedPackages }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
@@ -164,16 +177,18 @@ class ScrobblerAppsViewModel @Inject constructor(
     }.getOrNull()
 
     fun toggle(packageName: String) {
-        viewModelScope.launch { scrobblerPreferences.togglePackage(packageName) }
+        launchPreferenceAction("update selected app") {
+            scrobblerPreferences.togglePackage(packageName)
+        }
     }
 
     /** "Auto-detect installed music players" — select every currently
      *  installed app LastWave recognizes as a music/streaming app in one
      *  tap, instead of the user having to find and check each one by hand. */
     fun selectAllDetectedMusicPlayers() {
-        viewModelScope.launch {
+        launchPreferenceAction("select detected music players") {
             val detected = _allApps.value.filter { it.isKnownMusicPlayer }.map { it.packageName }.toSet()
-            if (detected.isEmpty()) return@launch
+            if (detected.isEmpty()) return@launchPreferenceAction
             val current = selectedPackages.value
             scrobblerPreferences.setSelectedPackages(current + detected)
         }

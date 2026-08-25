@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.lastwave.app.data.local.readSafely
+import com.lastwave.app.data.local.recoverPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -57,36 +59,43 @@ class YtMusicPreferences @Inject constructor(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    val connection: Flow<YtConnection> = dataStore.data.map { prefs ->
-        val cookies = prefs[COOKIES_KEY]?.let { raw ->
-            runCatching { json.decodeFromString<Map<String, String>>(raw) }.getOrNull()
-        } ?: emptyMap()
-        val name = prefs[ACCOUNT_NAME_KEY] ?: ""
-        if (cookies.isEmpty()) {
-            YtConnection.DISCONNECTED
-        } else {
-            YtConnection(
-                cookies = cookies,
-                accountName = name,
-                channelHandle = prefs[CHANNEL_HANDLE_KEY],
-                photoUrl = prefs[PHOTO_URL_KEY],
-                connectedAtMillis = prefs[CONNECTED_AT_KEY] ?: 0L,
-            )
+    val connection: Flow<YtConnection> = dataStore.data
+        .recoverPreferences("YtMusicPreferences")
+        .map { prefs ->
+            val cookies = prefs.readSafely(COOKIES_KEY)?.let { raw ->
+                runCatching { json.decodeFromString<Map<String, String>>(raw) }.getOrNull()
+            } ?: emptyMap()
+            val name = prefs.readSafely(ACCOUNT_NAME_KEY) ?: ""
+            if (cookies.isEmpty()) {
+                YtConnection.DISCONNECTED
+            } else {
+                YtConnection(
+                    cookies = cookies,
+                    accountName = name,
+                    channelHandle = prefs.readSafely(CHANNEL_HANDLE_KEY),
+                    photoUrl = prefs.readSafely(PHOTO_URL_KEY),
+                    connectedAtMillis = prefs.safeLong(CONNECTED_AT_KEY),
+                )
+            }
         }
-    }
 
     /** True only while a connection exists AND the user left sync on — both
      *  must hold before any background write to the account happens. */
     suspend fun isSyncActive(): Boolean =
-        connection.first().isConnected && dataStore.data.first()[SYNC_ENABLED_KEY] == true
+        connection.first().isConnected &&
+            dataStore.data.recoverPreferences("YtMusicPreferences").first().readSafely(SYNC_ENABLED_KEY) == true
 
-    val syncEnabled: Flow<Boolean> = dataStore.data.map { it[SYNC_ENABLED_KEY] == true }
+    val syncEnabled: Flow<Boolean> = dataStore.data
+        .recoverPreferences("YtMusicPreferences")
+        .map { it.readSafely(SYNC_ENABLED_KEY) == true }
 
-    val lastSyncAt: Flow<Long> = dataStore.data.map { it[LAST_SYNC_KEY] ?: 0L }
+    val lastSyncAt: Flow<Long> = dataStore.data
+        .recoverPreferences("YtMusicPreferences")
+        .map { it.safeLong(LAST_SYNC_KEY) }
 
     suspend fun mappings(): Map<Long, YtPlaylistMapping> =
         withContext(Dispatchers.IO) {
-            dataStore.data.first()[MAPPINGS_KEY]?.let { raw ->
+            dataStore.data.recoverPreferences("YtMusicPreferences").first().readSafely(MAPPINGS_KEY)?.let { raw ->
                 runCatching {
                     json.decodeFromString<Map<String, YtPlaylistMapping>>(raw)
                         .mapNotNull { (key, mapping) ->
@@ -136,11 +145,13 @@ class YtMusicPreferences @Inject constructor(
         }
     }
 
-    val syncedPlaylistIds: Flow<Set<Long>?> = dataStore.data.map { prefs ->
-        prefs[SYNCED_PLAYLIST_IDS_KEY]?.let { raw ->
-            runCatching { json.decodeFromString<Set<Long>>(raw) }.getOrNull()
+    val syncedPlaylistIds: Flow<Set<Long>?> = dataStore.data
+        .recoverPreferences("YtMusicPreferences")
+        .map { prefs ->
+            prefs.readSafely(SYNCED_PLAYLIST_IDS_KEY)?.let { raw ->
+                runCatching { json.decodeFromString<Set<Long>>(raw) }.getOrNull()
+            }
         }
-    }
 
     suspend fun setSyncedPlaylistIds(ids: Set<Long>?) {
         dataStore.edit { prefs ->
@@ -154,7 +165,7 @@ class YtMusicPreferences @Inject constructor(
 
     suspend fun togglePlaylistSync(allPlaylistIds: List<Long>, playlistId: Long, enabled: Boolean) {
         dataStore.edit { prefs ->
-            val current = prefs[SYNCED_PLAYLIST_IDS_KEY]?.let { raw ->
+            val current = prefs.readSafely(SYNCED_PLAYLIST_IDS_KEY)?.let { raw ->
                 runCatching { json.decodeFromString<Set<Long>>(raw) }.getOrNull()
             } ?: allPlaylistIds.toSet()
             val updated = if (enabled) current + playlistId else current - playlistId
@@ -166,7 +177,8 @@ class YtMusicPreferences @Inject constructor(
         dataStore.edit { it[SYNC_ENABLED_KEY] = enabled }
     }
 
-    suspend fun lastSyncAtMillis(): Long = dataStore.data.first()[LAST_SYNC_KEY] ?: 0L
+    suspend fun lastSyncAtMillis(): Long =
+        dataStore.data.recoverPreferences("YtMusicPreferences").first().safeLong(LAST_SYNC_KEY)
 
     suspend fun setLastSyncAt(millis: Long) {
         dataStore.edit { it[LAST_SYNC_KEY] = millis }
@@ -185,6 +197,11 @@ class YtMusicPreferences @Inject constructor(
         val LAST_SYNC_KEY = longPreferencesKey("ytm_last_sync_at")
     }
 }
+
+/** Backup schema <= 7 narrowed timestamps to Int. A typed lookup through the
+ * raw map ignores that damaged representation and safely resets it to zero. */
+private fun Preferences.safeLong(key: Preferences.Key<Long>): Long =
+    readSafely(key) ?: 0L
 
 private val YtPlaylistMappingStringMapSerializer =
     MapSerializer(String.serializer(), YtPlaylistMapping.serializer())

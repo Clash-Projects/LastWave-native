@@ -97,6 +97,10 @@ class YouTubePlaylistImportViewModel @Inject constructor(
         _uiState.update { it.copy(directLink = link, errorMessage = null) }
     }
 
+    fun showError(message: String) {
+        _uiState.update { it.copy(errorMessage = message) }
+    }
+
     fun loadLibrary(force: Boolean = false) {
         if (!_uiState.value.ytConnected) return
         if (_uiState.value.isLoadingLibrary) return
@@ -289,7 +293,9 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                 )
             }
             try {
-                val (savedPlaylist, result) = importManager.importCsvStream(inputStream, filename)
+                val (savedPlaylist, result) = inputStream.use {
+                    importManager.importCsvStream(it, filename)
+                }
                 _uiState.update {
                     it.copy(
                         isCsvImporting = false,
@@ -298,12 +304,22 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                     )
                 }
                 onSuccess(savedPlaylist)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isCsvImporting = false,
                         importProgress = null,
                         errorMessage = "$fileType import failed: ${e.localizedMessage ?: e.message}",
+                    )
+                }
+            } catch (error: LinkageError) {
+                _uiState.update {
+                    it.copy(
+                        isCsvImporting = false,
+                        importProgress = null,
+                        errorMessage = "$fileType import isn't supported by this ROM",
                     )
                 }
             }

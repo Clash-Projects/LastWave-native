@@ -84,27 +84,29 @@ class EqualizerPreferences @Inject constructor(
         val GAINS_DB = stringPreferencesKey("lw_eq_gains")
     }
 
-    val settings: Flow<EqualizerSettings> = dataStore.data.map { p ->
-        val storedGains = p[Keys.GAINS_DB]?.split(',')?.mapNotNull(String::toFloatOrNull)
-            ?.takeIf { it.size == EQ_BAND_FREQS_HZ.size }
-            ?.map { gain -> if (gain.isFinite()) gain.coerceIn(-8f, 8f) else 0f }
-        // The stored name is trusted as-is: every writer of GAINS_DB also
-        // updates PRESET_NAME (Custom on manual band edits), so the pair can't
-        // drift apart. Unknown names fall back to Default.
-        val resolvedName = p[Keys.PRESET_NAME]
-            ?.let { name ->
-                if (name == EqualizerPresets.CUSTOM_NAME || EqualizerPresets.byName(name) != null) name else null
-            }
-            ?: EqualizerPresets.FLAT.name
-        val gains = storedGains
-            ?: EqualizerPresets.byName(resolvedName)?.gainsDb
-            ?: EqualizerPresets.FLAT.gainsDb
-        EqualizerSettings(
-            enabled = p[Keys.ENABLED] ?: false,
-            presetName = resolvedName,
-            gainsDb = gains,
-        )
-    }
+    val settings: Flow<EqualizerSettings> = dataStore.data
+        .recoverPreferences("EqualizerPreferences")
+        .map { p ->
+            val storedGains = p.readSafely(Keys.GAINS_DB)?.split(',')?.mapNotNull(String::toFloatOrNull)
+                ?.takeIf { it.size == EQ_BAND_FREQS_HZ.size }
+                ?.map { gain -> if (gain.isFinite()) gain.coerceIn(-8f, 8f) else 0f }
+            // The stored name is trusted as-is: every writer of GAINS_DB also
+            // updates PRESET_NAME (Custom on manual band edits), so the pair can't
+            // drift apart. Unknown names fall back to Default.
+            val resolvedName = p.readSafely(Keys.PRESET_NAME)
+                ?.let { name ->
+                    if (name == EqualizerPresets.CUSTOM_NAME || EqualizerPresets.byName(name) != null) name else null
+                }
+                ?: EqualizerPresets.FLAT.name
+            val gains = storedGains
+                ?: EqualizerPresets.byName(resolvedName)?.gainsDb
+                ?: EqualizerPresets.FLAT.gainsDb
+            EqualizerSettings(
+                enabled = p.readSafely(Keys.ENABLED) ?: false,
+                presetName = resolvedName,
+                gainsDb = gains,
+            )
+        }
 
     suspend fun setEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.ENABLED] = enabled }
@@ -121,7 +123,7 @@ class EqualizerPreferences @Inject constructor(
     suspend fun setBandGain(bandIndex: Int, gainDb: Float) {
         if (bandIndex !in EQ_BAND_FREQS_HZ.indices) return
         dataStore.edit {
-            val current = it[Keys.GAINS_DB]?.split(',')?.mapNotNull { v -> v.toFloatOrNull() }
+            val current = it.readSafely(Keys.GAINS_DB)?.split(',')?.mapNotNull { v -> v.toFloatOrNull() }
                 ?.takeIf { v -> v.size == EQ_BAND_FREQS_HZ.size }
                 ?: EqualizerPresets.FLAT.gainsDb
             val next = current.toMutableList().also { list -> list[bandIndex] = gainDb }

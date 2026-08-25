@@ -69,6 +69,13 @@ class YouTubeLoginViewModel @Inject constructor(
                         errorMessage = "Couldn't finish connecting: ${e.localizedMessage ?: e.message}",
                     )
                 }
+            } catch (error: LinkageError) {
+                _uiState.update {
+                    it.copy(
+                        verifying = false,
+                        errorMessage = "YouTube Music sign-in isn't supported by this ROM.",
+                    )
+                }
             }
         }
     }

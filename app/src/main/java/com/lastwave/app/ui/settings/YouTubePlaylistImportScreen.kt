@@ -128,12 +128,20 @@ fun YouTubePlaylistImportScreen(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         if (uri != null) {
-            val filename = queryFileName(context, uri) ?: "Imported Playlist.csv"
-            val stream = context.contentResolver.openInputStream(uri)
-            if (stream != null) {
-                viewModel.importCsv(stream, filename) { saved ->
-                    onImportSuccess(listOf(saved))
+            try {
+                val filename = queryFileName(context, uri) ?: "Imported Playlist.csv"
+                val stream = context.contentResolver.openInputStream(uri)
+                if (stream != null) {
+                    viewModel.importCsv(stream, filename) { saved ->
+                        onImportSuccess(listOf(saved))
+                    }
+                } else {
+                    viewModel.showError("The selected file could not be opened")
                 }
+            } catch (error: Exception) {
+                viewModel.showError("The selected file is unavailable on this device")
+            } catch (error: LinkageError) {
+                viewModel.showError("File import isn't supported by this ROM")
             }
         }
     }
@@ -561,7 +569,13 @@ fun YouTubePlaylistImportScreen(
                                 Button(
                                     onClick = {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
+                                        try {
+                                            csvPickerLauncher.launch(arrayOf("text/*", "text/csv", "application/csv", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "*/*"))
+                                        } catch (error: Exception) {
+                                            viewModel.showError("No file picker is available")
+                                        } catch (error: LinkageError) {
+                                            viewModel.showError("File picking isn't supported by this ROM")
+                                        }
                                     },
                                     enabled = !state.isCsvImporting,
                                     shape = CircleShape,

@@ -43,15 +43,17 @@ class ThemePreferences @Inject constructor(
         val LIQUID_GLASS = booleanPreferencesKey("lw_liquidGlass")
     }
 
-    val prefs: Flow<ThemePrefs> = dataStore.data.map { p ->
-        ThemePrefs(
-            accentColor = p[Keys.ACCENT_COLOR] ?: "#E03030",
-            accentLight = p[Keys.ACCENT_LIGHT] ?: "#FF6060",
-            accentMode = AccentMode.fromStorage(p[Keys.ACCENT_MODE]),
-            amoled = p[Keys.AMOLED] ?: false,
-            liquidGlass = p[Keys.LIQUID_GLASS] ?: false,
-        )
-    }
+    val prefs: Flow<ThemePrefs> = dataStore.data
+        .recoverPreferences("ThemePreferences")
+        .map { p ->
+            ThemePrefs(
+                accentColor = p.readSafely(Keys.ACCENT_COLOR) ?: "#E03030",
+                accentLight = p.readSafely(Keys.ACCENT_LIGHT) ?: "#FF6060",
+                accentMode = AccentMode.fromStorage(p.readSafely(Keys.ACCENT_MODE)),
+                amoled = p.readSafely(Keys.AMOLED) ?: false,
+                liquidGlass = p.readSafely(Keys.LIQUID_GLASS) ?: false,
+            )
+        }
 
     suspend fun setManualAccent(color: String, light: String) {
         dataStore.edit {

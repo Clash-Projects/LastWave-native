@@ -107,8 +107,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.Job
@@ -900,19 +903,50 @@ private fun FullPlayer(
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             if (fullScreenCoverArt) {
-                // One real cover only. Keeping it square prevents the severe
-                // portrait crop caused by stretching album art over the full
-                // display; the lower edge is merged into the control surface.
-                val embeddedArtworkSize = minOf(maxWidth, maxHeight)
+                // Full-bleed canvas, Apple-Music-style: the cover becomes the
+                // environment. A blurred, slightly oversized copy fills the
+                // whole display so the sharp square art can dissolve into a
+                // same-colored continuation instead of ending on a hard edge.
+                PlayerArtwork(
+                    track = track,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = 1.25f
+                            scaleY = 1.25f
+                            alpha = 0.9f
+                        }
+                        .blur(64.dp),
+                    corner = 0.dp,
+                    decodeSizePx = 160,
+                )
+                // The sharp cover: full width, anchored under the header,
+                // capped so tall screens keep control space. Its bottom edge
+                // alpha-fades inside an offscreen layer — the mask must not
+                // touch the backdrop beneath, only this art — melting it
+                // seamlessly into the blurred continuation.
+                val sharpArtworkSize = minOf(maxWidth, maxHeight * 0.58f)
                 PlayerArtwork(
                     track = track,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .size(embeddedArtworkSize)
+                        .size(sharpArtworkSize)
                         .graphicsLayer {
+                            compositingStrategy = CompositingStrategy.Offscreen
                             val artworkWidth = size.width.coerceAtLeast(1f)
                             alpha = (1f - abs(shownArtworkX) / (artworkWidth * 2f))
                                 .coerceIn(0.84f, 1f)
+                        }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    0.00f to Color.Black,
+                                    0.70f to Color.Black,
+                                    0.96f to Color.Transparent,
+                                ),
+                                blendMode = BlendMode.DstIn,
+                            )
                         },
                     corner = 0.dp,
                     decodeSizePx = 900,
@@ -937,13 +971,18 @@ private fun FullPlayer(
                     .fillMaxSize()
                     .background(
                         if (fullScreenCoverArt) {
+                            // Legibility-only scrim: gentle at the status
+                            // bar/header, fully clear over the artwork, then
+                            // a smooth ramp where title, seek bar and
+                            // controls sit — never a muddy mid-screen band.
                             Brush.verticalGradient(
-                                0.00f to Color.Black.copy(alpha = 0.44f),
-                                0.13f to Color.Transparent,
-                                0.34f to Color.Transparent,
-                                0.52f to Color.Black.copy(alpha = 0.74f),
-                                0.66f to Color.Black.copy(alpha = 0.96f),
-                                1.00f to Color.Black,
+                                0.00f to Color.Black.copy(alpha = 0.35f),
+                                0.10f to Color.Black.copy(alpha = 0.12f),
+                                0.22f to Color.Transparent,
+                                0.46f to Color.Transparent,
+                                0.68f to Color.Black.copy(alpha = 0.38f),
+                                0.86f to Color.Black.copy(alpha = 0.62f),
+                                1.00f to Color.Black.copy(alpha = 0.78f),
                             )
                         } else {
                             Brush.verticalGradient(

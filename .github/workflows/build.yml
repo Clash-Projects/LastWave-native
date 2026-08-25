@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build Release APK
+    name: Build Release APKs
     runs-on: ubuntu-latest
 
     steps:
@@ -26,10 +26,10 @@ jobs:
       - name: Grant Gradle execute permission
         run: chmod +x gradlew
 
-      - name: Build Release APK
+      - name: Build Release APKs (compressed + raw)
         env:
           QOBUZ_API_KEY: ${{ secrets.QOBUZ_API_KEY }}
-        run: ./gradlew assembleRelease --stacktrace
+        run: ./gradlew assembleRelease assembleRawRelease --stacktrace
 
       - name: Sign Release APK with Custom Key (Optional)
         if: ${{ env.SIGNING_KEY != '' }}
@@ -45,18 +45,44 @@ jobs:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           BUILD_TOOLS_VERSION: "34.0.0"
 
-      - name: Prepare Single Final APK
+      - name: Sign Raw APK with Custom Key (Optional)
+        if: ${{ env.SIGNING_KEY != '' }}
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app_raw
+        with:
+          releaseDirectory: app/build/outputs/apk/rawRelease
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          BUILD_TOOLS_VERSION: "34.0.0"
+
+      - name: Prepare Final APKs
         run: |
           mkdir -p final_apk
+          # Compressed release (R8 + ProGuard + shrinkResources)
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
             cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v3.2.0-release.apk
           else
             cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v3.2.0-release.apk
           fi
+          # Raw release (no minify, no shrink, no ProGuard)
+          if [ -f "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" ]; then
+            cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/LastWave-v3.2.0-raw.apk
+          else
+            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/LastWave-v3.2.0-raw.apk
+          fi
+          ls -lh final_apk/
+          echo "--- release (compressed) ---"
+          ls -lh final_apk/LastWave-v3.2.0-release.apk
+          echo "--- raw (uncompressed) ---"
+          ls -lh final_apk/LastWave-v3.2.0-raw.apk
 
-      - name: Upload Single Release APK
+      - name: Upload Release APKs
         uses: actions/upload-artifact@v4
         with:
-          name: LastWave-v3.2.0-Release-APK
-          path: final_apk/LastWave-v3.2.0-release.apk
+          name: LastWave-v3.2.0-APKs
+          path: final_apk/*.apk
           if-no-files-found: error
