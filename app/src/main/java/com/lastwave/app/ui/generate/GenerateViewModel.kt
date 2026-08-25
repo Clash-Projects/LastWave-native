@@ -210,27 +210,39 @@ class GenerateViewModel @Inject constructor(
                 } else {
                     state.trackCount
                 }
+                // Pull a wider ranked pool so saved songs can be softly
+                // deprioritized without shrinking the requested playlist.
+                val candidateCount = if (mode == GenerateMode.RECOMMENDATIONS) {
+                    targetCount
+                } else {
+                    (targetCount + maxOf(10, targetCount / 2)).coerceAtMost(60)
+                }
 
                 val raw: List<GeneratedTrack> = when (mode) {
-                    GenerateMode.TOP -> repository.fetchTopTracks(targetCount, state.period)
-                    GenerateMode.LIBRARY -> repository.fetchTopTracks(targetCount, state.period)
-                    GenerateMode.RECENT -> repository.fetchRecentTracks(targetCount)
-                    GenerateMode.SIMILAR_TRACKS -> repository.fetchSimilarTracks(state.seedTrackName, state.seedArtistName, targetCount)
-                    GenerateMode.SIMILAR_ARTISTS -> repository.fetchSimilarArtistTracks(state.seedArtistQuery, targetCount)
-                    GenerateMode.TAG -> repository.fetchTagTracks(state.tagInput, targetCount)
-                    GenerateMode.MIX -> repository.fetchMix(targetCount, onProgress)
+                    GenerateMode.TOP -> repository.fetchTopTracks(candidateCount, state.period)
+                    GenerateMode.LIBRARY -> repository.fetchTopTracks(candidateCount, state.period)
+                    GenerateMode.RECENT -> repository.fetchRecentTracks(candidateCount)
+                    GenerateMode.SIMILAR_TRACKS -> repository.fetchSimilarTracks(state.seedTrackName, state.seedArtistName, candidateCount)
+                    GenerateMode.SIMILAR_ARTISTS -> repository.fetchSimilarArtistTracks(state.seedArtistQuery, candidateCount)
+                    GenerateMode.TAG -> repository.fetchTagTracks(state.tagInput, candidateCount)
+                    GenerateMode.MIX -> repository.fetchMix(candidateCount, onProgress)
                     GenerateMode.RECOMMENDATIONS -> repository.fetchRecommendations(targetCount, onProgress)
                 }
 
                 onProgress("Pre-checking availability\u2026")
-                val finalTracks = if (mode == GenerateMode.RECOMMENDATIONS) {
+                val preparedTracks = if (mode == GenerateMode.RECOMMENDATIONS) {
                     // RecommendationEngine already applies its own diversity
                     // stages. Do not discard fresh tracks afterward via the
                     // generic per-artist cap and accidentally save under 35.
-                    repository.deduplicate(raw).take(targetCount)
+                    repository.deduplicate(raw)
                 } else {
-                    repository.precheck(raw).take(targetCount)
+                    repository.precheck(raw)
                 }
+                val finalTracks = repository.preferPlaylistFreshness(
+                    tracks = preparedTracks,
+                    limit = targetCount,
+                    savedKeys = repository.savedPlaylistTrackKeys(),
+                )
                 if (finalTracks.isEmpty()) {
                     val message = if (mode == GenerateMode.SIMILAR_TRACKS && state.seedTrackName.isNotBlank()) {
                         "No similar songs found to mix for \"${state.seedTrackName}\"."

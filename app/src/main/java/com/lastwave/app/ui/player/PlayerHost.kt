@@ -185,9 +185,10 @@ class PlayerViewModel @Inject constructor(
     val chromeState = player.chromeState
     val progressState = player.progressState
     val settings: StateFlow<com.lastwave.app.data.local.MiscSettings> = settingsPreferences.settings
-        .stateIn(viewModelScope, SharingStarted.Eagerly, com.lastwave.app.data.local.MiscSettings())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), com.lastwave.app.data.local.MiscSettings())
     private val _customPlaylists = MutableStateFlow<List<SavedPlaylist>>(emptyList())
     val customPlaylists = _customPlaylists.asStateFlow()
+    private var customPlaylistsLoaded = false
 
     fun openArtist(name: String, browseId: String? = null) {
         navigator.openArtist(name, browseId)
@@ -204,8 +205,9 @@ class PlayerViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            refreshCustomPlaylists()
-            playlistRepository.changes.collect { refreshCustomPlaylists() }
+            playlistRepository.changes.collect {
+                if (customPlaylistsLoaded) refreshCustomPlaylists()
+            }
         }
         viewModelScope.launch {
             player.chromeState.collect { playerState ->
@@ -225,6 +227,12 @@ class PlayerViewModel @Inject constructor(
 
     private suspend fun refreshCustomPlaylists() {
         _customPlaylists.value = playlistRepository.getAll().filter { it.mode == "custom" }
+    }
+
+    fun prepareCustomPlaylists() {
+        if (customPlaylistsLoaded) return
+        customPlaylistsLoaded = true
+        viewModelScope.launch { refreshCustomPlaylists() }
     }
 
     fun loadLyrics(track: PlayableTrack, forceRefresh: Boolean = false) {
@@ -288,7 +296,12 @@ fun PlayerHost(
     var expanded by rememberSaveable { mutableStateOf(false) }
     var currentTab by rememberSaveable { mutableStateOf(FullPlayerTab.NOW_PLAYING) }
     var playlistTrack by remember { mutableStateOf<PlayableTrack?>(null) }
-    val requestAddToPlaylist = remember { { track: PlayableTrack -> playlistTrack = track } }
+    val requestAddToPlaylist = remember(viewModel) {
+        { track: PlayableTrack ->
+            viewModel.prepareCustomPlaylists()
+            playlistTrack = track
+        }
+    }
     val trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" }
     LaunchedEffect(trackKey) {
         if (trackKey == null) {
@@ -626,19 +639,19 @@ fun PlayingWaveBars(
     containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
 ) {
     val transition = rememberInfiniteTransition(label = "miniArtworkWave")
-    val first by transition.animateFloat(
+    val first = transition.animateFloat(
         initialValue = 0.35f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(420), RepeatMode.Reverse),
         label = "miniWaveFirst",
     )
-    val second by transition.animateFloat(
+    val second = transition.animateFloat(
         initialValue = 1f,
         targetValue = 0.4f,
         animationSpec = infiniteRepeatable(tween(560), RepeatMode.Reverse),
         label = "miniWaveSecond",
     )
-    val third by transition.animateFloat(
+    val third = transition.animateFloat(
         initialValue = 0.5f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(tween(480), RepeatMode.Reverse),
@@ -656,15 +669,36 @@ fun PlayingWaveBars(
             horizontalArrangement = Arrangement.spacedBy(2.5.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
-            listOf(first, second, third).forEach { level ->
-                Box(
-                    Modifier
-                        .width(2.5.dp)
-                        .height((4f + level * 10f).dp)
-                        .clip(CircleShape)
-                        .background(waveColor),
-                )
-            }
+            Box(
+                Modifier
+                    .width(2.5.dp)
+                    .height(14.dp)
+                    .graphicsLayer {
+                        scaleY = (4f + first.value * 10f) / 14f
+                        transformOrigin = TransformOrigin(0.5f, 1f)
+                    }
+                    .background(waveColor, CircleShape),
+            )
+            Box(
+                Modifier
+                    .width(2.5.dp)
+                    .height(14.dp)
+                    .graphicsLayer {
+                        scaleY = (4f + second.value * 10f) / 14f
+                        transformOrigin = TransformOrigin(0.5f, 1f)
+                    }
+                    .background(waveColor, CircleShape),
+            )
+            Box(
+                Modifier
+                    .width(2.5.dp)
+                    .height(14.dp)
+                    .graphicsLayer {
+                        scaleY = (4f + third.value * 10f) / 14f
+                        transformOrigin = TransformOrigin(0.5f, 1f)
+                    }
+                    .background(waveColor, CircleShape),
+            )
         }
     }
 }
@@ -854,7 +888,7 @@ private fun FullPlayer(
     }
 
     Surface(
-        color = MaterialTheme.colorScheme.surface,
+        color = if (fullScreenCoverArt) Color.Black else MaterialTheme.colorScheme.surface,
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
@@ -864,31 +898,52 @@ private fun FullPlayer(
             }
             .playerVerticalSwipe(enabled = currentTab == FullPlayerTab.NOW_PLAYING),
     ) {
-        Box(Modifier.fillMaxSize()) {
-            PlayerArtwork(
-                track = track,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        alpha = if (fullScreenCoverArt) 0.88f else 0.24f
-                        scaleX = if (fullScreenCoverArt) 1.06f else 1.25f
-                        scaleY = if (fullScreenCoverArt) 1.06f else 1.25f
-                    }
-                    .blur(if (fullScreenCoverArt) 0.dp else 72.dp),
-                corner = 0.dp,
-                decodeSizePx = if (fullScreenCoverArt) 800 else 160,
-            )
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            if (fullScreenCoverArt) {
+                // One real cover only. Keeping it square prevents the severe
+                // portrait crop caused by stretching album art over the full
+                // display; the lower edge is merged into the control surface.
+                val embeddedArtworkSize = minOf(maxWidth, maxHeight)
+                PlayerArtwork(
+                    track = track,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .size(embeddedArtworkSize)
+                        .graphicsLayer {
+                            val artworkWidth = size.width.coerceAtLeast(1f)
+                            alpha = (1f - abs(shownArtworkX) / (artworkWidth * 2f))
+                                .coerceIn(0.84f, 1f)
+                        },
+                    corner = 0.dp,
+                    decodeSizePx = 900,
+                )
+            } else {
+                PlayerArtwork(
+                    track = track,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = 0.24f
+                            scaleX = 1.25f
+                            scaleY = 1.25f
+                        }
+                        .blur(72.dp),
+                    corner = 0.dp,
+                    decodeSizePx = 160,
+                )
+            }
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         if (fullScreenCoverArt) {
                             Brush.verticalGradient(
-                                listOf(
-                                    Color.Black.copy(alpha = 0.35f),
-                                    Color.Black.copy(alpha = 0.58f),
-                                    Color.Black.copy(alpha = 0.88f),
-                                ),
+                                0.00f to Color.Black.copy(alpha = 0.44f),
+                                0.13f to Color.Transparent,
+                                0.34f to Color.Transparent,
+                                0.52f to Color.Black.copy(alpha = 0.74f),
+                                0.66f to Color.Black.copy(alpha = 0.96f),
+                                1.00f to Color.Black,
                             )
                         } else {
                             Brush.verticalGradient(
@@ -925,12 +980,16 @@ private fun FullPlayer(
                             .align(Alignment.CenterStart)
                             .size(44.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                            .background(
+                                if (fullScreenCoverArt) Color.Black.copy(alpha = 0.30f)
+                                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
                     ) {
                         Icon(
                             if (currentTab != FullPlayerTab.NOW_PLAYING) Icons.Filled.ArrowBack else Icons.Filled.ExpandMore,
                             if (currentTab != FullPlayerTab.NOW_PLAYING) "Back to player" else "Minimize player",
                             modifier = Modifier.size(26.dp),
+                            tint = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     Column(
@@ -944,7 +1003,7 @@ private fun FullPlayer(
                                 FullPlayerTab.QUEUE -> "PLAYING QUEUE"
                             },
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
@@ -954,7 +1013,8 @@ private fun FullPlayer(
                                 state.sourceLabel.takeIf { it.isNotBlank() } ?: "LastWave"
                             },
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (fullScreenCoverArt) Color.White.copy(alpha = 0.72f)
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -965,13 +1025,16 @@ private fun FullPlayer(
                             .align(Alignment.CenterEnd)
                             .size(44.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                            .background(
+                                if (fullScreenCoverArt) Color.Black.copy(alpha = 0.30f)
+                                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
                     ) {
                         Icon(
                             Icons.Filled.MoreVert,
                             "Song options",
                             modifier = Modifier.size(22.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -1019,14 +1082,17 @@ private fun FullPlayer(
                                         .coerceAtMost(370.dp)
                                     Surface(
                                         shape = RoundedCornerShape(32.dp),
-                                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        tonalElevation = 8.dp,
-                                        shadowElevation = 18.dp,
+                                        color = if (fullScreenCoverArt) Color.Transparent
+                                        else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        tonalElevation = if (fullScreenCoverArt) 0.dp else 8.dp,
+                                        shadowElevation = if (fullScreenCoverArt) 0.dp else 18.dp,
                                         modifier = Modifier
                                             .size(artworkSize)
                                             .graphicsLayer {
-                                                translationX = shownArtworkX
-                                                rotationZ = shownArtworkX / 80f
+                                                if (!fullScreenCoverArt) {
+                                                    translationX = shownArtworkX
+                                                    rotationZ = shownArtworkX / 80f
+                                                }
                                             }
                                             .pointerInput(track.videoId, track.title) {
                                                 awaitEachGesture {
@@ -1109,7 +1175,9 @@ private fun FullPlayer(
                                             },
                                     ) {
                                         Box(Modifier.fillMaxSize()) {
-                                            PlayerArtwork(track, Modifier.fillMaxSize(), 32.dp)
+                                            if (!fullScreenCoverArt) {
+                                                PlayerArtwork(track, Modifier.fillMaxSize(), 32.dp)
+                                            }
 
                                             // Dedicated Left Rewind Overlay (strictly anchored to left half)
                                             androidx.compose.animation.AnimatedVisibility(
@@ -1225,26 +1293,39 @@ private fun FullPlayer(
                                         val splitArtists = remember(track.artist) {
                                             com.lastwave.app.util.ArtistHelper.splitArtists(track.artist)
                                         }
-                                        FlowRow(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                                        ) {
-                                            splitArtists.forEach { artName ->
-                                                Surface(
-                                                    onClick = { onOpenArtist(artName) },
-                                                    shape = RoundedCornerShape(10.dp),
-                                                    color = if (fullScreenCoverArt) Color.White.copy(alpha = 0.20f)
-                                                    else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                                                ) {
-                                                    Text(
-                                                        artName,
-                                                        style = MaterialTheme.typography.titleMedium,
-                                                        color = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.primary,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                                    )
+                                        if (fullScreenCoverArt) {
+                                            Text(
+                                                track.artist,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = Color.White.copy(alpha = 0.76f),
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.clickable {
+                                                    splitArtists.firstOrNull()?.let(onOpenArtist)
+                                                },
+                                            )
+                                        } else {
+                                            FlowRow(
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                            ) {
+                                                splitArtists.forEach { artName ->
+                                                    Surface(
+                                                        onClick = { onOpenArtist(artName) },
+                                                        shape = RoundedCornerShape(10.dp),
+                                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                                                    ) {
+                                                        Text(
+                                                            artName,
+                                                            style = MaterialTheme.typography.titleMedium,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -1256,10 +1337,10 @@ private fun FullPlayer(
                                     Surface(
                                         onClick = { onTabChange(FullPlayerTab.LYRICS) },
                                         shape = RoundedCornerShape(18.dp),
-                                        color = if (fullScreenCoverArt) Color.White.copy(alpha = 0.20f)
+                                        color = if (fullScreenCoverArt) Color.Black.copy(alpha = 0.30f)
                                         else MaterialTheme.colorScheme.surfaceContainerHigh,
                                         contentColor = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.primary,
-                                        tonalElevation = 2.dp,
+                                        tonalElevation = if (fullScreenCoverArt) 0.dp else 2.dp,
                                         modifier = Modifier.size(50.dp),
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
@@ -1382,7 +1463,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::previous,
             shape = RoundedCornerShape(22.dp),
-            color = if (isTranslucent) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.secondaryContainer,
+            color = if (isTranslucent) Color.Black.copy(alpha = 0.28f) else MaterialTheme.colorScheme.secondaryContainer,
             contentColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
             modifier = Modifier.size(58.dp),
         ) {
@@ -1414,7 +1495,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::next,
             shape = RoundedCornerShape(22.dp),
-            color = if (isTranslucent) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.secondaryContainer,
+            color = if (isTranslucent) Color.Black.copy(alpha = 0.28f) else MaterialTheme.colorScheme.secondaryContainer,
             contentColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
             modifier = Modifier.size(58.dp),
         ) {
@@ -1436,8 +1517,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             onClick = player::toggleShuffle,
             shape = RoundedCornerShape(18.dp),
             color = when {
-                isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.38f)
-                isTranslucent -> Color.White.copy(alpha = 0.18f)
+                isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.24f)
+                isTranslucent -> Color.Black.copy(alpha = 0.26f)
                 state.shuffleEnabled -> MaterialTheme.colorScheme.primaryContainer
                 else -> MaterialTheme.colorScheme.surfaceContainerHigh
             },
@@ -1454,7 +1535,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         }
         Surface(
             shape = RoundedCornerShape(18.dp),
-            color = if (isTranslucent) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = if (isTranslucent) Color.Black.copy(alpha = 0.26f) else MaterialTheme.colorScheme.surfaceContainerHigh,
             contentColor = if (isTranslucent) Color.White else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1.3f).height(48.dp),
         ) {
@@ -1484,8 +1565,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             onClick = player::cycleRepeatMode,
             shape = RoundedCornerShape(18.dp),
             color = when {
-                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.38f)
-                isTranslucent -> Color.White.copy(alpha = 0.18f)
+                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.24f)
+                isTranslucent -> Color.Black.copy(alpha = 0.26f)
                 state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.primaryContainer
                 else -> MaterialTheme.colorScheme.surfaceContainerHigh
             },

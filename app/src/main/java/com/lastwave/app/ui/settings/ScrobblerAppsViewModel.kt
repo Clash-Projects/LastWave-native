@@ -2,7 +2,6 @@ package com.lastwave.app.ui.settings
 
 import android.app.Application
 import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
@@ -13,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.local.ScrobblerPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -83,7 +83,7 @@ class ScrobblerAppsViewModel @Inject constructor(
 
     val selectedPackages: StateFlow<Set<String>> = scrobblerPreferences.settings
         .map { it.selectedPackages }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     /** Apps filtered by the current search query. Selected apps are always
      *  grouped together at the top (regardless of whether they were
@@ -99,7 +99,7 @@ class ScrobblerAppsViewModel @Inject constructor(
                 .thenByDescending { it.isKnownMusicPlayer }
                 .thenBy { it.label.lowercase() },
         )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     init {
         loadApps()
@@ -111,29 +111,39 @@ class ScrobblerAppsViewModel @Inject constructor(
         viewModelScope.launch {
             _loading.value = true
             val list = withContext(Dispatchers.IO) {
-                val pm = application.packageManager
+                try {
+                    val pm = application.packageManager
                 // Only apps a user would plausibly pick (has a launcher
                 // entry, i.e. shows up in their app drawer, OR isn't a
                 // system package) — filters out the hundreds of
                 // system/background packages that would otherwise flood
                 // this list with things that could never actually have a
                 // "now playing" media session.
-                pm.getInstalledApplications(PackageManager.GET_META_DATA)
-                    .asSequence()
-                    .filter { it.packageName != application.packageName }
-                    .filter { pm.getLaunchIntentForPackage(it.packageName) != null || (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0 }
-                    .distinctBy { it.packageName }
-                    .map { info ->
-                        val icon = runCatching { pm.getApplicationIcon(info) }.getOrNull()?.let { drawableToBitmap(it) }
-                        InstalledAppEntry(
-                            packageName = info.packageName,
-                            label = runCatching { pm.getApplicationLabel(info).toString() }.getOrDefault(info.packageName),
-                            icon = icon,
-                            isKnownMusicPlayer = info.packageName in KNOWN_MUSIC_PACKAGES,
-                        )
-                    }
-                    .sortedBy { it.label.lowercase() }
-                    .toList()
+                    pm.getInstalledApplications(0)
+                        .asSequence()
+                        .filter { it.packageName != application.packageName }
+                        .filter {
+                            runCatching { pm.getLaunchIntentForPackage(it.packageName) }.getOrNull() != null ||
+                                (it.flags and ApplicationInfo.FLAG_SYSTEM) == 0
+                        }
+                        .distinctBy { it.packageName }
+                        .map { info ->
+                            val icon = runCatching { pm.getApplicationIcon(info) }.getOrNull()?.let { drawableToBitmap(it) }
+                            InstalledAppEntry(
+                                packageName = info.packageName,
+                                label = runCatching { pm.getApplicationLabel(info).toString() }.getOrDefault(info.packageName),
+                                icon = icon,
+                                isKnownMusicPlayer = info.packageName in KNOWN_MUSIC_PACKAGES,
+                            )
+                        }
+                        .sortedBy { it.label.lowercase() }
+                        .toList()
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (error: Throwable) {
+                    android.util.Log.e("ScrobblerApps", "Could not enumerate installed apps", error)
+                    emptyList()
+                }
             }
             _allApps.value = list
             _loading.value = false

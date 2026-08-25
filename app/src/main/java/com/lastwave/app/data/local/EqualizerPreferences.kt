@@ -87,6 +87,7 @@ class EqualizerPreferences @Inject constructor(
     val settings: Flow<EqualizerSettings> = dataStore.data.map { p ->
         val storedGains = p[Keys.GAINS_DB]?.split(',')?.mapNotNull(String::toFloatOrNull)
             ?.takeIf { it.size == EQ_BAND_FREQS_HZ.size }
+            ?.map { gain -> if (gain.isFinite()) gain.coerceIn(-8f, 8f) else 0f }
         // The stored name is trusted as-is: every writer of GAINS_DB also
         // updates PRESET_NAME (Custom on manual band edits), so the pair can't
         // drift apart. Unknown names fall back to Default.
@@ -134,5 +135,7 @@ class EqualizerPreferences @Inject constructor(
     }
 
     private fun encodeGains(gains: List<Float>): String =
-        gains.joinToString(",") { "%.1f".format(it) }
+        gains.joinToString(",") { gain ->
+            "%.1f".format(if (gain.isFinite()) gain.coerceIn(-8f, 8f) else 0f)
+        }
 }

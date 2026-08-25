@@ -2,10 +2,13 @@ package com.lastwave.app.data.search
 
 import androidx.compose.runtime.Immutable
 import com.lastwave.app.data.generate.GenerateJson
+import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.local.SessionPreferences
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubeMusicTrack
+import com.lastwave.app.data.network.LastFmAppCredentials
 import com.lastwave.app.data.network.LastFmApiService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -110,6 +113,80 @@ class SearchRepository @Inject constructor(
     suspend fun songsFor(item: SearchResultItem): List<YouTubeMusicTrack> =
         item.entityId?.takeIf(String::isNotBlank)?.let { innerTube.browseSongs(it) }.orEmpty()
 
+    /**
+     * Builds playback continuation for a selected search result without
+     * changing the visible search results. Similar tracks come from Last.fm;
+     * an artist search is only a fallback when that graph is unavailable.
+     * Titles are deliberately unique so covers/remakes of the searched song
+     * cannot fill the queue.
+     */
+    suspend fun similarSongsFor(item: SearchResultItem, limit: Int = 25): List<GeneratedTrack> =
+        withContext(Dispatchers.IO) {
+            val seedTitle = item.name.trim()
+            val seedArtist = item.artist.orEmpty().trim()
+            if (seedTitle.isBlank() || seedArtist.isBlank()) return@withContext emptyList()
+
+            val similar = try {
+                val apiKey = sessionPreferences.session.first().apiKey.ifBlank { LastFmAppCredentials.API_KEY }
+                val response = api.get(
+                    mapOf(
+                        "method" to "track.getsimilar",
+                        "track" to seedTitle,
+                        "artist" to seedArtist,
+                        "limit" to (limit * 3).coerceAtMost(100).toString(),
+                        "api_key" to apiKey,
+                        "format" to "json",
+                        "autocorrect" to "1",
+                    ),
+                )
+                val body = response.body()?.string()
+                if (!response.isSuccessful || body.isNullOrBlank()) {
+                    emptyList()
+                } else {
+                    val root = json.parseToJsonElement(body).jsonObject
+                    GenerateJson.normalise(root["similartracks"]?.jsonObject?.get("track"))
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            val candidates = if (similar.isNotEmpty()) {
+                similar
+            } else {
+                try {
+                    innerTube.searchSongs("$seedArtist songs", limit = limit * 2).map { track ->
+                        GeneratedTrack(
+                            name = track.title,
+                            artist = track.artist,
+                            artworkUrl = track.artworkUrl,
+                            album = track.album,
+                        )
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    emptyList()
+                }
+            }
+
+            val seedTitleKey = queueTitleKey(seedTitle)
+            val seenTitles = mutableSetOf(seedTitleKey)
+            val artistCounts = mutableMapOf<String, Int>()
+            candidates.filter { candidate ->
+                val titleKey = queueTitleKey(candidate.name)
+                val artistKey = candidate.artist.trim().lowercase()
+                val artistCount = artistCounts[artistKey] ?: 0
+                val keep = titleKey.isNotBlank() &&
+                    candidate.artist.isNotBlank() &&
+                    artistCount < 3 &&
+                    seenTitles.add(titleKey)
+                if (keep) artistCounts[artistKey] = artistCount + 1
+                keep
+            }.take(limit)
+        }
+
     private suspend fun lookupUser(key: String, username: String): List<SearchResultItem> {
         val response = api.get(
             mapOf(
@@ -139,5 +216,18 @@ class SearchRepository @Inject constructor(
                 artworkUrl = avatarUrl,
             ),
         )
+    }
+
+    private fun queueTitleKey(title: String): String = title
+        .lowercase()
+        .replace(TITLE_VARIANT, " ")
+        .replace(NON_TITLE_CHARACTER, "")
+
+    private companion object {
+        val TITLE_VARIANT = Regex(
+            """\s*[\[(][^)\]]*\b(?:official|video|audio|lyrics?|cover|karaoke|remaster(?:ed)?|live|version|edit|mix|slowed|reverb)[^)\]]*[])]""",
+            RegexOption.IGNORE_CASE,
+        )
+        val NON_TITLE_CHARACTER = Regex("[^\\p{L}\\p{N}]+")
     }
 }

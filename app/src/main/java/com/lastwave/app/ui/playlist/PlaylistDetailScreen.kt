@@ -745,7 +745,12 @@ fun PlaylistDetailScreen(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Regenerate playlist") },
+                            text = {
+                                Text(
+                                    if (state.regeneratingId == playlistId) "Regenerating…"
+                                    else "Regenerate playlist",
+                                )
+                            },
                             leadingIcon = {
                                 Icon(
                                     Icons.Filled.Refresh,
@@ -753,6 +758,7 @@ fun PlaylistDetailScreen(
                                     tint = MaterialTheme.colorScheme.primary,
                                 )
                             },
+                            enabled = state.regeneratingId == null,
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 viewModel.regenerate(playlistId) { newId ->
@@ -823,6 +829,38 @@ fun PlaylistDetailScreen(
             }
         }
     }
+
+        AnimatedVisibility(
+            visible = state.regeneratingId == playlistId,
+            enter = fadeIn() + scaleIn(),
+            exit = fadeOut() + scaleOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = FloatingNavDefaults.contentBottomPadding() + 12.dp),
+        ) {
+            Surface(
+                shape = ExpressivePillShape,
+                color = MaterialTheme.colorScheme.inverseSurface,
+                shadowElevation = 8.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator(
+                        size = 20.dp,
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        strokeWidth = 2.dp,
+                    )
+                    Text(
+                        "Building a fresh playlist…",
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
 
         // Toasts
         state.toastMessage?.let { msg ->

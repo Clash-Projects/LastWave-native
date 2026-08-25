@@ -44,7 +44,12 @@ class NativeProcessingAudioSink(
         getFormatSupport(format) != AudioSink.SINK_FORMAT_UNSUPPORTED
 
     override fun getFormatSupport(format: Format): Int {
-        if (canProcess(format)) return delegate.getFormatSupport(asFloatFormat(format))
+        if (!processor.isAvailable) return delegate.getFormatSupport(format)
+        if (canProcess(format)) {
+            val floatSupport = delegate.getFormatSupport(asFloatFormat(format))
+            if (floatSupport != AudioSink.SINK_FORMAT_UNSUPPORTED) return floatSupport
+            return delegate.getFormatSupport(format)
+        }
         // Reporting compressed formats unsupported here forces Media3 to
         // decode them; otherwise device passthrough would bypass native DSP.
         return if (format.sampleMimeType == MimeTypes.AUDIO_RAW) {
@@ -62,16 +67,32 @@ class NativeProcessingAudioSink(
         clearPending()
         clearEndOfStream()
         processor.reset()
-        processingActive = canProcess(format)
-        if (processingActive) {
+        val floatFormat = asFloatFormat(format)
+        val shouldProcess = processor.isAvailable &&
+            canProcess(format) &&
+            delegate.getFormatSupport(floatFormat) != AudioSink.SINK_FORMAT_UNSUPPORTED
+        if (shouldProcess) {
             outputChannelCount = format.channelCount
             processor.setTrimFrameCount(format.encoderDelay, format.encoderPadding)
-            processor.configure(AudioProcessor.AudioFormat(format))
-            processor.flush()
-            delegate.configure(asFloatFormat(format), 0, outputChannels)
-        } else {
-            delegate.configure(format, specifiedBufferSize, outputChannels)
+            processingActive = try {
+                processor.configure(AudioProcessor.AudioFormat(format))
+                processor.flush()
+                true
+            } catch (error: RuntimeException) {
+                android.util.Log.e(TAG, "Native DSP configuration failed; using platform audio", error)
+                processor.reset()
+                false
+            } catch (error: LinkageError) {
+                android.util.Log.e(TAG, "Native DSP unavailable; using platform audio", error)
+                processor.reset()
+                false
+            }
         }
+        if (processingActive) {
+            delegate.configure(floatFormat, 0, outputChannels)
+            return
+        }
+        delegate.configure(format, specifiedBufferSize, outputChannels)
     }
 
     override fun play() = delegate.play()
@@ -232,6 +253,7 @@ class NativeProcessingAudioSink(
     }
 
     private companion object {
+        const val TAG = "NativeAudioSink"
         const val MICROS_PER_SECOND = 1_000_000L
         val SUPPORTED_ENCODINGS = setOf(
             C.ENCODING_PCM_16BIT,

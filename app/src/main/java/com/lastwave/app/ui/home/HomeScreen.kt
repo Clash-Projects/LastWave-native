@@ -88,7 +88,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -150,7 +150,7 @@ fun HomeScreen(
     onOpenFriends: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(viewModel) {
@@ -443,8 +443,9 @@ private fun HeaderRow(
 
 @Composable
 private fun LiveListenTimer(viewModel: HomeViewModel) {
-    val uiState by viewModel.uiState.collectAsState()
-    val totalSeconds = (uiState.stats?.timerBaseSeconds ?: 0) + uiState.listenElapsedSeconds.toLong()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val listenElapsedSeconds by viewModel.listenElapsedSeconds.collectAsStateWithLifecycle()
+    val totalSeconds = (uiState.stats?.timerBaseSeconds ?: 0) + listenElapsedSeconds.toLong()
     val isPlaying = uiState.nowPlaying != null
 
     Surface(

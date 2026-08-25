@@ -33,7 +33,7 @@ class AlbumViewModel @Inject constructor(
 ) : ViewModel() {
 
     val settings: StateFlow<MiscSettings> = settingsPreferences.settings
-        .stateIn(viewModelScope, SharingStarted.Eagerly, MiscSettings())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MiscSettings())
 
     private val _uiState = MutableStateFlow<AlbumUiState>(AlbumUiState.Loading)
     val uiState: StateFlow<AlbumUiState> = _uiState.asStateFlow()

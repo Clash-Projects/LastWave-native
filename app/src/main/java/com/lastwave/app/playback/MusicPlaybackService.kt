@@ -43,9 +43,27 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+private val TOPIC_SUFFIX_REGEX = Regex("""(?i)\s*-\s*topic$""")
+private val VEVO_SUFFIX_REGEX = Regex("""(?i)\s*vevo$""")
+private val TITLE_SUFFIX_REGEX = Regex(
+    """(?i)\s*[\(\[](official\s*(music\s*)?video|official\s*audio|visualizer|audio|lyric\s*video|lyrics|hd|4k|remastered|hq)[\)\]]""",
+)
+
+private data class CleanTrackMetadata(val title: String, val artist: String)
+
+private fun sameServiceState(previous: MusicPlayerState, current: MusicPlayerState): Boolean =
+    previous.current == current.current &&
+        previous.isPlaying == current.isPlaying &&
+        previous.isBuffering == current.isBuffering &&
+        previous.durationMs == current.durationMs &&
+        previous.speed == current.speed &&
+        (previous.isPlaying || current.isPlaying || previous.positionMs == current.positionMs)
 
 /**
  * Foreground playback host and standard Android MediaSession bridge. It
@@ -86,6 +104,9 @@ class MusicPlaybackService : Service() {
     private var retryCount = 0
     private var pendingPreviousTrack: PlayableTrack? = null
     private var pendingPreviousStartedAt: Long = 0L
+    private var cleanedSourceTitle = ""
+    private var cleanedSourceArtist = ""
+    private var cleanedMetadata = CleanTrackMetadata("", "")
     private var artworkJob: Job? = null
     private var artworkUrl: String? = null
     private var artworkBitmap: Bitmap? = null
@@ -130,13 +151,20 @@ class MusicPlaybackService : Service() {
             }
         }
         scope.launch {
-            musicPlayer.state.collectLatest { state ->
-                requestArtwork(state.current)
-                publishSystemState(state)
-                publishNotification(state)
-                publishWidget(state)
-                detectTransition(state)
-            }
+            musicPlayer.state
+                // Position/buffer ticks arrive about 16 times per second for
+                // the seek bar. Notification, widget and MediaSession chrome
+                // do not need that cadence; Android extrapolates a playing
+                // position from the published speed. Filter those ticks before
+                // doing string work, artwork lookup and binder-state checks.
+                .distinctUntilChanged(::sameServiceState)
+                .collect { state ->
+                    requestArtwork(state.current)
+                    publishSystemState(state)
+                    publishNotification(state)
+                    publishWidget(state)
+                    detectTransition(state)
+                }
         }
         scope.launch {
             artworkRepository.resolved.collect { map ->
@@ -178,15 +206,21 @@ class MusicPlaybackService : Service() {
         super.onDestroy()
     }
 
-    private fun cleanTrackMetadata(title: String, artist: String): Pair<String, String> {
+    private fun cleanTrackMetadata(title: String, artist: String): CleanTrackMetadata {
+        if (title == cleanedSourceTitle && artist == cleanedSourceArtist) return cleanedMetadata
         val cleanArtist = artist.trim()
-            .replace(Regex("""(?i)\s*-\s*topic$"""), "")
-            .replace(Regex("""(?i)\s*vevo$"""), "")
+            .replace(TOPIC_SUFFIX_REGEX, "")
+            .replace(VEVO_SUFFIX_REGEX, "")
             .trim()
         val cleanTitle = title.trim()
-            .replace(Regex("""(?i)\s*[\(\[](official\s*(music\s*)?video|official\s*audio|visualizer|audio|lyric\s*video|lyrics|hd|4k|remastered|hq)[\)\]]"""), "")
+            .replace(TITLE_SUFFIX_REGEX, "")
             .trim()
-        return Pair(cleanTitle.ifBlank { title }, cleanArtist.ifBlank { artist })
+        cleanedSourceTitle = title
+        cleanedSourceArtist = artist
+        return CleanTrackMetadata(
+            cleanTitle.ifBlank { title },
+            cleanArtist.ifBlank { artist },
+        ).also { cleanedMetadata = it }
     }
 
     private fun detectTransition(state: MusicPlayerState) {

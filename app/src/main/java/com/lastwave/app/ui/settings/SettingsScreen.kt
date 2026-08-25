@@ -94,7 +94,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -116,6 +115,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -227,20 +227,20 @@ fun SettingsScreen(
     onOpenYouTubeLogin: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val session by viewModel.session.collectAsState()
-    val theme by viewModel.theme.collectAsState()
-    val misc by viewModel.misc.collectAsState()
-    val scrobbler by viewModel.scrobbler.collectAsState()
-    val state by viewModel.uiState.collectAsState()
-    val downloadCount by viewModel.downloadCount.collectAsState()
-    val downloadTotalBytes by viewModel.downloadTotalBytes.collectAsState()
-    val ytConnection by viewModel.ytConnection.collectAsState()
-    val ytSyncEnabled by viewModel.ytSyncEnabled.collectAsState()
-    val ytSyncState by viewModel.ytSyncState.collectAsState()
-    val ytLastSyncAt by viewModel.ytLastSyncAt.collectAsState()
-    val syncedPlaylistIds by viewModel.syncedPlaylistIds.collectAsState()
-    val allPlaylists by viewModel.allPlaylists.collectAsState()
-    val eq by viewModel.equalizer.collectAsState()
+    val session by viewModel.session.collectAsStateWithLifecycle()
+    val theme by viewModel.theme.collectAsStateWithLifecycle()
+    val misc by viewModel.misc.collectAsStateWithLifecycle()
+    val scrobbler by viewModel.scrobbler.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val downloadCount by viewModel.downloadCount.collectAsStateWithLifecycle()
+    val downloadTotalBytes by viewModel.downloadTotalBytes.collectAsStateWithLifecycle()
+    val ytConnection by viewModel.ytConnection.collectAsStateWithLifecycle()
+    val ytSyncEnabled by viewModel.ytSyncEnabled.collectAsStateWithLifecycle()
+    val ytSyncState by viewModel.ytSyncState.collectAsStateWithLifecycle()
+    val ytLastSyncAt by viewModel.ytLastSyncAt.collectAsStateWithLifecycle()
+    val syncedPlaylistIds by viewModel.syncedPlaylistIds.collectAsStateWithLifecycle()
+    val allPlaylists by viewModel.allPlaylists.collectAsStateWithLifecycle()
+    val eq by viewModel.equalizer.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showQualityDialog by remember { mutableStateOf(false) }
     var showEqSheet by remember { mutableStateOf(false) }
@@ -595,7 +595,7 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = "Full Screen Cover Art",
                                 subtitle = if (misc.fullScreenCoverArtEnabled) {
-                                    "Edge-to-edge artwork with translucent glass controls"
+                                    "Single cover with a seamless lower control gradient"
                                 } else {
                                     "Standard centered artwork layout"
                                 },
@@ -804,7 +804,8 @@ fun SettingsScreen(
                         subtitle = "github.com/duxtami/LastWave-native",
                         onClick = {
                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/duxtami/LastWave-native"))
-                            context.startActivity(intent)
+                            runCatching { context.startActivity(intent) }
+                                .onFailure { viewModel.showToast("No browser is available") }
                         },
                     )
                 }

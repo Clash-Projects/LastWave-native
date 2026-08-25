@@ -33,6 +33,8 @@ import javax.inject.Inject
 
 enum class PendingRestoreKind { FULL_BACKUP, PLAYLIST_MIRROR }
 
+private val SettingsSharing = SharingStarted.WhileSubscribed(stopTimeoutMillis = 5_000)
+
 data class SettingsScreenState(
     val session: SessionData = SessionData(),
     val theme: ThemeUiState? = null,
@@ -57,7 +59,7 @@ class SettingsViewModel @Inject constructor(
     private val sessionPreferences: SessionPreferences,
     private val themeRepository: ThemeRepository,
     private val settingsPreferences: SettingsPreferences,
-    private val audioEngine: NativeAudioEngine,
+    private val audioEngine: dagger.Lazy<NativeAudioEngine>,
     private val generateRepository: GenerateRepository,
     private val discoverRepository: com.lastwave.app.data.discover.DiscoverRepository,
     private val backupRepository: BackupRepository,
@@ -80,13 +82,13 @@ class SettingsViewModel @Inject constructor(
     val ytConnection: StateFlow<com.lastwave.app.data.ytmusic.YtConnection> = ytAuthManager.connection
     val ytSyncState: StateFlow<com.lastwave.app.data.ytmusic.YtSyncState> = ytMusicSyncManager.state
     val ytSyncEnabled: StateFlow<Boolean> = ytMusicPreferences.syncEnabled
-        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+        .stateIn(viewModelScope, SettingsSharing, false)
     val ytLastSyncAt: StateFlow<Long> = ytMusicPreferences.lastSyncAt
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+        .stateIn(viewModelScope, SettingsSharing, 0L)
     val syncedPlaylistIds: StateFlow<Set<Long>?> = ytMusicPreferences.syncedPlaylistIds
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+        .stateIn(viewModelScope, SettingsSharing, null)
     val allPlaylists: StateFlow<List<com.lastwave.app.data.playlist.SavedPlaylist>> = playlistRepository.playlists
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        .stateIn(viewModelScope, SettingsSharing, emptyList())
 
     val session: StateFlow<SessionData> = kotlinx.coroutines.flow.combine(
         sessionPreferences.session,
@@ -99,32 +101,31 @@ class SettingsViewModel @Inject constructor(
         } else {
             sess
         }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, SessionData())
+    }.stateIn(viewModelScope, SettingsSharing, SessionData())
 
     val theme: StateFlow<ThemeUiState> = themeRepository.uiState
 
     val misc: StateFlow<MiscSettings> = settingsPreferences.settings
-        .stateIn(viewModelScope, SharingStarted.Eagerly, MiscSettings())
+        .stateIn(viewModelScope, SettingsSharing, MiscSettings())
 
     val scrobbler: StateFlow<ScrobblerSettings> = scrobblerPreferences.settings
-        .stateIn(viewModelScope, SharingStarted.Eagerly, ScrobblerSettings())
+        .stateIn(viewModelScope, SettingsSharing, ScrobblerSettings())
 
     /** Experimental 15-band equalizer state (Settings → Experimental). */
     val equalizer: StateFlow<EqualizerSettings> = equalizerPreferences.settings
-        .stateIn(viewModelScope, SharingStarted.Eagerly, EqualizerSettings())
+        .stateIn(viewModelScope, SettingsSharing, EqualizerSettings())
     private var immediateEqGains = EqualizerSettings().gainsDb.toFloatArray()
 
     val downloadCount: StateFlow<Int> = downloadedTrackDao.count()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+        .stateIn(viewModelScope, SettingsSharing, 0)
 
     val downloadTotalBytes: StateFlow<Long?> = downloadedTrackDao.totalBytes()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+        .stateIn(viewModelScope, SettingsSharing, 0L)
 
     private val _uiState = MutableStateFlow(SettingsScreenState())
     val uiState: StateFlow<SettingsScreenState> = _uiState.asStateFlow()
 
     init {
-        refreshRecommendationExclusionCount()
         viewModelScope.launch {
             equalizer.collect { immediateEqGains = it.gainsDb.toFloatArray() }
         }
@@ -179,17 +180,17 @@ class SettingsViewModel @Inject constructor(
     fun setQobuzQuality(quality: Int) = viewModelScope.launch { settingsPreferences.setQobuzQuality(quality) }
     fun setStudioMasterClarity(enabled: Boolean) {
         // Apply immediately; DataStore persists the same state for future engine instances.
-        audioEngine.setStudioMasterClarity(enabled)
+        runCatching { audioEngine.get().setStudioMasterClarity(enabled) }
         viewModelScope.launch { settingsPreferences.setStudioMasterClarity(enabled) }
     }
     fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = viewModelScope.launch { settingsPreferences.setLyricsAnimation(animation) }
     fun setVolumeBoostEnabled(enabled: Boolean) {
-        audioEngine.setVolumeBoost(enabled, misc.value.volumeBoostPercent)
+        runCatching { audioEngine.get().setVolumeBoost(enabled, misc.value.volumeBoostPercent) }
         viewModelScope.launch { settingsPreferences.setVolumeBoostEnabled(enabled) }
     }
     fun setVolumeBoostPercent(percent: Int) {
         val safePercent = percent.coerceIn(100, 200)
-        audioEngine.setVolumeBoost(misc.value.volumeBoostEnabled, safePercent)
+        runCatching { audioEngine.get().setVolumeBoost(misc.value.volumeBoostEnabled, safePercent) }
         viewModelScope.launch { settingsPreferences.setVolumeBoostPercent(safePercent) }
     }
     fun setFullScreenCoverArt(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setFullScreenCoverArt(enabled) }
@@ -197,7 +198,7 @@ class SettingsViewModel @Inject constructor(
     // ── Experimental: 15-band equalizer ──
 
     fun setEqualizerEnabled(enabled: Boolean) {
-        audioEngine.setEqualizer(enabled, immediateEqGains)
+        runCatching { audioEngine.get().setEqualizer(enabled, immediateEqGains) }
         viewModelScope.launch { equalizerPreferences.setEnabled(enabled) }
     }
 
@@ -206,7 +207,7 @@ class SettingsViewModel @Inject constructor(
     fun applyEqPreset(name: String) {
         com.lastwave.app.data.local.EqualizerPresets.byName(name)?.let { preset ->
             immediateEqGains = preset.gainsDb.toFloatArray()
-            audioEngine.setEqualizer(true, immediateEqGains)
+            runCatching { audioEngine.get().setEqualizer(true, immediateEqGains) }
             viewModelScope.launch { equalizerPreferences.applyPreset(preset) }
         }
     }
@@ -215,7 +216,7 @@ class SettingsViewModel @Inject constructor(
     fun setEqBandGain(bandIndex: Int, gainDb: Float) {
         if (bandIndex !in immediateEqGains.indices) return
         immediateEqGains = immediateEqGains.copyOf().also { it[bandIndex] = gainDb }
-        audioEngine.setEqualizer(equalizer.value.enabled, immediateEqGains)
+        runCatching { audioEngine.get().setEqualizer(equalizer.value.enabled, immediateEqGains) }
         viewModelScope.launch { equalizerPreferences.setBandGain(bandIndex, gainDb) }
     }
 

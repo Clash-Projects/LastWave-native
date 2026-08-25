@@ -48,6 +48,7 @@ class SearchViewModel @Inject constructor(
 
     private var debounceJob: Job? = null
     private var suggestionsJob: Job? = null
+    private var searchQueueJob: Job? = null
     private var lastIssuedQuery: String = ""
 
     init {
@@ -135,20 +136,34 @@ class SearchViewModel @Inject constructor(
     }
 
     fun playResult(item: SearchResultItem) {
+        searchQueueJob?.cancel()
         val tab = _uiState.value.tab
         when (tab) {
             SearchTab.TRACKS -> {
-                val results = _uiState.value.results
-                val queue = results.map { result ->
-                    PlayableTrack(
-                        title = result.name,
-                        artist = result.artist.orEmpty(),
-                        album = result.subtitle,
-                        artworkUrl = result.artworkUrl,
-                        videoId = result.videoId,
+                val selected = PlayableTrack(
+                    title = item.name,
+                    artist = item.artist.orEmpty(),
+                    album = item.subtitle,
+                    artworkUrl = item.artworkUrl,
+                    videoId = item.videoId,
+                )
+                // Start immediately. Recommendations load in the background
+                // and are appended only if this is still the active track.
+                musicPlayer.play(selected, sourceLabel = "Search")
+                searchQueueJob = viewModelScope.launch {
+                    val related = repository.similarSongsFor(item)
+                    musicPlayer.appendSearchRecommendations(
+                        seed = selected,
+                        tracks = related.map { track ->
+                            PlayableTrack(
+                                title = track.name,
+                                artist = track.artist,
+                                album = track.album,
+                                artworkUrl = track.artworkUrl,
+                            )
+                        },
                     )
                 }
-                musicPlayer.playQueue(queue, results.indexOf(item).coerceAtLeast(0), sourceLabel = "Search")
             }
             SearchTab.ARTISTS, SearchTab.ALBUMS -> viewModelScope.launch {
                 val tracks = runCatching { repository.songsFor(item) }.getOrDefault(emptyList())

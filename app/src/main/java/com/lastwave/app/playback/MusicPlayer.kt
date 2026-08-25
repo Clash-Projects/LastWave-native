@@ -152,7 +152,7 @@ class MusicPlayer @Inject constructor(
     private val qobuzMusicApi: QobuzMusicApi,
     private val settingsPreferences: SettingsPreferences,
     private val discoverRepository: DiscoverRepository,
-    private val nativeAudioEngine: NativeAudioEngine,
+    private val nativeAudioEngine: dagger.Lazy<NativeAudioEngine>,
     private val applicationScope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
@@ -398,11 +398,13 @@ class MusicPlayer @Inject constructor(
                 val nativeMixerRate = audioManager
                     ?.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
                     ?.toIntOrNull()
-                    ?.takeIf { it in 8_000..384_000 }
+                    ?.takeIf { it in 8_000..192_000 }
                     ?: 48_000
+                val engine = runCatching { nativeAudioEngine.get() }.getOrNull()
+                if (engine?.isAvailable != true) return platformSink
                 return NativeProcessingAudioSink(
                     delegate = platformSink,
-                    processor = NativePcmAudioProcessor(nativeAudioEngine, nativeMixerRate),
+                    processor = NativePcmAudioProcessor(engine, nativeMixerRate),
                 )
             }
         }.apply {
@@ -604,6 +606,44 @@ class MusicPlayer @Inject constructor(
         applicationScope.launch {
             val enriched = runCatching { matchMetadata(track) }.getOrDefault(track)
             withContext(Dispatchers.Main.immediate) { player.addMediaItem(enriched.toMediaItem()) }
+        }
+    }
+
+    /** Adds the varied continuation loaded for a search-started track.
+     * A stale response can never modify a newer playback queue. */
+    fun appendSearchRecommendations(seed: PlayableTrack, tracks: List<PlayableTrack>) {
+        if (tracks.isEmpty()) return
+        onMain {
+            val current = player.currentMediaItem?.toPlayableTrack() ?: return@onMain
+            val sameSeed = if (!seed.videoId.isNullOrBlank()) {
+                seed.videoId == current.videoId
+            } else {
+                seed.title.equals(current.title, ignoreCase = true) &&
+                    seed.artist.equals(current.artist, ignoreCase = true)
+            }
+            if (!sameSeed || _state.value.sourceLabel != "Search") return@onMain
+
+            val seenQueueKeys = (0 until player.mediaItemCount).mapTo(mutableSetOf()) {
+                player.getMediaItemAt(it).toPlayableTrack().queueKey()
+            }
+            val seenTitles = (0 until player.mediaItemCount).mapTo(mutableSetOf()) {
+                player.getMediaItemAt(it).toPlayableTrack().searchQueueTitleKey()
+            }
+            val fresh = tracks.filter { track ->
+                track.title.isNotBlank() && track.artist.isNotBlank() &&
+                    seenQueueKeys.add(track.queueKey()) &&
+                    seenTitles.add(track.searchQueueTitleKey())
+            }
+            if (fresh.isEmpty()) return@onMain
+
+            player.addMediaItems(fresh.map(PlayableTrack::toMediaItem))
+            refresh(player)
+            val currentIndex = player.currentMediaItemIndex
+            enrichUpcomingQueue(currentIndex)
+            val nextIndex = if (player.shuffleModeEnabled) player.nextMediaItemIndex else currentIndex + 1
+            if (nextIndex != C.INDEX_UNSET && nextIndex in 0 until player.mediaItemCount) {
+                preloadNextTrack(player.getMediaItemAt(nextIndex).toPlayableTrack())
+            }
         }
     }
 
@@ -1273,3 +1313,14 @@ fun GeneratedTrack.toPlayableTrack() = PlayableTrack(
 )
 
 private fun PlayableTrack.queueKey(): String = "$title|$artist".lowercase()
+
+private fun PlayableTrack.searchQueueTitleKey(): String = title
+    .lowercase()
+    .replace(SEARCH_TITLE_VARIANT, " ")
+    .replace(SEARCH_TITLE_NON_CHARACTER, "")
+
+private val SEARCH_TITLE_VARIANT = Regex(
+    """\s*[\[(][^)\]]*\b(?:official|video|audio|lyrics?|cover|karaoke|remaster(?:ed)?|live|version|edit|mix|slowed|reverb)[^)\]]*[])]""",
+    RegexOption.IGNORE_CASE,
+)
+private val SEARCH_TITLE_NON_CHARACTER = Regex("[^\\p{L}\\p{N}]+")

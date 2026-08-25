@@ -6,6 +6,7 @@ import com.lastwave.app.data.local.db.RecommendationExclusionDao
 import com.lastwave.app.data.local.db.RecommendationExclusionEntity
 import com.lastwave.app.data.network.LastFmApiService
 import com.lastwave.app.data.playlist.PlaylistRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -13,7 +14,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -48,7 +51,17 @@ class GenerateRepository @Inject constructor(
     private val inFlightRequests = ConcurrentHashMap<String, Deferred<JsonObject>>()
     private val lastFmRequestGate = Semaphore(5)
     private val exclusionMutex = Mutex()
+    private val savedPlaylistKeysMutex = Mutex()
     @Volatile private var exclusionKeysCache: Set<String>? = null
+    @Volatile private var savedPlaylistKeysCache: Set<String>? = null
+
+    init {
+        requestScope.launch {
+            playlistRepository.changes.collect {
+                savedPlaylistKeysMutex.withLock { savedPlaylistKeysCache = null }
+            }
+        }
+    }
 
     // Collapses concurrent, identical in-flight requests (e.g. two parallel
     // branches of fetchMix both wanting the same artist's top tracks at the
@@ -151,6 +164,55 @@ class GenerateRepository @Inject constructor(
                 false
             }
         }
+    }
+
+    /** All songs already saved in any local playlist. This is a soft
+     *  familiarity signal only; callers must never turn it into a blacklist. */
+    suspend fun savedPlaylistTrackKeys(): Set<String> {
+        savedPlaylistKeysCache?.let { return it }
+        return savedPlaylistKeysMutex.withLock {
+            savedPlaylistKeysCache?.let { return@withLock it }
+            try {
+                playlistRepository.getAll().flatMapTo(mutableSetOf()) { playlist ->
+                    playlist.tracks.map { it.key }
+                }.also { savedPlaylistKeysCache = it }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Log.d(TAG, "Could not read saved-playlist tracks", error)
+                emptySet()
+            }
+        }
+    }
+
+    /** Keeps ranked relevance while limiting familiar songs to roughly one
+     *  in six when enough new candidates exist. Familiar songs fill any
+     *  shortage, so this deliberately remains a preference, not exclusion. */
+    fun preferPlaylistFreshness(
+        tracks: List<GeneratedTrack>,
+        limit: Int,
+        savedKeys: Set<String>,
+    ): List<GeneratedTrack> {
+        if (limit <= 0) return emptyList()
+        val unique = deduplicate(tracks.filter { it.name.isNotBlank() && it.artist.isNotBlank() })
+        val target = minOf(limit, unique.size)
+        if (target == 0 || savedKeys.isEmpty()) return unique.take(target)
+
+        val familiarCap = maxOf(1, target / 6)
+        val selected = ArrayList<GeneratedTrack>(target)
+        val deferredFamiliar = ArrayList<GeneratedTrack>()
+        var familiarCount = 0
+        for (track in unique) {
+            if (track.key in savedKeys && familiarCount >= familiarCap) {
+                deferredFamiliar += track
+                continue
+            }
+            selected += track
+            if (track.key in savedKeys) familiarCount++
+            if (selected.size == target) return selected
+        }
+        selected += deferredFamiliar.take(target - selected.size)
+        return selected
     }
 
     suspend fun recommendationExclusionKeys(): Set<String> {
@@ -486,8 +548,11 @@ class GenerateRepository @Inject constructor(
         val originalKeys = playlistTracks.mapTo(mutableSetOf()) { it.key }
         val pool = java.util.Collections.synchronizedList(mutableListOf<GeneratedTrack>())
         val distinctArtists = playlistTracks.map { it.artist.trim() }.filter { it.isNotBlank() }.distinct()
-        val seedArtists = distinctArtists.shuffled().take(10)
-        val seedTracks = playlistTracks.filter { it.name.isNotBlank() && it.artist.isNotBlank() }.shuffled().take(8)
+        // A few strong seeds produce a better mix than flooding Last.fm with
+        // dozens of nested calls. The old 10/8 fan-out could exceed 70 HTTP
+        // requests, hit rate limits and make Regenerate appear frozen.
+        val seedArtists = distinctArtists.shuffled().take(3)
+        val seedTracks = playlistTracks.filter { it.name.isNotBlank() && it.artist.isNotBlank() }.shuffled().take(4)
 
         // 1. Similar artists' top tracks (Last.fm) — the core "same taste,
         //    different songs" source.
@@ -495,7 +560,7 @@ class GenerateRepository @Inject constructor(
             async(Dispatchers.IO) {
                 try {
                     val sim = call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "12"))
-                    val simArtists = GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(4)
+                    val simArtists = GenerateJson.namesOf(sim["similarartists"]?.jsonObject?.get("artist")).shuffled().take(2)
                     kotlinx.coroutines.supervisorScope {
                         simArtists.map { sa ->
                             async(Dispatchers.IO) {
@@ -545,9 +610,9 @@ class GenerateRepository @Inject constructor(
         // 4. YouTube Music search — queries built from seed tracks/artists
         //    widen the candidate pool beyond Last.fm's graph.
         val ytQueries = buildList {
-            seedTracks.take(4).forEach { add("${it.artist} ${it.name}") }
-            seedArtists.take(4).forEach { add(it) }
-        }.shuffled().take(6)
+            seedTracks.take(2).forEach { add("${it.artist} ${it.name}") }
+            seedArtists.take(2).forEach { add("$it songs") }
+        }.shuffled().take(3)
         val ytJobs = ytQueries.map { query ->
             async(Dispatchers.IO) {
                 try {
@@ -628,13 +693,13 @@ class GenerateRepository @Inject constructor(
         //    a slightly-less-on-taste 20+ beats a half-empty playlist.
         if (result.size < minSize) {
             try {
-                val extraArtists = distinctArtists.shuffled().take(4)
+                val extraArtists = distinctArtists.shuffled().take(2)
                 val extra = coroutineScope {
                     extraArtists.map { artist ->
                         async(Dispatchers.IO) {
                             try {
                                 val d = call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "20"))
-                                GenerateJson.namesOf(d["similarartists"]?.jsonObject?.get("artist")).shuffled().take(6)
+                                GenerateJson.namesOf(d["similarartists"]?.jsonObject?.get("artist")).shuffled().take(3)
                             } catch (_: Exception) {
                                 emptyList()
                             }
@@ -720,17 +785,14 @@ class GenerateRepository @Inject constructor(
             val lovedRes = call(mapOf("method" to "user.getlovedtracks", "user" to username(), "limit" to "200"))
             GenerateJson.normalise(lovedRes["lovedtracks"]?.jsonObject?.get("track")).forEach { blacklist.add(it.key) }
         } catch (e: Exception) { Log.d(TAG, "fetchRecommendations loved-tracks miss", e) }
-        try {
-            playlistRepository.getAll()
-                .forEach { playlist -> playlist.tracks.forEach { blacklist.add(it.key) } }
-        } catch (e: Exception) { Log.d(TAG, "fetchRecommendations saved-playlists blacklist miss", e) }
+        val savedPlaylistKeys = savedPlaylistTrackKeys()
 
         val engine = RecommendationEngine(
             rawCall = { params -> call(params) },
             isFresh = { tracks -> filterRecommendationExclusions(tracks) },
             onProgress = onProgress,
         )
-        val recommended = engine.run(total, profile, blacklist)
+        val recommended = engine.run(total, profile, blacklist, savedPlaylistKeys)
         return filterPlayable(filterRecommendationExclusions(recommended)).take(total)
     }
 

@@ -74,8 +74,11 @@ fun Modifier.wobbleOverscroll(): Modifier {
             // `settleAnim` takes over the spring-back, so there's always
             // exactly one source of truth for translationY, never both at
             // once fighting each other.
-            translationY = if (raw != 0f) raw else settleAnim.value
-            clip = true
+            val offset = if (raw != 0f) raw else settleAnim.value
+            translationY = offset
+            // Clipping a resting full-screen list creates an unnecessary GPU
+            // layer. It is required only while the content is translated.
+            clip = offset != 0f
         }
 }
 

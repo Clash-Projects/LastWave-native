@@ -28,10 +28,18 @@ class DownloadsViewModel @Inject constructor(
 ) : ViewModel() {
 
     val downloadedTracks: StateFlow<List<DownloadedTrackEntity>> =
-        downloadedTrackDao.getAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        downloadedTrackDao.getAll().stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            emptyList(),
+        )
 
     val totalBytes: StateFlow<Long?> =
-        downloadedTrackDao.totalBytes().stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+        downloadedTrackDao.totalBytes().stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            0L,
+        )
 
     val activeDownloads: StateFlow<Map<String, com.lastwave.app.data.download.DownloadProgress>> =
         downloadManager.downloads

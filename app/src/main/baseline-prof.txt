@@ -2,7 +2,11 @@ HSPLcom/lastwave/app/MainActivity;->**(**)**
 HSPLcom/lastwave/app/LastWaveApplication;->**(**)**
 HSPLcom/lastwave/app/ui/shell/**->**(**)**
 HSPLcom/lastwave/app/ui/home/**->**(**)**
+HSPLcom/lastwave/app/ui/settings/**->**(**)**
 HSPLcom/lastwave/app/ui/player/**->**(**)**
 HSPLcom/lastwave/app/ui/common/ArtworkImageKt;->**(**)**
 HSPLcom/lastwave/app/ui/common/ExpressiveMotion;->**(**)**
 HSPLcom/lastwave/app/playback/MusicPlayer;->**(**)**
+HSPLcom/lastwave/app/playback/MusicPlaybackService;->**(**)**
+HSPLcom/lastwave/app/data/artwork/ArtworkRepository;->**(**)**
+HSPLcom/lastwave/app/ui/common/ExpressiveHeaderKt;->**(**)**

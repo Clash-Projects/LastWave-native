@@ -12,7 +12,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +23,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.model.AuthState
 import com.lastwave.app.ui.auth.AuthViewModel
 import com.lastwave.app.ui.auth.LoginScreen
@@ -60,7 +60,7 @@ fun LastWaveNavHost(
     // is a pushed destination on THIS nav controller and none of those
     // screens hold a reference to it. See GenreExplorer's doc comment.
     val genreExplorerBridge: GenreExplorerNavBridge = hiltViewModel()
-    val pendingGenre by genreExplorerBridge.pendingGenre.collectAsState()
+    val pendingGenre by genreExplorerBridge.pendingGenre.collectAsStateWithLifecycle()
     LaunchedEffect(pendingGenre) {
         if (pendingGenre != null) {
             navController.navigate(Screen.Genres.route)
@@ -101,7 +101,7 @@ fun LastWaveNavHost(
         // completely and a real logged-out state is the only way to see it.
         composable(Screen.Splash.route) {
             val authViewModel: AuthViewModel = hiltViewModel()
-            val authState by authViewModel.authState.collectAsState()
+            val authState by authViewModel.authState.collectAsStateWithLifecycle()
 
             LaunchedEffect(authState) {
                 when (authState) {
@@ -120,8 +120,8 @@ fun LastWaveNavHost(
 
         composable(Screen.Login.route) {
             val authViewModel: AuthViewModel = hiltViewModel()
-            val authState by authViewModel.authState.collectAsState()
-            val webAuthState by authViewModel.webAuthState.collectAsState()
+            val authState by authViewModel.authState.collectAsStateWithLifecycle()
+            val webAuthState by authViewModel.webAuthState.collectAsStateWithLifecycle()
 
             // Real one-tap sign-in now: tap Connect, approve in an
             // embedded WebView, done — see AuthViewModel/LoginScreen for
@@ -154,7 +154,9 @@ fun LastWaveNavHost(
         // clear session) return all the way to Login.
         composable(Screen.MainShell.route) {
             MainShell(
-                onOpenSettings = { navController.navigate(Screen.Settings.route) },
+                onOpenSettings = {
+                    navController.navigate(Screen.Settings.route) { launchSingleTop = true }
+                },
                 onOpenSearch = { navController.navigate(Screen.Search.route) },
                 onOpenDiscover = { navController.navigate(Screen.Discover.route) },
                 onOpenGenres = { navController.navigate(Screen.Genres.route) },

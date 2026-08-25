@@ -24,6 +24,7 @@ private const val MAX_EXPLORATION_SEEDS = 120
 private const val MAX_TRACK_SEEDS = 6
 private const val DISCOVER_ARTIST_CAP = 3
 private const val MAX_SHOWN_KEYS = 3_000
+private const val SAVED_TRACK_SCORE_PENALTY = 22.0
 
 private val CURATED_GENRE_SEEDS = listOf(
     "indie", "electronic", "synthwave", "rock", "alternative", "pop",
@@ -182,12 +183,14 @@ class DiscoverRepository @Inject constructor(
         val allowedKeys = generateRepository.filterRecommendationExclusions(
             candidates.values.map(RankedCandidate::track),
         ).mapTo(mutableSetOf(), GeneratedTrack::key)
+        val savedPlaylistKeys = generateRepository.savedPlaylistTrackKeys()
         fun score(candidate: RankedCandidate): Double {
             val affinity = profile?.artistAffinity?.get(candidate.track.artist.trim().lowercase()) ?: 0.0
             val consensus = minOf(24, (candidate.sources.size - 1).coerceAtLeast(0) * 8)
             val similarity = (candidate.track.match ?: 0.0).coerceIn(0.0, 1.0) * 24.0
+            val savedPenalty = if (candidate.track.key in savedPlaylistKeys) SAVED_TRACK_SCORE_PENALTY else 0.0
             return candidate.strongestWeight + consensus + similarity +
-                affinity * 26.0 + Random.nextDouble() * 3.0
+                affinity * 26.0 - savedPenalty + Random.nextDouble() * 3.0
         }
         val ranked = candidates.values
             .filterNot { it.track.key in shownKeys }
@@ -241,8 +244,13 @@ class DiscoverRepository @Inject constructor(
             } catch (_: Exception) {}
         }
 
-        val batch = queue.take(count)
-        queue = queue.drop(count).toMutableList()
+        val batch = generateRepository.preferPlaylistFreshness(
+            tracks = queue,
+            limit = count,
+            savedKeys = generateRepository.savedPlaylistTrackKeys(),
+        )
+        val batchKeys = batch.mapTo(mutableSetOf(), GeneratedTrack::key)
+        queue = queue.filterNot { it.key in batchKeys }.toMutableList()
         shownKeys.addAll(batch.map { it.key })
         while (shownKeys.size > MAX_SHOWN_KEYS) {
             shownKeys.iterator().let { iterator ->
@@ -275,7 +283,10 @@ class DiscoverRepository @Inject constructor(
                 queue.addAll(chartFallback)
             } catch (_: Exception) {}
         }
-        queue.randomOrNull()?.also {
+        val savedPlaylistKeys = generateRepository.savedPlaylistTrackKeys()
+        val freshPool = queue.filterNot { it.key in savedPlaylistKeys }
+        val candidatePool = if (freshPool.isNotEmpty() && Random.nextInt(100) < 85) freshPool else queue
+        candidatePool.randomOrNull()?.also {
             queue.remove(it)
             shownKeys.add(it.key)
         }

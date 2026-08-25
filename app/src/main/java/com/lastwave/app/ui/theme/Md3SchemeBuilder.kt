@@ -29,9 +29,10 @@ object Md3SchemeBuilder {
     fun hueOf(hex: String): Int {
         val clean = hex.removePrefix("#")
         if (clean.length < 6) return 0
-        val r = clean.substring(0, 2).toInt(16) / 255f
-        val g = clean.substring(2, 4).toInt(16) / 255f
-        val b = clean.substring(4, 6).toInt(16) / 255f
+        val rgb = clean.take(6).toIntOrNull(16) ?: return 0
+        val r = ((rgb ushr 16) and 0xFF) / 255f
+        val g = ((rgb ushr 8) and 0xFF) / 255f
+        val b = (rgb and 0xFF) / 255f
         val max = maxOf(r, g, b)
         val min = minOf(r, g, b)
         if (max == min) return 0

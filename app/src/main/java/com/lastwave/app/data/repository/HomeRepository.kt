@@ -107,10 +107,9 @@ class HomeRepository @Inject constructor(
         val session = requireSession()
         val targetUser = username ?: session.username
         val cacheKey = "$targetUser:$page:$limit"
-        if (forceRefresh) {
-            inFlightRecent.remove(cacheKey)
-        }
-
+        // There is no stale response cache here: entries exist only while a
+        // real request is running. Even forced refreshes should join that
+        // request instead of starting a duplicate when poll timers overlap.
         val deferred = inFlightRecent.getOrPut(cacheKey) {
             inFlightScope.async {
                 fetchRecentTracksInternal(session, targetUser, page, limit)
@@ -194,10 +193,8 @@ class HomeRepository @Inject constructor(
         val session = requireSession()
         val targetUser = username ?: session.username
         val cacheKey = targetUser.ifBlank { "guest" }
-        if (forceRefresh) {
-            inFlightStats.remove(cacheKey)
-        }
-
+        // Coalesce overlapping refreshes. The map contains only active work,
+        // and completion removes it immediately.
         val deferred = inFlightStats.getOrPut(cacheKey) {
             inFlightScope.async {
                 fetchStatsInternal(session, targetUser)
@@ -324,7 +321,6 @@ class HomeRepository @Inject constructor(
 
         val now = System.currentTimeMillis()
         if (forceRefresh) {
-            inFlightInitialData.remove(cacheKey)
             cachedInitialData = null
         } else if (cachedInitialData?.first == cacheKey && (now - cachedInitialDataTimestamp < 30_000L)) {
             return Result.success(cachedInitialData!!.second)

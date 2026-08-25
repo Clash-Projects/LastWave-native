@@ -1,5 +1,6 @@
 package com.lastwave.app.playback
 
+import android.util.Log
 import com.lastwave.app.data.local.SettingsPreferences
 import com.lastwave.app.data.local.EqualizerPreferences
 import java.io.Closeable
@@ -31,24 +32,39 @@ class NativeAudioEngine @Inject constructor(
     applicationScope: CoroutineScope,
 ) : Closeable {
     private val handleLock = Any()
-    private var nativeHandle = nativeCreate()
+    @Volatile
+    private var nativeHandle = if (libraryLoaded) {
+        try {
+            nativeCreate()
+        } catch (error: LinkageError) {
+            Log.e(TAG, "Native audio engine is unavailable; using Android audio", error)
+            0L
+        }
+    } else {
+        0L
+    }
+
+    val isAvailable: Boolean
+        get() = nativeHandle != 0L
 
     init {
-        applicationScope.launch(Dispatchers.Default) {
-            settingsPreferences.settings
-                .map { it.isStudioMasterClarityEnabled }
-                .distinctUntilChanged()
-                .collect(::setStudioMasterClarity)
-        }
-        applicationScope.launch(Dispatchers.Default) {
-            settingsPreferences.settings
-                .map { it.volumeBoostEnabled to it.volumeBoostPercent.coerceIn(100, 200) }
-                .distinctUntilChanged()
-                .collect { (enabled, percent) -> setVolumeBoost(enabled, percent) }
-        }
-        applicationScope.launch(Dispatchers.Default) {
-            equalizerPreferences.settings.collect { settings ->
-                setEqualizer(settings.enabled, settings.gainsDb.toFloatArray())
+        if (isAvailable) {
+            applicationScope.launch(Dispatchers.Default) {
+                settingsPreferences.settings
+                    .map { it.isStudioMasterClarityEnabled }
+                    .distinctUntilChanged()
+                    .collect(::setStudioMasterClarity)
+            }
+            applicationScope.launch(Dispatchers.Default) {
+                settingsPreferences.settings
+                    .map { it.volumeBoostEnabled to it.volumeBoostPercent.coerceIn(100, 200) }
+                    .distinctUntilChanged()
+                    .collect { (enabled, percent) -> setVolumeBoost(enabled, percent) }
+            }
+            applicationScope.launch(Dispatchers.Default) {
+                equalizerPreferences.settings.collect { settings ->
+                    setEqualizer(settings.enabled, settings.gainsDb.toFloatArray())
+                }
             }
         }
     }
@@ -100,7 +116,7 @@ class NativeAudioEngine @Inject constructor(
         channelCount: Int,
     ): Int {
         require(input.isDirect && output.isDirect) { "Native PCM buffers must be direct" }
-        return withHandle(0) { handle ->
+        return withHandle(-1) { handle ->
             nativeProcessMediaPcm(
                 handle,
                 input,
@@ -179,14 +195,33 @@ class NativeAudioEngine @Inject constructor(
         synchronized(handleLock) {
             val handle = nativeHandle
             nativeHandle = 0L
-            if (handle != 0L) nativeDestroy(handle)
+            if (handle != 0L) {
+                try {
+                    nativeDestroy(handle)
+                } catch (error: LinkageError) {
+                    Log.e(TAG, "Could not release native audio engine", error)
+                }
+            }
         }
     }
 
     private inline fun <T> withHandle(fallback: T, block: (Long) -> T): T {
         return synchronized(handleLock) {
             val handle = nativeHandle
-            if (handle == 0L) fallback else block(handle)
+            if (handle == 0L) {
+                fallback
+            } else {
+                try {
+                    block(handle)
+                } catch (error: LinkageError) {
+                    // A stale/split APK can load the library yet still miss an
+                    // individual JNI symbol. Disable native processing for the
+                    // rest of this process instead of crashing playback/UI.
+                    nativeHandle = 0L
+                    Log.e(TAG, "Native audio call failed; falling back to Android audio", error)
+                    fallback
+                }
+            }
         }
     }
 
@@ -234,10 +269,18 @@ class NativeAudioEngine @Inject constructor(
     private external fun nativeBufferedFrames(handle: Long): Long
 
     private companion object {
+        const val TAG = "NativeAudioEngine"
         const val EQUALIZER_BAND_COUNT = 15
 
-        init {
+        val libraryLoaded = try {
             System.loadLibrary("lastwave_audio")
+            true
+        } catch (error: LinkageError) {
+            Log.e(TAG, "Could not load native audio library", error)
+            false
+        } catch (error: SecurityException) {
+            Log.e(TAG, "Native audio loading was blocked", error)
+            false
         }
     }
 }

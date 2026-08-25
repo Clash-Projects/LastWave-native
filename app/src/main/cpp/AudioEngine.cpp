@@ -34,20 +34,30 @@ bool AudioEngine::startLocked(std::int32_t preferredOutputSampleRate) {
     if (stream_ != nullptr) return true;
 
     requestedOutputSampleRate_ = std::max(preferredOutputSampleRate, 0);
-    oboe::AudioStreamBuilder builder;
-    builder.setDirection(oboe::Direction::Output)
-        ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-        ->setSharingMode(oboe::SharingMode::Exclusive)
-        ->setFormat(oboe::AudioFormat::Float)
-        ->setChannelCount(kOutputChannels)
-        ->setDataCallback(this)
-        ->setErrorCallback(this);
-    if (requestedOutputSampleRate_ > 0) {
-        builder.setSampleRate(requestedOutputSampleRate_);
-    }
-
     std::shared_ptr<oboe::AudioStream> openedStream;
-    const auto openResult = builder.openStream(openedStream);
+    const auto openWithSharingMode = [this, &openedStream](oboe::SharingMode sharingMode) {
+        oboe::AudioStreamBuilder builder;
+        builder.setDirection(oboe::Direction::Output)
+            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+            ->setSharingMode(sharingMode)
+            ->setFormat(oboe::AudioFormat::Float)
+            ->setChannelCount(kOutputChannels)
+            ->setDataCallback(this)
+            ->setErrorCallback(this);
+        if (requestedOutputSampleRate_ > 0) {
+            builder.setSampleRate(requestedOutputSampleRate_);
+        }
+        return builder.openStream(openedStream);
+    };
+    auto openResult = openWithSharingMode(oboe::SharingMode::Exclusive);
+    if (openResult != oboe::Result::OK || openedStream == nullptr) {
+        // Exclusive streams are routinely denied by OEM policy, Bluetooth,
+        // calls, accessibility services, and other active media apps.
+        // Shared low-latency output is the portable fallback.
+        if (openedStream != nullptr) openedStream->close();
+        openedStream.reset();
+        openResult = openWithSharingMode(oboe::SharingMode::Shared);
+    }
     if (openResult != oboe::Result::OK || openedStream == nullptr) {
         restartAllowed_.store(false, std::memory_order_release);
         return false;
@@ -394,7 +404,10 @@ bool AudioEngine::configureMediaResamplerLocked() {
     if (mediaInputSampleRate_ == mediaOutputSampleRate_) return true;
     soxr_error_t error = nullptr;
     const soxr_io_spec_t ioSpec = soxr_io_spec(SOXR_FLOAT32_I, SOXR_FLOAT32_I);
-    const soxr_quality_spec_t qualitySpec = soxr_quality_spec(SOXR_VHQ, 0);
+    // HQ is transparent for playback while avoiding the large CPU spikes of
+    // VHQ on low-end ARM cores. VHQ's extra offline-grade precision is not
+    // worth real-time underruns on mobile hardware.
+    const soxr_quality_spec_t qualitySpec = soxr_quality_spec(SOXR_HQ, 0);
     const soxr_runtime_spec_t runtimeSpec = soxr_runtime_spec(1);
     mediaResampler_ = soxr_create(
         static_cast<double>(mediaInputSampleRate_),
@@ -496,7 +509,16 @@ void AudioEngine::onErrorAfterClose(
         std::lock_guard producerLock(producerMutex_);
         releaseProducerStateLocked();
     }
-    startLocked(requestedOutputSampleRate_);
+    try {
+        (void) startLocked(requestedOutputSampleRate_);
+    } catch (...) {
+        // This callback runs on Oboe's recovery thread, outside a JNI frame.
+        // Never allow an allocation failure during restart to terminate the
+        // whole process.
+        restartAllowed_.store(false, std::memory_order_release);
+        activeRingBuffer_.store(nullptr, std::memory_order_release);
+        outputSampleRate_.store(0, std::memory_order_release);
+    }
 }
 
 void AudioEngine::releaseProducerStateLocked() noexcept {
@@ -534,7 +556,7 @@ bool AudioEngine::configureResamplerLocked(std::int32_t inputSampleRate) {
 
     soxr_error_t error = nullptr;
     const soxr_io_spec_t ioSpec = soxr_io_spec(SOXR_FLOAT32_I, SOXR_FLOAT32_I);
-    const soxr_quality_spec_t qualitySpec = soxr_quality_spec(SOXR_VHQ, 0);
+    const soxr_quality_spec_t qualitySpec = soxr_quality_spec(SOXR_HQ, 0);
     const soxr_runtime_spec_t runtimeSpec = soxr_runtime_spec(1);
     resampler_ = soxr_create(
         static_cast<double>(inputSampleRate),

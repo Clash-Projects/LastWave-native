@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <new>
 
@@ -53,7 +54,14 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeStart(
     jlong handle,
     jint preferredOutputSampleRate) {
     auto* engine = fromHandle(handle);
-    return engine != nullptr && engine->start(preferredOutputSampleRate) ? JNI_TRUE : JNI_FALSE;
+    if (engine == nullptr) return JNI_FALSE;
+    try {
+        return engine->start(preferredOutputSampleRate) ? JNI_TRUE : JNI_FALSE;
+    } catch (const std::exception&) {
+        return JNI_FALSE;
+    } catch (...) {
+        return JNI_FALSE;
+    }
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -115,8 +123,14 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeConfigureMediaProcessor(
     jint outputSampleRate,
     jint channelCount) {
     if (auto* engine = fromHandle(handle); engine != nullptr) {
-        return engine->configureMediaProcessor(
-            inputSampleRate, outputSampleRate, channelCount) ? JNI_TRUE : JNI_FALSE;
+        try {
+            return engine->configureMediaProcessor(
+                inputSampleRate, outputSampleRate, channelCount) ? JNI_TRUE : JNI_FALSE;
+        } catch (const std::exception&) {
+            return JNI_FALSE;
+        } catch (...) {
+            return JNI_FALSE;
+        }
     }
     return JNI_FALSE;
 }
@@ -143,6 +157,9 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeProcessMediaPcm(
         inputCapacity < 0 || outputCapacity < 0 || inputByteOffset < 0 ||
         outputByteOffset < 0 || frameCount <= 0 ||
         (channelCount != 1 && channelCount != 2) || !parseFormat(encoding, format)) {
+        return -1;
+    }
+    if (static_cast<std::size_t>(outputByteOffset) % alignof(float) != 0U) {
         return -1;
     }
 
@@ -196,6 +213,9 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeFlushMediaProcessor(
         outputByteOffset < 0 || (channelCount != 1 && channelCount != 2)) {
         return -1;
     }
+    if (static_cast<std::size_t>(outputByteOffset) % alignof(float) != 0U) {
+        return -1;
+    }
     const std::size_t offset = static_cast<std::size_t>(outputByteOffset);
     const std::size_t bytesPerFrame = sizeof(float) * static_cast<std::size_t>(channelCount);
     if (offset > static_cast<std::size_t>(outputCapacity) ||
@@ -242,7 +262,9 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeWritePcm(
     const jlong capacity = env->GetDirectBufferCapacity(directBuffer);
     PcmFormat format{};
     if (engine == nullptr || base == nullptr || capacity < 0 || byteOffset < 0 ||
-        frameCount <= 0 || inputChannelCount <= 0 || !parseFormat(encoding, format)) {
+        frameCount <= 0 || inputSampleRate <= 0 ||
+        (inputChannelCount != 1 && inputChannelCount != 2) ||
+        !parseFormat(encoding, format)) {
         return 0;
     }
 

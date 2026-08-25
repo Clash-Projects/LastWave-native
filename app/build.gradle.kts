@@ -14,8 +14,8 @@ android {
         applicationId = "com.lastwave.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 9
-        versionName = "3.1.0"
+        versionCode = 10
+        versionName = "3.2.0"
 
         val rawApiKey = System.getenv("QOBUZ_API_KEY") ?: (project.findProperty("QOBUZ_API_KEY") as? String) ?: ""
         val qobuzApiKey = rawApiKey.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")

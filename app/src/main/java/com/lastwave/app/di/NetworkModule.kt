@@ -1,6 +1,7 @@
 package com.lastwave.app.di
 
 import android.content.Context
+import com.lastwave.app.BuildConfig
 import com.lastwave.app.data.network.LastFmApiService
 import com.lastwave.app.data.network.LastFmRateGuard
 import dagger.Module
@@ -40,16 +41,21 @@ object NetworkModule {
         rateGuard: LastFmRateGuard,
     ): OkHttpClient {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
+            // Release logging still formats every request and writes logcat
+            // on the networking threads. Keep it for diagnostics only.
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.BASIC
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
         }
 
-        // Pacing dispatcher: raised headroom so parallel artwork/racer/stream
-        // lookups don't queue behind parked Last.fm requests. Last.fm's own
-        // 5 req/s limit is enforced per-request by LastFmRateGuard pacing,
-        // not by this cap.
+        // Keep enough parallelism for Home's batched metadata calls without
+        // allowing a slow network to retain dozens of response buffers and
+        // coroutines on low-memory devices. Artwork uses its own dispatcher.
         val dispatcher = Dispatcher().apply {
-            maxRequests = 64
-            maxRequestsPerHost = 20
+            maxRequests = 24
+            maxRequestsPerHost = 8
         }
 
         val cacheDir = File(context.cacheDir, "lfm_http_cache")

@@ -11,6 +11,9 @@ class NativePcmAudioProcessor(
     private val engine: NativeAudioEngine,
     val nativeOutputSampleRate: Int,
 ) : BaseAudioProcessor() {
+    val isAvailable: Boolean
+        get() = engine.isAvailable
+
     private var nativeEncoding = NativePcmEncoding.PCM_FLOAT
     private var copyBuffer: ByteBuffer = AudioProcessor.EMPTY_BUFFER
     private var trimCombineBuffer: ByteBuffer = AudioProcessor.EMPTY_BUFFER
@@ -165,7 +168,23 @@ class NativePcmAudioProcessor(
             encoding = nativeEncoding,
             channelCount = inputAudioFormat.channelCount,
         )
-        check(processedFrames >= 0) { "Native PCM processor failed" }
+        if (processedFrames < 0) {
+            // A native failure must not take down Media3's playback thread.
+            // Preserve the stream clock with silence; the next configure will
+            // select the platform sink if native processing was disabled.
+            output.clear()
+            val silenceFrames = if (inputAudioFormat.sampleRate == nativeOutputSampleRate) {
+                frameCount
+            } else {
+                ((frameCount.toLong() * nativeOutputSampleRate + inputAudioFormat.sampleRate - 1L) /
+                    inputAudioFormat.sampleRate).toInt()
+            }
+            repeat(silenceFrames * inputAudioFormat.channelCount) {
+                output.putFloat(0f)
+            }
+            output.flip()
+            return
+        }
         output.position(processedFrames * outputAudioFormat.bytesPerFrame)
         output.flip()
     }
@@ -178,8 +197,7 @@ class NativePcmAudioProcessor(
             RESAMPLER_FLUSH_CAPACITY_FRAMES * outputAudioFormat.bytesPerFrame,
         ).order(ByteOrder.nativeOrder())
         val outputFrames = engine.flushMediaProcessor(output, outputAudioFormat.channelCount)
-        check(outputFrames >= 0) { "Native sinc resampler flush failed" }
-        output.position(outputFrames * outputAudioFormat.bytesPerFrame)
+        output.position(outputFrames.coerceAtLeast(0) * outputAudioFormat.bytesPerFrame)
         output.flip()
     }
 

@@ -33,11 +33,29 @@ class AudioTagWriter @Inject constructor(
         private const val FLAC_TYPE_VORBIS_COMMENT = 4
         private const val FLAC_TYPE_PICTURE = 6
         private const val FLAC_MAGIC = "fLaC"
+        private const val OGG_CAPTURE_PATTERN = "OggS"
+        private const val OPUS_HEAD = "OpusHead"
+        private const val OPUS_TAGS = "OpusTags"
+        private const val OGG_MAX_SEGMENTS = 255
+        private const val OGG_CRC_POLYNOMIAL = 0x04C11DB7
 
         /** Cap on embedded artwork so a giant image can't balloon the audio file. */
         private const val MAX_ARTWORK_BYTES = 2 * 1024 * 1024
         private const val MAX_ARTWORK_DOWNLOAD_BYTES = 12 * 1024 * 1024
         private const val MAX_ARTWORK_EDGE = 1600
+        private const val BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+        private val OGG_CRC_TABLE = IntArray(256) { index ->
+            var remainder = index shl 24
+            repeat(8) {
+                remainder = if ((remainder and Int.MIN_VALUE) != 0) {
+                    (remainder shl 1) xor OGG_CRC_POLYNOMIAL
+                } else {
+                    remainder shl 1
+                }
+            }
+            remainder
+        }
     }
 
     /**
@@ -47,6 +65,7 @@ class AudioTagWriter @Inject constructor(
      *             spec-correct; a leading ID3 chunk would break strict parsers)
      *  - M4A   -> iTunes-style udta/meta/ilst atoms inserted inside the moov box
      *             with fast-start chunk offsets adjusted when necessary
+     *  - Opus  -> native OpusTags/Vorbis comments with METADATA_BLOCK_PICTURE
      *  - WebM  -> native Matroska tags plus an attached front-cover image
      *  - other -> ID3v2.3 prepend (MP3 and tolerant players)
      *
@@ -77,7 +96,7 @@ class AudioTagWriter @Inject constructor(
                 // Keep MP4/WebM metadata native; ID3 prepends corrupt their container contract.
                 ContainerKind.MP4 -> embedIntoMp4(audioFile, title, artist, album, artworkBytes, lyrics)
                 ContainerKind.WEBM -> embedIntoWebm(audioFile, title, artist, album, artworkBytes, lyrics)
-                ContainerKind.OGG -> false
+                ContainerKind.OGG -> embedIntoOggOpus(audioFile, title, artist, album, artworkBytes, lyrics)
                 else -> embedId3Prepend(audioFile, title, artist, album, artworkBytes, lyrics)
             }
             if (ok) {
@@ -96,7 +115,10 @@ class AudioTagWriter @Inject constructor(
 
     private fun detectContainerKind(file: File): ContainerKind {
         return try {
-            FileInputStream(file).use { input ->
+            java.io.RandomAccessFile(file, "r").use { input ->
+                val payloadOffset = detectExistingId3v2TagLength(file)
+                if (payloadOffset + 12 > input.length()) return ContainerKind.OTHER
+                input.seek(payloadOffset)
                 val header = ByteArray(12)
                 val n = input.read(header)
                 if (n < 12) return ContainerKind.OTHER
@@ -296,13 +318,15 @@ class AudioTagWriter @Inject constructor(
     ): Boolean {
         val blocks = mutableListOf<FlacBlockRef>()
         var framesStart = -1L
+        val flacStart = detectExistingId3v2TagLength(audioFile)
 
         // Phase 1 — parse the metadata chain (no output written yet).
         java.io.RandomAccessFile(audioFile, "r").use { raf ->
+            raf.seek(flacStart)
             val magic = ByteArray(4)
             if (raf.read(magic) < 4 || String(magic, StandardCharsets.US_ASCII) != FLAC_MAGIC) return false
 
-            var offset = 4L
+            var offset = flacStart + 4L
             while (true) {
                 raf.seek(offset)
                 val header = ByteArray(4)
@@ -327,11 +351,24 @@ class AudioTagWriter @Inject constructor(
         val streamInfo = blocks.firstOrNull { it.type == 0 } ?: return false
         // STREAMINFO is kept verbatim; our VORBIS_COMMENT/PICTURE replace any
         // existing ones; everything else (seektable, cuesheet, padding…) rides along.
+        val originalComments = blocks.firstOrNull { it.type == FLAC_TYPE_VORBIS_COMMENT }
+            ?.let { readFlacComments(audioFile, it) }
+            .orEmpty()
         val keptBlocks = blocks.filter {
-            it.type != 0 && it.type != FLAC_TYPE_VORBIS_COMMENT && it.type != FLAC_TYPE_PICTURE
+            it.type != 0 &&
+                it.type != FLAC_TYPE_VORBIS_COMMENT &&
+                !(it.type == FLAC_TYPE_PICTURE && artworkBytes != null)
         }
 
-        val comments = mutableListOf<String>()
+        val replacedFields = buildSet {
+            addAll(setOf("TITLE", "ARTIST", "ALBUMARTIST", "ALBUM", "LYRICS", "UNSYNCEDLYRICS"))
+            if (artworkBytes != null) {
+                addAll(setOf("METADATA_BLOCK_PICTURE", "COVERART", "COVERARTMIME"))
+            }
+        }
+        val comments = originalComments
+            .filterNot { it.substringBefore('=').trim().uppercase() in replacedFields }
+            .toMutableList()
         if (title.isNotBlank()) comments += "TITLE=$title"
         if (artist.isNotBlank()) comments += "ARTIST=$artist"
         if (artist.isNotBlank()) comments += "ALBUMARTIST=$artist"
@@ -396,7 +433,7 @@ class AudioTagWriter @Inject constructor(
         }
 
         // Sanity: tagged output must start with fLaC and contain the full frame region.
-        val valid = tempFile.length() > framesStart &&
+        val valid = tempFile.length() > 8L &&
             FileInputStream(tempFile).use { input ->
                 val head = ByteArray(4)
                 input.read(head) == 4 && String(head, StandardCharsets.US_ASCII) == FLAC_MAGIC
@@ -409,6 +446,20 @@ class AudioTagWriter @Inject constructor(
     }
 
     private data class FlacBlockRef(val type: Int, val bodyStart: Long, val bodyLen: Int)
+
+    private fun readFlacComments(audioFile: File, block: FlacBlockRef): List<String> {
+        return try {
+            if (block.bodyLen <= 0) return emptyList()
+            val body = ByteArray(block.bodyLen)
+            java.io.RandomAccessFile(audioFile, "r").use { source ->
+                source.seek(block.bodyStart)
+                source.readFully(body)
+            }
+            parseVorbisComments(body, 0)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
 
     /** Little-endian Vorbis comment block body (the FLAC variant has no framing bit). */
     private fun buildVorbisCommentBody(comments: List<String>): ByteArray {
@@ -430,13 +481,14 @@ class AudioTagWriter @Inject constructor(
         val out = ByteArrayOutputStream()
         val mime = if (isPngBytes(imageBytes)) "image/png" else "image/jpeg"
         val mimeBytes = mime.toByteArray(StandardCharsets.US_ASCII)
+        val (width, height, depth) = imageDimensions(imageBytes)
         writeBe32(out, PIC_TYPE_COVER_FRONT.toInt() and 0xFF) // front cover
         writeBe32(out, mimeBytes.size)
         out.write(mimeBytes)
         writeBe32(out, 0) // description length (empty)
-        writeBe32(out, 0) // width
-        writeBe32(out, 0) // height
-        writeBe32(out, 0) // depth
+        writeBe32(out, width)
+        writeBe32(out, height)
+        writeBe32(out, depth)
         writeBe32(out, 0) // colors
         writeBe32(out, imageBytes.size)
         out.write(imageBytes)
@@ -444,6 +496,471 @@ class AudioTagWriter @Inject constructor(
     }
 
     // ─────────────────────────── MP4/M4A (iTunes ilst atoms) ───────────────────────────
+
+    // --------------------------- Ogg Opus (OpusTags) ---------------------------
+
+    private data class OggPageRef(
+        val offset: Long,
+        val headerType: Int,
+        val granulePosition: Long,
+        val serialNumber: Int,
+        val sequenceNumber: Int,
+        val lacing: ByteArray,
+        val dataStart: Long,
+        val dataLength: Int,
+        val totalLength: Int,
+    )
+
+    private data class OpusTagsLocation(
+        val startPage: Int,
+        val endPage: Int,
+        val endSegment: Int,
+        val serialNumber: Int,
+        val sequenceNumber: Int,
+        val packet: ByteArray,
+    )
+
+    /** Replaces the OpusTags packet with native Vorbis comments and a
+     * METADATA_BLOCK_PICTURE comment. Audio packets are copied byte-for-byte;
+     * only Ogg page headers, sequence numbers and checksums are rebuilt. */
+    private fun embedIntoOggOpus(
+        audioFile: File,
+        title: String,
+        artist: String,
+        album: String?,
+        artworkBytes: ByteArray?,
+        lyrics: String?,
+    ): Boolean {
+        val pages = readOggPages(audioFile)
+        if (pages.isEmpty()) return false
+        val location = findOpusTags(audioFile, pages) ?: return false
+        val newPacket = buildOpusTagsPacket(location.packet, title, artist, album, artworkBytes, lyrics)
+        if (newPacket.isEmpty()) return false
+
+        val tempFile = File.createTempFile("tagged_", ".opus", audioFile.parentFile)
+        return try {
+            java.io.RandomAccessFile(audioFile, "r").use { source ->
+                FileOutputStream(tempFile).buffered().use { output ->
+                    for (index in 0 until location.startPage) {
+                        val page = pages[index]
+                        copyFromRandomAccess(source, output, page.offset, page.totalLength.toLong())
+                    }
+
+                    var nextSequence = writeOggPacketPages(
+                        output,
+                        newPacket,
+                        location.serialNumber,
+                        location.sequenceNumber,
+                    )
+
+                    val originalLastTagPage = pages[location.endPage]
+                    val trailingLacing = originalLastTagPage.lacing.copyOfRange(
+                        location.endSegment + 1,
+                        originalLastTagPage.lacing.size,
+                    )
+                    if (trailingLacing.isNotEmpty()) {
+                        val consumedData = originalLastTagPage.lacing
+                            .take(location.endSegment + 1)
+                            .sumOf { it.toInt() and 0xFF }
+                        val trailingLength = trailingLacing.sumOf { it.toInt() and 0xFF }
+                        val trailingData = ByteArray(trailingLength)
+                        source.seek(originalLastTagPage.dataStart + consumedData)
+                        source.readFully(trailingData)
+                        writeOggPage(
+                            output,
+                            originalLastTagPage.headerType and 0xFE,
+                            originalLastTagPage.granulePosition,
+                            location.serialNumber,
+                            nextSequence++,
+                            trailingLacing,
+                            trailingData,
+                        )
+                    }
+
+                    for (index in (location.endPage + 1) until pages.size) {
+                        val page = pages[index]
+                        if (page.serialNumber == location.serialNumber) {
+                            val data = ByteArray(page.dataLength)
+                            source.seek(page.dataStart)
+                            source.readFully(data)
+                            writeOggPage(
+                                output,
+                                page.headerType,
+                                page.granulePosition,
+                                page.serialNumber,
+                                nextSequence++,
+                                page.lacing,
+                                data,
+                            )
+                        } else {
+                            copyFromRandomAccess(source, output, page.offset, page.totalLength.toLong())
+                        }
+                    }
+                    output.flush()
+                }
+            }
+
+            val valid = tempFile.length() > 64L && FileInputStream(tempFile).use { input ->
+                val header = ByteArray(4)
+                input.read(header) == 4 && String(header, StandardCharsets.US_ASCII) == OGG_CAPTURE_PATTERN
+            }
+            if (!valid) {
+                tempFile.delete()
+                false
+            } else {
+                replaceOriginal(audioFile, tempFile, minimumValidLength = 64)
+            }
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not rewrite Ogg Opus tags: ${error.message}", error)
+            tempFile.delete()
+            false
+        }
+    }
+
+    private fun readOggPages(file: File): List<OggPageRef> {
+        return try {
+            java.io.RandomAccessFile(file, "r").use { source ->
+                val pages = mutableListOf<OggPageRef>()
+                var offset = detectExistingId3v2TagLength(file)
+                while (offset < source.length()) {
+                    if (source.length() - offset < 27L) return emptyList()
+                    source.seek(offset)
+                    val header = ByteArray(27)
+                    source.readFully(header)
+                    if (String(header, 0, 4, StandardCharsets.US_ASCII) != OGG_CAPTURE_PATTERN || header[4].toInt() != 0) {
+                        return emptyList()
+                    }
+                    val segmentCount = header[26].toInt() and 0xFF
+                    val lacing = ByteArray(segmentCount)
+                    source.readFully(lacing)
+                    val dataLength = lacing.sumOf { it.toInt() and 0xFF }
+                    val dataStart = offset + 27L + segmentCount
+                    val totalLength = 27 + segmentCount + dataLength
+                    if (dataStart + dataLength > source.length()) return emptyList()
+                    pages += OggPageRef(
+                        offset = offset,
+                        headerType = header[5].toInt() and 0xFF,
+                        granulePosition = readLe64(header, 6),
+                        serialNumber = readLe32(header, 14),
+                        sequenceNumber = readLe32(header, 18),
+                        lacing = lacing,
+                        dataStart = dataStart,
+                        dataLength = dataLength,
+                        totalLength = totalLength,
+                    )
+                    offset += totalLength
+                }
+                if (offset == source.length()) pages else emptyList()
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun findOpusTags(file: File, pages: List<OggPageRef>): OpusTagsLocation? {
+        java.io.RandomAccessFile(file, "r").use { source ->
+            var packetIndex = 0
+            var packetStartPage = -1
+            var packetStartSegment = -1
+            var packetSerial = 0
+            val packet = ByteArrayOutputStream()
+
+            pages.forEachIndexed { pageIndex, page ->
+                var dataOffset = 0
+                page.lacing.forEachIndexed { segmentIndex, rawLength ->
+                    val length = rawLength.toInt() and 0xFF
+                    if (packetIndex <= 1) {
+                        if (packet.size() == 0) {
+                            packetStartPage = pageIndex
+                            packetStartSegment = segmentIndex
+                            packetSerial = page.serialNumber
+                        } else if (page.serialNumber != packetSerial) {
+                            return null
+                        }
+                        if (length > 0) {
+                            val bytes = ByteArray(length)
+                            source.seek(page.dataStart + dataOffset)
+                            source.readFully(bytes)
+                            packet.write(bytes)
+                        }
+                    }
+                    dataOffset += length
+
+                    if (length < 255) {
+                        val completed = packet.toByteArray()
+                        if (packetIndex == 0 && !completed.startsWithAscii(OPUS_HEAD)) return null
+                        if (packetIndex == 1) {
+                            if (!completed.startsWithAscii(OPUS_TAGS) || packetStartSegment != 0) return null
+                            return OpusTagsLocation(
+                                packetStartPage,
+                                pageIndex,
+                                segmentIndex,
+                                packetSerial,
+                                pages[packetStartPage].sequenceNumber,
+                                completed,
+                            )
+                        }
+                        packetIndex++
+                        packet.reset()
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun buildOpusTagsPacket(
+        originalPacket: ByteArray,
+        title: String,
+        artist: String,
+        album: String?,
+        artworkBytes: ByteArray?,
+        lyrics: String?,
+    ): ByteArray {
+        val replacedFields = buildSet {
+            addAll(setOf("TITLE", "ARTIST", "ALBUMARTIST", "ALBUM", "LYRICS", "UNSYNCEDLYRICS"))
+            if (artworkBytes != null) {
+                addAll(setOf("METADATA_BLOCK_PICTURE", "COVERART", "COVERARTMIME"))
+            }
+        }
+        val comments = parseOpusComments(originalPacket)
+            .filterNot { it.substringBefore('=').trim().uppercase() in replacedFields }
+            .toMutableList()
+        if (title.isNotBlank()) comments += "TITLE=$title"
+        if (artist.isNotBlank()) {
+            comments += "ARTIST=$artist"
+            comments += "ALBUMARTIST=$artist"
+        }
+        if (!album.isNullOrBlank()) comments += "ALBUM=$album"
+        if (!lyrics.isNullOrBlank()) comments += "LYRICS=$lyrics"
+        if (artworkBytes != null && artworkBytes.isNotEmpty()) {
+            comments += "METADATA_BLOCK_PICTURE=${base64NoWrap(buildFlacPictureBody(artworkBytes))}"
+        }
+
+        val out = ByteArrayOutputStream()
+        out.write(OPUS_TAGS.toByteArray(StandardCharsets.US_ASCII))
+        val vendor = "LastWave".toByteArray(StandardCharsets.UTF_8)
+        writeLe32(out, vendor.size)
+        out.write(vendor)
+        writeLe32(out, comments.size)
+        comments.forEach { comment ->
+            val bytes = comment.toByteArray(StandardCharsets.UTF_8)
+            writeLe32(out, bytes.size)
+            out.write(bytes)
+        }
+        return out.toByteArray()
+    }
+
+    private fun parseOpusComments(packet: ByteArray): List<String> {
+        if (!packet.startsWithAscii(OPUS_TAGS)) return emptyList()
+        return parseVorbisComments(packet, 8)
+    }
+
+    private fun parseVorbisComments(bytes: ByteArray, startOffset: Int): List<String> {
+        return try {
+            var offset = startOffset
+            if (offset < 0 || offset + 4 > bytes.size) return emptyList()
+            val vendorLength = readLe32(bytes, offset)
+            if (vendorLength < 0 || offset + 4L + vendorLength > bytes.size) return emptyList()
+            offset += 4 + vendorLength
+            if (offset + 4 > bytes.size) return emptyList()
+            val count = readLe32(bytes, offset)
+            offset += 4
+            if (count !in 0..10_000) return emptyList()
+            buildList {
+                repeat(count) {
+                    if (offset + 4 > bytes.size) return@buildList
+                    val length = readLe32(bytes, offset)
+                    offset += 4
+                    if (length < 0 || offset + length.toLong() > bytes.size) return@buildList
+                    add(String(bytes, offset, length, StandardCharsets.UTF_8))
+                    offset += length
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun writeOggPacketPages(
+        output: OutputStream,
+        packet: ByteArray,
+        serialNumber: Int,
+        firstSequence: Int,
+    ): Int {
+        val fullSegments = packet.size / 255
+        val totalSegments = fullSegments + 1
+        var segmentOffset = 0
+        var dataOffset = 0
+        var sequence = firstSequence
+        var firstPage = true
+        while (segmentOffset < totalSegments) {
+            val count = minOf(OGG_MAX_SEGMENTS, totalSegments - segmentOffset)
+            val lacing = ByteArray(count)
+            var dataLength = 0
+            repeat(count) { localIndex ->
+                val globalIndex = segmentOffset + localIndex
+                val length = if (globalIndex < fullSegments) 255 else packet.size % 255
+                lacing[localIndex] = length.toByte()
+                dataLength += length
+            }
+            val data = packet.copyOfRange(dataOffset, dataOffset + dataLength)
+            writeOggPage(
+                output,
+                if (firstPage) 0 else 0x01,
+                0L,
+                serialNumber,
+                sequence++,
+                lacing,
+                data,
+            )
+            segmentOffset += count
+            dataOffset += dataLength
+            firstPage = false
+        }
+        return sequence
+    }
+
+    private fun writeOggPage(
+        output: OutputStream,
+        headerType: Int,
+        granulePosition: Long,
+        serialNumber: Int,
+        sequenceNumber: Int,
+        lacing: ByteArray,
+        data: ByteArray,
+    ) {
+        require(lacing.size <= OGG_MAX_SEGMENTS)
+        require(lacing.sumOf { it.toInt() and 0xFF } == data.size)
+        val page = ByteArrayOutputStream(27 + lacing.size + data.size)
+        page.write(OGG_CAPTURE_PATTERN.toByteArray(StandardCharsets.US_ASCII))
+        page.write(0)
+        page.write(headerType and 0xFF)
+        writeLe64(page, granulePosition)
+        writeLe32(page, serialNumber)
+        writeLe32(page, sequenceNumber)
+        writeLe32(page, 0)
+        page.write(lacing.size)
+        page.write(lacing)
+        page.write(data)
+        val bytes = page.toByteArray()
+        val crc = oggCrc(bytes)
+        bytes[22] = crc.toByte()
+        bytes[23] = (crc ushr 8).toByte()
+        bytes[24] = (crc ushr 16).toByte()
+        bytes[25] = (crc ushr 24).toByte()
+        output.write(bytes)
+    }
+
+    private fun oggCrc(bytes: ByteArray): Int {
+        var crc = 0
+        for (byte in bytes) {
+            val index = ((crc ushr 24) xor (byte.toInt() and 0xFF)) and 0xFF
+            crc = (crc shl 8) xor OGG_CRC_TABLE[index]
+        }
+        return crc
+    }
+
+    private fun ByteArray.startsWithAscii(value: String): Boolean {
+        val prefix = value.toByteArray(StandardCharsets.US_ASCII)
+        if (size < prefix.size) return false
+        return prefix.indices.all { this[it] == prefix[it] }
+    }
+
+    private fun imageDimensions(bytes: ByteArray): Triple<Int, Int, Int> {
+        if (isPngBytes(bytes) && bytes.size >= 24) {
+            val width = readBeUInt32(bytes, 16).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            val height = readBeUInt32(bytes, 20).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            return Triple(width.coerceAtLeast(0), height.coerceAtLeast(0), 32)
+        }
+        if (bytes.size >= 10 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte()) {
+            val startOfFrameMarkers = setOf(0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF)
+            var offset = 2
+            while (offset + 9 < bytes.size) {
+                if ((bytes[offset].toInt() and 0xFF) != 0xFF) {
+                    offset++
+                    continue
+                }
+                var markerOffset = offset + 1
+                while (markerOffset < bytes.size && (bytes[markerOffset].toInt() and 0xFF) == 0xFF) markerOffset++
+                if (markerOffset >= bytes.size) break
+                val marker = bytes[markerOffset].toInt() and 0xFF
+                if (marker == 0xD8 || marker == 0xD9 || marker == 0x01) {
+                    offset = markerOffset + 1
+                    continue
+                }
+                if (markerOffset + 2 >= bytes.size) break
+                val segmentLength = ((bytes[markerOffset + 1].toInt() and 0xFF) shl 8) or
+                    (bytes[markerOffset + 2].toInt() and 0xFF)
+                if (segmentLength < 2 || markerOffset + 1L + segmentLength > bytes.size) break
+                if (marker in startOfFrameMarkers && segmentLength >= 8) {
+                    val precision = bytes[markerOffset + 3].toInt() and 0xFF
+                    val height = ((bytes[markerOffset + 4].toInt() and 0xFF) shl 8) or
+                        (bytes[markerOffset + 5].toInt() and 0xFF)
+                    val width = ((bytes[markerOffset + 6].toInt() and 0xFF) shl 8) or
+                        (bytes[markerOffset + 7].toInt() and 0xFF)
+                    val components = bytes.getOrNull(markerOffset + 8)?.toInt()?.and(0xFF) ?: 3
+                    return Triple(width, height, (precision * components).coerceAtLeast(1))
+                }
+                offset = markerOffset + 1 + segmentLength
+            }
+        }
+        return Triple(0, 0, 0)
+    }
+
+    private fun base64NoWrap(bytes: ByteArray): String {
+        if (bytes.isEmpty()) return ""
+        val output = CharArray(((bytes.size + 2) / 3) * 4)
+        var source = 0
+        var target = 0
+        while (source < bytes.size) {
+            val first = bytes[source++].toInt() and 0xFF
+            val hasSecond = source < bytes.size
+            val second = if (hasSecond) bytes[source++].toInt() and 0xFF else 0
+            val hasThird = source < bytes.size
+            val third = if (hasThird) bytes[source++].toInt() and 0xFF else 0
+            output[target++] = BASE64_ALPHABET[first ushr 2]
+            output[target++] = BASE64_ALPHABET[((first and 0x03) shl 4) or (second ushr 4)]
+            output[target++] = if (hasSecond) BASE64_ALPHABET[((second and 0x0F) shl 2) or (third ushr 6)] else '='
+            output[target++] = if (hasThird) BASE64_ALPHABET[third and 0x3F] else '='
+        }
+        return String(output)
+    }
+
+    private fun readLe32(bytes: ByteArray, offset: Int): Int =
+        (bytes[offset].toInt() and 0xFF) or
+            ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
+            ((bytes[offset + 2].toInt() and 0xFF) shl 16) or
+            ((bytes[offset + 3].toInt() and 0xFF) shl 24)
+
+    private fun readLe64(bytes: ByteArray, offset: Int): Long {
+        var value = 0L
+        repeat(8) { index ->
+            value = value or ((bytes[offset + index].toLong() and 0xFFL) shl (index * 8))
+        }
+        return value
+    }
+
+    private fun writeLe64(out: ByteArrayOutputStream, value: Long) {
+        repeat(8) { index -> out.write((value ushr (index * 8)).toInt() and 0xFF) }
+    }
+
+    private fun copyFromRandomAccess(
+        source: java.io.RandomAccessFile,
+        output: OutputStream,
+        offset: Long,
+        byteCount: Long,
+    ) {
+        source.seek(offset)
+        val buffer = ByteArray(64 * 1024)
+        var remaining = byteCount
+        while (remaining > 0) {
+            val read = source.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+            if (read <= 0) throw java.io.EOFException("Ogg stream ended while copying")
+            output.write(buffer, 0, read)
+            remaining -= read
+        }
+    }
 
     /** Appends native Matroska tags and an attached cover inside the WebM Segment. */
     private fun embedIntoWebm(

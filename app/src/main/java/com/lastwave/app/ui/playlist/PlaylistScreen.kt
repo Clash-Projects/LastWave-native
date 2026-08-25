@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -256,6 +257,11 @@ fun PlaylistScreen(
                                     onRename = { viewModel.requestRename(playlist.id) },
                                     onEditCover = { coverEditorPlaylistId = playlist.id },
                                     onTogglePin = { viewModel.togglePinned(playlist.id) },
+                                    onRegenerate = {
+                                        viewModel.regenerate(playlist.id) { newId ->
+                                            onOpenPlaylist(newId)
+                                        }
+                                    },
                                     onDelete = { viewModel.requestDelete(playlist.id) },
                                     onPlay = {
                                         musicPlayer.playQueue(
@@ -496,6 +502,7 @@ private fun PlaylistCard(
     onRename: () -> Unit,
     onEditCover: () -> Unit,
     onTogglePin: () -> Unit,
+    onRegenerate: () -> Unit,
     onDelete: () -> Unit,
     onPlay: () -> Unit,
 ) {
@@ -552,6 +559,20 @@ private fun PlaylistCard(
                     com.lastwave.app.ui.player.PlayingWaveBars(
                         Modifier.align(Alignment.BottomEnd).padding(4.dp),
                     )
+                }
+                if (isRegenerating) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.62f),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator(
+                                size = 26.dp,
+                                color = androidx.compose.ui.graphics.Color.White,
+                            )
+                        }
+                    }
                 }
             }
             Spacer(Modifier.width(14.dp))
@@ -641,6 +662,12 @@ private fun PlaylistCard(
                         text = { Text(if (playlist.isPinned) "Unpin" else "Pin") },
                         leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
                         onClick = { onTogglePin(); menuExpanded = false },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (isRegenerating) "Regenerating…" else "Regenerate") },
+                        leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
+                        enabled = !isRegenerating,
+                        onClick = { onRegenerate(); menuExpanded = false },
                     )
                     DropdownMenuItem(
                         text = { Text("Change cover") },

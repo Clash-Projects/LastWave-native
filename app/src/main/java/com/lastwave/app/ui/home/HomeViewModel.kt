@@ -38,7 +38,6 @@ data class HomeUiState(
     val viewingUsername: String = "",
     val stats: HomeStats? = null,
     val nowPlaying: HomeTrack? = null,
-    val listenElapsedSeconds: Int = 0,
     val sortMode: HomeSortMode = HomeSortMode.RECENT,
     val allTracks: List<HomeTrack> = emptyList(),
     val topTracksOverall: List<HomeTrack> = emptyList(),
@@ -172,6 +171,8 @@ class HomeViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+    private val _listenElapsedSeconds = MutableStateFlow(0)
+    val listenElapsedSeconds: StateFlow<Int> = _listenElapsedSeconds.asStateFlow()
 
     private var cachedTopTracks: List<HomeTrack> = emptyList()
 
@@ -492,11 +493,9 @@ class HomeViewModel @Inject constructor(
                         val trackChanged = (previousNp?.name != nowPlaying?.name || previousNp?.artist != nowPlaying?.artist)
 
                         notifyNowPlayingArtwork(nowPlaying)
+                        if (trackChanged) _listenElapsedSeconds.value = 0
                         _uiState.update { state ->
-                            state.copy(
-                                nowPlaying = nowPlaying,
-                                listenElapsedSeconds = if (trackChanged) 0 else state.listenElapsedSeconds,
-                            )
+                            state.copy(nowPlaying = nowPlaying)
                         }
                         // When a track finishes or changes, auto-refresh recent tracks list immediately
                         if (trackEnded || (trackChanged && previousNp != null)) {
@@ -511,7 +510,7 @@ class HomeViewModel @Inject constructor(
         }
         launch {
             while (true) {
-                delay(15_000L)
+                delay(RECENT_TRACKS_POLL_MS)
                 val target = _uiState.value.viewingUsername
                 if (target.isNotBlank() && !target.equals("Guest User", ignoreCase = true)) {
                     val result = runCatching { homeRepository.fetchRecentTracks(username = target, forceRefresh = true) }.getOrNull()
@@ -536,7 +535,7 @@ class HomeViewModel @Inject constructor(
             while (true) {
                 delay(LISTEN_TICK_MS)
                 if (_uiState.value.nowPlaying != null) {
-                    _uiState.update { it.copy(listenElapsedSeconds = it.listenElapsedSeconds + 1) }
+                    _listenElapsedSeconds.update { it + 1 }
                 }
             }
         }

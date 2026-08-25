@@ -15,6 +15,7 @@ import com.lastwave.app.data.repository.AuthRepository
 import com.lastwave.app.util.FileExportHelper
 import com.lastwave.app.util.PlaylistExportFormat
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,7 +77,7 @@ class PlaylistViewModel @Inject constructor(
     val uiState: StateFlow<PlaylistUiState> = _uiState.asStateFlow()
 
     val syncedPlaylistIds: StateFlow<Set<Long>?> = ytMusicPreferences.syncedPlaylistIds
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun toggleYtSync(playlistId: Long) {
         viewModelScope.launch {
@@ -185,7 +186,7 @@ class PlaylistViewModel @Inject constructor(
         )
 
     fun regenerateLatest() {
-        val newest = _uiState.value.playlists.firstOrNull() ?: return
+        val newest = _uiState.value.playlists.maxByOrNull { it.createdAtMillis } ?: return
         regenerate(newest.id)
     }
 
@@ -314,32 +315,46 @@ class PlaylistViewModel @Inject constructor(
     /** Port of §4.2's "Generate Fresh" — re-runs the same mode with the
      *  same inputs and saves a brand-new playlist inspired from the original. */
     fun regenerate(id: Long, onRegenerated: ((Long) -> Unit)? = null) {
+        if (_uiState.value.regeneratingId != null) return
+        _uiState.update {
+            it.copy(regeneratingId = id, toastMessage = "Regenerating inspired mix\u2026")
+        }
         viewModelScope.launch {
             val playlist = _uiState.value.playlists.firstOrNull { it.id == id }
                 ?: _uiState.value.detailPlaylist?.takeIf { it.id == id }
                 ?: try { playlistRepository.getById(id) } catch (_: Exception) { null }
-                ?: return@launch
+            if (playlist == null) {
+                _uiState.update {
+                    it.copy(regeneratingId = null, toastMessage = "Playlist could not be loaded")
+                }
+                return@launch
+            }
 
-            _uiState.update { it.copy(regeneratingId = id, toastMessage = "Regenerating inspired mix\u2026") }
             try {
                 val targetCount = (30..35).random()
-                val finalTracks = if (playlist.tracks.isNotEmpty()) {
+                val candidateCount = (targetCount + 15).coerceAtMost(50)
+                val candidates = if (playlist.tracks.isNotEmpty()) {
                     // fetchTasteMixForPlaylist already dedupes, filters and
                     // caps artists itself (relaxing the cap to protect the
                     // 20+ floor) — re-prechecking here would re-shrink the
                     // result, so the mix is taken as-is.
-                    generateRepository.fetchTasteMixForPlaylist(playlist.tracks, targetCount)
+                    generateRepository.fetchTasteMixForPlaylist(playlist.tracks, candidateCount)
                 } else {
                     val raw = when (playlist.mode) {
-                        "top", "library" -> generateRepository.fetchTopTracks(targetCount, "overall")
-                        "recent" -> generateRepository.fetchRecentTracks(targetCount)
+                        "top", "library" -> generateRepository.fetchTopTracks(candidateCount, "overall")
+                        "recent" -> generateRepository.fetchRecentTracks(candidateCount)
                         "recommendations" -> generateRepository.fetchRecommendations(targetCount)
-                        else -> generateRepository.fetchMix(targetCount)
+                        else -> generateRepository.fetchMix(candidateCount)
                     }
-                    generateRepository.precheck(raw).take(targetCount).ifEmpty {
-                        generateRepository.deduplicate(raw).take(targetCount)
+                    generateRepository.precheck(raw).ifEmpty {
+                        generateRepository.deduplicate(raw)
                     }
                 }
+                val finalTracks = generateRepository.preferPlaylistFreshness(
+                    tracks = candidates,
+                    limit = targetCount,
+                    savedKeys = generateRepository.savedPlaylistTrackKeys(),
+                )
 
                 if (finalTracks.isEmpty()) {
                     throw IllegalStateException("No tracks found to mix for this playlist.")
@@ -360,11 +375,17 @@ class PlaylistViewModel @Inject constructor(
 
                 val subtitle = "Inspired by ${playlist.title}"
                 val saved = playlistRepository.save(title, subtitle, playlist.mode, finalTracks)
-                _uiState.update { it.copy(regeneratingId = null, toastMessage = "Created \"$title\" (${finalTracks.size} tracks)") }
+                _uiState.update { it.copy(toastMessage = "Created \"$title\" (${finalTracks.size} tracks)") }
                 load(justGeneratedId = saved.id)
                 onRegenerated?.invoke(saved.id)
+            } catch (error: CancellationException) {
+                throw error
             } catch (e: Exception) {
-                _uiState.update { it.copy(regeneratingId = null, toastMessage = e.message ?: "Couldn't regenerate playlist") }
+                _uiState.update { it.copy(toastMessage = e.message ?: "Couldn't regenerate playlist") }
+            } finally {
+                _uiState.update { current ->
+                    if (current.regeneratingId == id) current.copy(regeneratingId = null) else current
+                }
             }
         }
     }

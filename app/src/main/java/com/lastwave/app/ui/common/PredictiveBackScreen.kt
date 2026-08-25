@@ -139,7 +139,10 @@ fun PredictiveBackScreen(
                 translationX = edgeSign * 28.dp.toPx() * p
                 alpha = 1f - 0.25f * p
                 shape = RoundedCornerShape(lerp(0.dp, 32.dp, p))
-                clip = true
+                // Clipping a full-screen LazyColumn at rest forces extra GPU
+                // work on every frame. It is only visually needed while a
+                // predictive-back gesture has actually rounded the corners.
+                clip = p > 0f
                 shadowElevation = if (p > 0f) 24f else 0f
             },
     ) {

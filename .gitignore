@@ -40,6 +40,8 @@ local.properties
 .DS_Store
 Thumbs.db
 .acside/
+.codex/
+*.codex
 
 # Screenshots
 Screenshot/release.jks

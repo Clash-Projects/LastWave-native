@@ -4,6 +4,7 @@ import android.util.Log
 import com.lastwave.app.data.local.db.ArtworkCacheDao
 import com.lastwave.app.data.local.db.ArtworkCacheEntity
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
@@ -14,7 +15,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
@@ -65,7 +68,10 @@ class ArtworkRepository @Inject constructor(
                 val now = System.currentTimeMillis()
                 cacheDao.deleteOlderThan(now - DISK_CACHE_TTL_MILLIS)
                 cacheDao.trimToNewest(MAX_ARTWORK_DB_ENTRIES)
-                val cachedEntities = cacheDao.getAll()
+                // Only prewarm what the in-memory cache can retain. Reading
+                // all 1,000 rows just to discard 400 on the first new cover
+                // inflated startup DB work and the first map copy.
+                val cachedEntities = cacheDao.getNewest(MAX_ARTWORK_MEMORY_ENTRIES).asReversed()
                 val validMap = cachedEntities
                     .filter { it.url.isNotBlank() && now - it.timestampMillis < DISK_CACHE_TTL_MILLIS }
                     .associate { it.cacheKey to it.url }
@@ -80,6 +86,10 @@ class ArtworkRepository @Inject constructor(
     // Avoids firing a second lookup for a track that's already mid-resolve.
     private val inFlight = mutableSetOf<String>()
     private val inFlightMutex = Mutex()
+    // One visible list can request dozens of missing covers at once. Each
+    // cover races three providers, so cap races globally to avoid socket,
+    // JSON and bitmap pressure overwhelming low-memory phones.
+    private val networkRaceSemaphore = Semaphore(4)
 
     /** Public entry point. Deliberately catches Throwable, not just
      *  Exception — an artwork miss must never take the app down, full stop. */
@@ -87,6 +97,9 @@ class ArtworkRepository @Inject constructor(
         val key = ArtworkNormalizer.cacheKey(name, artist)
         try {
             resolveInternal(key, name, artist)
+        } catch (cancellation: CancellationException) {
+            inFlightMutex.withLock { inFlight.remove(key) }
+            throw cancellation
         } catch (t: Throwable) {
             Log.e(CRASH_TAG, "Artwork lookup crashed and was suppressed | Track: $name | Artist: $artist | Cache key: $key", t)
             inFlightMutex.withLock { inFlight.remove(key) }
@@ -116,39 +129,29 @@ class ArtworkRepository @Inject constructor(
                 return
             }
 
-            // 3. Multi-Provider High-Speed Parallel Racing (Deezer, iTunes, YouTube Music)
-            val channel = kotlinx.coroutines.channels.Channel<Pair<String, String>>(3)
-            val jobs = mutableListOf<kotlinx.coroutines.Job>()
-
-            // Provider A: Deezer (Ultra-fast 80ms public CDN, 1000x1000)
-            jobs += scope.launch(Dispatchers.IO) {
-                val url = fetchDeezer(name, artist)
-                if (!url.isNullOrBlank()) channel.trySend(Pair("deezer", url))
-            }
-
-            // Provider B: iTunes / Apple Music (1200x1200 upscaled)
-            jobs += scope.launch(Dispatchers.IO) {
-                val url = safeFetch("iTunes", name, artist) { itunes.fetchArtworkUrl(name, artist) }
-                if (!url.isNullOrBlank()) channel.trySend(Pair("itunes", url))
-            }
-
-            // Provider C: YouTube Music Catalog (Universal 1200x1200 artwork)
-            jobs += scope.launch(Dispatchers.IO) {
-                val url = fetchYouTubeMusic(name, artist)
-                if (!url.isNullOrBlank()) channel.trySend(Pair("youtube", url))
-            }
-
-            val winner = try {
-                kotlinx.coroutines.withTimeoutOrNull(3_000L) {
-                    channel.receive()
+            // 3. Multi-provider race, bounded across all visible rows.
+            val winner = networkRaceSemaphore.withPermit {
+                val channel = kotlinx.coroutines.channels.Channel<Pair<String, String>>(3)
+                val jobs = mutableListOf<kotlinx.coroutines.Job>()
+                jobs += scope.launch(Dispatchers.IO) {
+                    val url = fetchDeezer(name, artist)
+                    if (!url.isNullOrBlank()) channel.trySend(Pair("deezer", url))
                 }
-            } catch (_: Exception) {
-                null
-            } finally {
-                channel.close()
-                jobs.forEach { it.cancel() }
+                jobs += scope.launch(Dispatchers.IO) {
+                    val url = safeFetch("iTunes", name, artist) { itunes.fetchArtworkUrl(name, artist) }
+                    if (!url.isNullOrBlank()) channel.trySend(Pair("itunes", url))
+                }
+                jobs += scope.launch(Dispatchers.IO) {
+                    val url = fetchYouTubeMusic(name, artist)
+                    if (!url.isNullOrBlank()) channel.trySend(Pair("youtube", url))
+                }
+                try {
+                    kotlinx.coroutines.withTimeoutOrNull(3_000L) { channel.receive() }
+                } finally {
+                    channel.close()
+                    jobs.forEach { it.cancel() }
+                }
             }
-
 
             if (winner != null) {
                 save(key, winner.first, winner.second)

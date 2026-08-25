@@ -28,7 +28,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.ui.common.ExpressiveGroupSelectRow
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.groupPositionFor
@@ -50,10 +50,10 @@ fun ScrobblerAppsScreen(
     onBack: () -> Unit = {},
     viewModel: ScrobblerAppsViewModel = hiltViewModel(),
 ) {
-    val apps by viewModel.apps.collectAsState()
-    val selected by viewModel.selectedPackages.collectAsState()
-    val loading by viewModel.loading.collectAsState()
-    val query by viewModel.query.collectAsState()
+    val apps by viewModel.apps.collectAsStateWithLifecycle()
+    val selected by viewModel.selectedPackages.collectAsStateWithLifecycle()
+    val loading by viewModel.loading.collectAsStateWithLifecycle()
+    val query by viewModel.query.collectAsStateWithLifecycle()
 
     val detectedCount = apps.count { it.isKnownMusicPlayer }
     val undetectedSelected = detectedCount > 0 && apps.filter { it.isKnownMusicPlayer }.any { it.packageName !in selected }

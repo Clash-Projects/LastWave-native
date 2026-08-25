@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.artwork.ArtworkRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -27,6 +28,8 @@ class ArtworkViewModel @Inject constructor(
             // track row happens to be on.
             try {
                 repository.resolve(name = name, artist = artist)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (t: Throwable) {
                 Log.e(CRASH_TAG, "Unexpected exception escaped ArtworkRepository.resolve() and was suppressed | Track: $name | Artist: $artist", t)
             }

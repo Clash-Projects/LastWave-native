@@ -1,11 +1,5 @@
 package com.lastwave.app.ui.common
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,14 +24,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -46,9 +35,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.liquidGlassChrome
 
@@ -160,72 +146,38 @@ fun ExpressiveHeader(
     }
 }
 
-/** Paints two soft radial glows (accent colors fading to nothing) whose centers
- *  slowly drifts side to side — a continuous, gentle infinite-transition
- *  animation, not a fixed static blob — used as [ExpressiveHeader]'s
- *  background instead of a blurred shape (see the class doc for why it's
- *  a plain gradient rather than Modifier.blur()). */
+/** Cached accent glows for [ExpressiveHeader]. Keeping these static avoids
+ * repainting two full-width gradients every frame on every screen. */
 @Composable
 private fun Modifier.drawGlowBackground(color: Color, secondaryColor: Color): Modifier {
-    // The drift animation only runs while the app is actually in the
-    // foreground. An always-on infinite transition forced RenderThread to
-    // repaint two full-width radial gradients every single frame — on every
-    // screen, forever, even when the app was backgrounded or the user was
-    // just reading a static screen. Leaving composition when not resumed
-    // stops that invalidation loop entirely; visually identical while the
-    // app is visible (the glow simply holds still otherwise).
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var resumed by remember { mutableStateOf(true) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            resumed = event == Lifecycle.Event.ON_RESUME
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val drift: Float = if (resumed) {
-        val transition = rememberInfiniteTransition(label = "headerGlowDrift")
-        val animated by transition.animateFloat(
-            initialValue = -1f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 7000, easing = LinearEasing),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "headerGlowDriftX",
-        )
-        animated
-    } else {
-        0f
-    }
-    return this.drawBehind {
-        val cx = size.width / 2f + drift * size.width * 0.30f
+    return this.drawWithCache {
+        val cx = size.width * 0.58f
         val cy = size.height * 0.46f
         val radius = (size.width.coerceAtLeast(size.height) * 1.08f).coerceAtLeast(1f)
-        val secondaryCx = size.width / 2f - drift * size.width * 0.24f
+        val secondaryCx = size.width * 0.38f
         val secondaryRadius = (size.width.coerceAtLeast(size.height) * 0.72f).coerceAtLeast(1f)
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    secondaryColor.copy(alpha = 0.13f),
-                    secondaryColor.copy(alpha = 0.045f),
-                    secondaryColor.copy(alpha = 0f),
-                ),
-                center = Offset(secondaryCx, size.height * 0.78f),
-                radius = secondaryRadius,
+        val secondaryBrush = Brush.radialGradient(
+            colors = listOf(
+                secondaryColor.copy(alpha = 0.13f),
+                secondaryColor.copy(alpha = 0.045f),
+                secondaryColor.copy(alpha = 0f),
             ),
+            center = Offset(secondaryCx, size.height * 0.78f),
+            radius = secondaryRadius,
         )
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    color.copy(alpha = 0.23f),
-                    color.copy(alpha = 0.07f),
-                    color.copy(alpha = 0f),
-                ),
-                center = Offset(cx, cy),
-                radius = radius,
+        val primaryBrush = Brush.radialGradient(
+            colors = listOf(
+                color.copy(alpha = 0.23f),
+                color.copy(alpha = 0.07f),
+                color.copy(alpha = 0f),
             ),
+            center = Offset(cx, cy),
+            radius = radius,
         )
+        onDrawBehind {
+            drawRect(brush = secondaryBrush)
+            drawRect(brush = primaryBrush)
+        }
     }
 }
 

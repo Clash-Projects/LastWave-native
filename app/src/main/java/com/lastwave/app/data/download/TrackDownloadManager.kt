@@ -181,10 +181,11 @@ class TrackDownloadManager @Inject constructor(
                 if (resolvedArtworkUrl == null) {
                     artworkRepository.resolve(title, artist)
                     val cacheKey = ArtworkNormalizer.cacheKey(title, artist)
-                    resolvedArtworkUrl = artworkRepository.resolved.value[cacheKey]?.takeIf { it.isNotBlank() }
+                    resolvedArtworkUrl = artworkRepository.resolved.value[cacheKey]
+                        ?.takeIf { ArtworkNormalizer.isRealImage(it) }
                         ?: kotlinx.coroutines.withTimeoutOrNull(3_500L) {
                             artworkRepository.resolved.first { it.containsKey(cacheKey) }[cacheKey]
-                        }?.takeIf { it.isNotBlank() }
+                        }?.takeIf { ArtworkNormalizer.isRealImage(it) }
                 }
 
                 // 1. Resolve source — respect user's Qobuz preference for downloads too
@@ -381,8 +382,9 @@ class TrackDownloadManager @Inject constructor(
 
                     // 4. Embed metadata, cover art AND lyrics directly into the
                     // downloaded audio file (container-aware: Vorbis comments +
-                    // PICTURE for FLAC, iTunes atoms for M4A, ID3v2.3 otherwise).
-                    audioTagWriter.embedMetadata(
+                    // PICTURE for FLAC/Opus, Matroska tags for WebM,
+                    // iTunes atoms for M4A, ID3v2.3 otherwise).
+                    val metadataEmbedded = audioTagWriter.embedMetadata(
                         audioFile = tempDownloadFile,
                         title = title,
                         artist = artist,
@@ -390,6 +392,9 @@ class TrackDownloadManager @Inject constructor(
                         artworkUrl = resolvedArtworkUrl,
                         lyrics = syncedLyrics ?: plainLyrics,
                     )
+                    if (!metadataEmbedded) {
+                        throw IOException("Could not safely embed audio metadata")
+                    }
 
                     // 5. Transfer tagged file to public storage / MediaStore
                     val (destStream, uri, file) = openPublicOutputStream(

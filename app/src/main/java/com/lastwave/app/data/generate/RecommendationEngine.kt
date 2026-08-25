@@ -45,6 +45,7 @@ private data class Scored(
     val weight: Int,
     val tags: Set<String>,
     val fresh: Boolean,
+    val familiar: Boolean,
     val score: Double,
 )
 
@@ -135,7 +136,15 @@ class RecommendationEngine(
     private fun matchBonus(track: GeneratedTrack): Int =
         track.match?.let { (it * 34).roundToInt() } ?: 0
 
-    private fun recoScore(track: GeneratedTrack, profile: TasteProfile, bucketWeight: Int, isPrimaryGenre: Boolean, sourceCount: Int, fresh: Boolean): Double {
+    private fun recoScore(
+        track: GeneratedTrack,
+        profile: TasteProfile,
+        bucketWeight: Int,
+        isPrimaryGenre: Boolean,
+        sourceCount: Int,
+        fresh: Boolean,
+        familiar: Boolean,
+    ): Double {
         var score = 0.0
         val bw = if (bucketWeight <= 0) 1 else bucketWeight
 
@@ -159,6 +168,7 @@ class RecommendationEngine(
         score += communityScore(track)
 
         score += if (fresh) 6 else -20
+        if (familiar) score -= 22
         score += Random.nextDouble() * 2
 
         return score
@@ -413,21 +423,29 @@ class RecommendationEngine(
         }
     }
 
-    // ── Selection — progressive diversity relaxation, strict freshness ──
+    // ── Selection — progressive diversity relaxation, strict exclusions ──
 
     private fun selectFinal(scored: List<Scored>, total: Int): List<GeneratedTrack> {
         val genreCap = maxOf(2, ceil(total * RECO_GENRE_CAP_RATIO).toInt())
 
-        fun attempt(artistCap: Int, albumCapOn: Boolean, genreCapOn: Boolean, freshOnly: Boolean): List<GeneratedTrack> {
+        fun attempt(
+            artistCap: Int,
+            albumCapOn: Boolean,
+            genreCapOn: Boolean,
+            freshOnly: Boolean,
+            familiarCap: Int,
+        ): List<GeneratedTrack> {
             val artistCount = mutableMapOf<String, Int>()
             val albumCount = mutableMapOf<String, Int>()
             val genreCount = mutableMapOf<String, Int>()
             val pickedKeys = mutableSetOf<String>()
             val picked = mutableListOf<GeneratedTrack>()
+            var familiarCount = 0
             for (c in scored) {
                 val key = c.track.key
                 if (key in pickedKeys) continue
                 if (freshOnly && !c.fresh) continue
+                if (c.familiar && familiarCount >= familiarCap) continue
                 val ak = c.track.artist.trim().lowercase()
                 if ((artistCount[ak] ?: 0) >= artistCap) continue
                 if (albumCapOn && !c.track.album.isNullOrBlank()) {
@@ -448,17 +466,23 @@ class RecommendationEngine(
                 }
                 pickedKeys.add(key)
                 picked.add(c.track)
+                if (c.familiar) familiarCount++
                 if (picked.size >= total) break
             }
             return picked
         }
 
-        // Diversity may relax, but an explicitly excluded song never does.
-        var result = attempt(RECO_ARTIST_CAP, true, true, true)
-        if (result.size < total) result = attempt(3, true, true, true)
-        if (result.size < total) result = attempt(3, true, false, true)
-        if (result.size < total) result = attempt(3, false, false, true)
-        if (result.size < total) result = attempt(99, false, false, true)
+        // Saved-playlist songs are softly capped, then progressively allowed
+        // back only when the fresh pool cannot fill the requested playlist.
+        // Explicit recommendation exclusions remain strict throughout.
+        val familiarCap = maxOf(1, total / 6)
+        var result = attempt(RECO_ARTIST_CAP, true, true, true, familiarCap)
+        if (result.size < total) result = attempt(3, true, true, true, familiarCap)
+        if (result.size < total) result = attempt(3, true, false, true, familiarCap)
+        if (result.size < total) result = attempt(3, false, false, true, familiarCap)
+        if (result.size < total) result = attempt(99, false, false, true, familiarCap)
+        if (result.size < total) result = attempt(99, false, false, true, maxOf(familiarCap, total / 3))
+        if (result.size < total) result = attempt(99, false, false, true, total)
         return result
     }
 
@@ -487,8 +511,14 @@ class RecommendationEngine(
         return out
     }
 
-    /** Main entry point for a complete, strictly fresh recommendation set. */
-    suspend fun run(total: Int, profile: TasteProfile, blacklist: Set<String>): List<GeneratedTrack> {
+    /** Main entry point for a complete recommendation set. [blacklist] is
+     *  strict; [familiarKeys] only lowers and caps already-saved songs. */
+    suspend fun run(
+        total: Int,
+        profile: TasteProfile,
+        blacklist: Set<String>,
+        familiarKeys: Set<String> = emptySet(),
+    ): List<GeneratedTrack> {
         onProgress("Reading your listening mood\u2026")
         val ctx = RecoContext(total, profile, blacklist)
         ctx.addAll(profile.ytMusicFeedRaw.take(40), 3, "yt-feed")
@@ -528,12 +558,14 @@ class RecommendationEngine(
 
         val scored = ctx.pool.values.map { c ->
             val fresh = c.track.key in freshKeysFinal
+            val familiar = c.track.key in familiarKeys
             Scored(
                 track = c.track,
                 weight = c.weight,
                 tags = c.tags,
                 fresh = fresh,
-                score = recoScore(c.track, profile, c.weight, c.isPrimaryGenre, c.tags.size, fresh),
+                familiar = familiar,
+                score = recoScore(c.track, profile, c.weight, c.isPrimaryGenre, c.tags.size, fresh, familiar),
             )
         }.sortedWith(compareByDescending<Scored> { it.fresh }.thenByDescending { it.score })
 

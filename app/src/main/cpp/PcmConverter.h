@@ -40,8 +40,9 @@ public:
         switch (format) {
             case PcmFormat::Int16:
                 for (std::size_t i = 0; i < sampleCount; ++i) {
-                    const std::uint16_t raw = static_cast<std::uint16_t>(bytes[0]) |
-                        (static_cast<std::uint16_t>(bytes[1]) << 8U);
+                    const std::uint16_t raw = static_cast<std::uint16_t>(
+                        static_cast<std::uint16_t>(bytes[0]) |
+                        (static_cast<std::uint16_t>(bytes[1]) << 8U));
                     std::int16_t value;
                     std::memcpy(&value, &raw, sizeof(value));
                     output[i] = static_cast<float>(value) / 32768.0F;
@@ -70,8 +71,7 @@ public:
                         (static_cast<std::uint32_t>(bytes[3]) << 24U);
                     std::int32_t value;
                     std::memcpy(&value, &raw, sizeof(value));
-                    output[i] = static_cast<float>(
-                        static_cast<double>(value) / 2147483648.0);
+                    output[i] = static_cast<float>(value) / 2147483648.0F;
                     bytes += 4;
                 }
                 return true;
