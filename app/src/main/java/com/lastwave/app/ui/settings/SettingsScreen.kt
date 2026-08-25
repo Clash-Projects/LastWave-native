@@ -567,13 +567,13 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = "Studio Master Clarity",
-                                subtitle = if (misc.musicEnhancerEnabled) {
+                                subtitle = if (misc.isStudioMasterClarityEnabled) {
                                     "Crystal-clear open sound \u2022 airy detail \u2022 deep clean separation"
                                 } else {
                                     "Original unshaped output"
                                 },
-                                checked = misc.musicEnhancerEnabled,
-                                onCheckedChange = viewModel::setMusicEnhancer,
+                                checked = misc.isStudioMasterClarityEnabled,
+                                onCheckedChange = viewModel::setStudioMasterClarity,
                                 position = position,
                             )
                             4 -> SettingsActionCard(
@@ -582,9 +582,9 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 title = "Volume Boost",
                                 subtitle = if (misc.volumeBoostEnabled) {
-                                    "On • ${misc.volumeBoostPercent}% output • use carefully"
+                                    "Native clean gain • ${misc.volumeBoostPercent}% • -1 dBFS protected"
                                 } else {
-                                    "Optional clean gain up to 200%"
+                                    "Optional native adaptive gain up to 200%"
                                 },
                                 onClick = { showVolumeBoostSheet = true },
                                 position = position,

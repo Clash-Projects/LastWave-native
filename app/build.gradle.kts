@@ -20,6 +20,12 @@ android {
         val rawApiKey = System.getenv("QOBUZ_API_KEY") ?: (project.findProperty("QOBUZ_API_KEY") as? String) ?: ""
         val qobuzApiKey = rawApiKey.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
         buildConfigField("String", "QOBUZ_API_KEY", "\"$qobuzApiKey\"")
+
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_STL=c++_shared")
+            }
+        }
     }
 
     signingConfigs {
@@ -62,6 +68,13 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        prefab = true
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.14"
@@ -133,6 +146,10 @@ dependencies {
     // Native in-app audio playback, background service, system media
     // controls, Bluetooth/headset controls and a MediaController-backed UI.
     implementation("androidx.media3:media3-exoplayer:1.2.1")
+
+    // Low-latency native output. Version 1.10 remains API-compatible with the
+    // requested Oboe 1.8+ baseline and exposes its CMake target through Prefab.
+    implementation("com.google.oboe:oboe:1.10.0")
 
     // Resolves YouTube's current protected/ciphered playback URLs locally.
     // InnerTube remains responsible for YouTube Music search and metadata.

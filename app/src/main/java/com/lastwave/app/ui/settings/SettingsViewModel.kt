@@ -18,6 +18,7 @@ import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.repository.AuthRepository
 import com.lastwave.app.data.repository.ThemeRepository
 import com.lastwave.app.data.repository.ThemeUiState
+import com.lastwave.app.playback.NativeAudioEngine
 import com.lastwave.app.util.FileExportHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,6 +57,7 @@ class SettingsViewModel @Inject constructor(
     private val sessionPreferences: SessionPreferences,
     private val themeRepository: ThemeRepository,
     private val settingsPreferences: SettingsPreferences,
+    private val audioEngine: NativeAudioEngine,
     private val generateRepository: GenerateRepository,
     private val discoverRepository: com.lastwave.app.data.discover.DiscoverRepository,
     private val backupRepository: BackupRepository,
@@ -110,6 +112,7 @@ class SettingsViewModel @Inject constructor(
     /** Experimental 15-band equalizer state (Settings → Experimental). */
     val equalizer: StateFlow<EqualizerSettings> = equalizerPreferences.settings
         .stateIn(viewModelScope, SharingStarted.Eagerly, EqualizerSettings())
+    private var immediateEqGains = EqualizerSettings().gainsDb.toFloatArray()
 
     val downloadCount: StateFlow<Int> = downloadedTrackDao.count()
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
@@ -122,6 +125,9 @@ class SettingsViewModel @Inject constructor(
 
     init {
         refreshRecommendationExclusionCount()
+        viewModelScope.launch {
+            equalizer.collect { immediateEqGains = it.gainsDb.toFloatArray() }
+        }
         viewModelScope.launch {
             generateRepository.observeRecommendationExclusions().collect { exclusions ->
                 _uiState.update { it.copy(recommendationExclusionCount = exclusions.size) }
@@ -171,27 +177,46 @@ class SettingsViewModel @Inject constructor(
     fun setUseCustomFont(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setUseCustomFont(enabled) }
     fun setPreferQobuzStreaming(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setPreferQobuzStreaming(enabled) }
     fun setQobuzQuality(quality: Int) = viewModelScope.launch { settingsPreferences.setQobuzQuality(quality) }
-    fun setMusicEnhancer(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setMusicEnhancer(enabled) }
+    fun setStudioMasterClarity(enabled: Boolean) {
+        // Apply immediately; DataStore persists the same state for future engine instances.
+        audioEngine.setStudioMasterClarity(enabled)
+        viewModelScope.launch { settingsPreferences.setStudioMasterClarity(enabled) }
+    }
     fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = viewModelScope.launch { settingsPreferences.setLyricsAnimation(animation) }
-    fun setVolumeBoostEnabled(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setVolumeBoostEnabled(enabled) }
-    fun setVolumeBoostPercent(percent: Int) = viewModelScope.launch { settingsPreferences.setVolumeBoostPercent(percent) }
+    fun setVolumeBoostEnabled(enabled: Boolean) {
+        audioEngine.setVolumeBoost(enabled, misc.value.volumeBoostPercent)
+        viewModelScope.launch { settingsPreferences.setVolumeBoostEnabled(enabled) }
+    }
+    fun setVolumeBoostPercent(percent: Int) {
+        val safePercent = percent.coerceIn(100, 200)
+        audioEngine.setVolumeBoost(misc.value.volumeBoostEnabled, safePercent)
+        viewModelScope.launch { settingsPreferences.setVolumeBoostPercent(safePercent) }
+    }
     fun setFullScreenCoverArt(enabled: Boolean) = viewModelScope.launch { settingsPreferences.setFullScreenCoverArt(enabled) }
 
     // ── Experimental: 15-band equalizer ──
 
-    fun setEqualizerEnabled(enabled: Boolean) = viewModelScope.launch { equalizerPreferences.setEnabled(enabled) }
+    fun setEqualizerEnabled(enabled: Boolean) {
+        audioEngine.setEqualizer(enabled, immediateEqGains)
+        viewModelScope.launch { equalizerPreferences.setEnabled(enabled) }
+    }
 
     /** Selecting a preset also switches the EQ on — an off equalizer with a
      *  fresh preset would read as a dead control. */
     fun applyEqPreset(name: String) {
         com.lastwave.app.data.local.EqualizerPresets.byName(name)?.let { preset ->
+            immediateEqGains = preset.gainsDb.toFloatArray()
+            audioEngine.setEqualizer(true, immediateEqGains)
             viewModelScope.launch { equalizerPreferences.applyPreset(preset) }
         }
     }
 
     /** Manual band drag → curve becomes Custom. */
-    fun setEqBandGain(bandIndex: Int, gainDb: Float) = viewModelScope.launch {
-        equalizerPreferences.setBandGain(bandIndex, gainDb)
+    fun setEqBandGain(bandIndex: Int, gainDb: Float) {
+        if (bandIndex !in immediateEqGains.indices) return
+        immediateEqGains = immediateEqGains.copyOf().also { it[bandIndex] = gainDb }
+        audioEngine.setEqualizer(equalizer.value.enabled, immediateEqGains)
+        viewModelScope.launch { equalizerPreferences.setBandGain(bandIndex, gainDb) }
     }
 
     // ── Data management (§8.5) ──

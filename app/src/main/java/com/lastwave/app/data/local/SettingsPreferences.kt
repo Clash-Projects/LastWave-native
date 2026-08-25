@@ -52,7 +52,7 @@ data class MiscSettings(
     /** Audiophile Studio Clarity — studio-grade clarity curve (vocal presence +
      *  air sparkle + anti-clipping limiter) that delivers pristine sound out of the box.
      *  Defaults to true on fresh install. */
-    val musicEnhancerEnabled: Boolean = true,
+    val isStudioMasterClarityEnabled: Boolean = true,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     /** Experimental output gain. Disabled by default; when enabled the DSP
@@ -89,7 +89,7 @@ class SettingsPreferences @Inject constructor(
             pinnedFriends = p[Keys.PINNED_FRIENDS] ?: emptySet(),
             preferQobuzStreaming = p[Keys.PREFER_QOBUZ_STREAMING] ?: true,
             qobuzQuality = p[Keys.QOBUZ_QUALITY] ?: 27,
-            musicEnhancerEnabled = p[Keys.MUSIC_ENHANCER] ?: true,
+            isStudioMasterClarityEnabled = p[Keys.MUSIC_ENHANCER] ?: true,
             lyricsAnimation = LyricsAnimation.fromId(p[Keys.LYRICS_ANIMATION]),
             volumeBoostEnabled = p[Keys.VOLUME_BOOST_ENABLED] ?: false,
             volumeBoostPercent = (p[Keys.VOLUME_BOOST_PERCENT] ?: 100).coerceIn(100, 200),
@@ -113,7 +113,7 @@ class SettingsPreferences @Inject constructor(
         dataStore.edit { it[Keys.QOBUZ_QUALITY] = quality }
     }
 
-    suspend fun setMusicEnhancer(enabled: Boolean) {
+    suspend fun setStudioMasterClarity(enabled: Boolean) {
         dataStore.edit { it[Keys.MUSIC_ENHANCER] = enabled }
     }
 

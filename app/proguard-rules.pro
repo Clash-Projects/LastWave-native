@@ -8,6 +8,9 @@
 
 -keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod
 
+# JNI exports use the Kotlin class and method names verbatim.
+-keep class com.lastwave.app.playback.NativeAudioEngine { *; }
+
 # kotlinx.serialization: keep generated serializers and Serializable models
 -keepclassmembers class com.lastwave.app.** {
     *** Companion;

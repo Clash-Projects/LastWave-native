@@ -23,7 +23,7 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
-import android.media.audiofx.AudioEffect
+import android.media.AudioManager
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -152,7 +152,7 @@ class MusicPlayer @Inject constructor(
     private val qobuzMusicApi: QobuzMusicApi,
     private val settingsPreferences: SettingsPreferences,
     private val discoverRepository: DiscoverRepository,
-    private val audioEffects: AudioEffectsEngine,
+    private val nativeAudioEngine: NativeAudioEngine,
     private val applicationScope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
@@ -227,22 +227,6 @@ class MusicPlayer @Inject constructor(
                 unavailableMediaIds.clear()
                 errorRetryCount = 0
                 retryMediaId = player.currentMediaItem?.mediaId
-            }
-        }
-        override fun onAudioSessionIdChanged(audioSessionId: Int) {
-            // The Experimental equalizer / music-enhancer effects must follow
-            // the session id wherever the platform audio server rebinds it.
-            audioEffects.attach(audioSessionId)
-            // Broadcast audio session open intent for system equalizer / spatial audio / DSP (Pixel Audio / Wavelet / Viper)
-            if (audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
-                runCatching {
-                    val intent = Intent(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION).apply {
-                        putExtra(AudioEffect.EXTRA_AUDIO_SESSION, audioSessionId)
-                        putExtra(AudioEffect.EXTRA_PACKAGE_NAME, appContext.packageName)
-                        putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC)
-                    }
-                    appContext.sendBroadcast(intent)
-                }
             }
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -393,8 +377,8 @@ class MusicPlayer @Inject constructor(
             .setBufferDurationsMs(
                 /* minBufferMs = */ 30_000,
                 /* maxBufferMs = */ 60_000,
-                /* bufferForPlaybackMs = */ 250, // Instant ultra-reactive playback trigger
-                /* bufferForPlaybackAfterRebufferMs = */ 1_000,
+                /* bufferForPlaybackMs = */ 3_000,
+                /* bufferForPlaybackAfterRebufferMs = */ 6_000,
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(15_000, true)
@@ -405,11 +389,21 @@ class MusicPlayer @Inject constructor(
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
             ): androidx.media3.exoplayer.audio.AudioSink {
-                return DefaultAudioSink.Builder(context)
+                val platformSink = DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(true)
                     .setEnableAudioTrackPlaybackParams(true)
                     .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
                     .build()
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                val nativeMixerRate = audioManager
+                    ?.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
+                    ?.toIntOrNull()
+                    ?.takeIf { it in 8_000..384_000 }
+                    ?: 48_000
+                return NativeProcessingAudioSink(
+                    delegate = platformSink,
+                    processor = NativePcmAudioProcessor(nativeAudioEngine, nativeMixerRate),
+                )
             }
         }.apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
@@ -446,9 +440,6 @@ class MusicPlayer @Inject constructor(
         if (restored) {
             runCatching {
                 refresh(player)
-                // If a session id already exists (restored playback), effects
-                // attach now; otherwise onAudioSessionIdChanged covers it later.
-                audioEffects.attach(player.audioSessionId)
             }.onFailure {
                 android.util.Log.e("MusicPlayer", "Restored player setup failed", it)
                 _state.value = MusicPlayerState()
