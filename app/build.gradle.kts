@@ -16,8 +16,8 @@ android {
         applicationId = "com.lastwave.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 11
-        versionName = "3.2.1"
+        versionCode = 12
+        versionName = "3.3.0"
 
         val localProps = Properties().apply {
             val localPropsFile = rootProject.file("local.properties")
