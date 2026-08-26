@@ -47,7 +47,7 @@ import kotlin.math.sin
  * Shifts the Hue and boosts Saturation/Value of a Compose Color to produce
  * a harmonious, vibrant neon companion hue.
  */
-private fun Color.shiftNeonHue(hueOffset: Float, saturationScale: Float = 1.15f, valueScale: Float = 1.1f): Color {
+private fun Color.shiftNeonHue(hueOffset: Float, saturationScale: Float = 1.2f, valueScale: Float = 1.15f): Color {
     val hsv = FloatArray(3)
     android.graphics.Color.RGBToHSV(
         (red * 255).toInt().coerceIn(0, 255),
@@ -55,24 +55,23 @@ private fun Color.shiftNeonHue(hueOffset: Float, saturationScale: Float = 1.15f,
         (blue * 255).toInt().coerceIn(0, 255),
         hsv,
     )
-    // If the color is nearly grayscale, give it an electric violet-blue base
-    if (hsv[1] < 0.1f) {
-        hsv[0] = 270f
+    if (hsv[1] < 0.15f) {
+        hsv[0] = 265f // Electric Indigo default
         hsv[1] = 0.85f
     }
     var h = (hsv[0] + hueOffset) % 360f
     if (h < 0f) h += 360f
     hsv[0] = h
     hsv[1] = (hsv[1] * saturationScale).coerceIn(0.70f, 1.0f)
-    hsv[2] = (hsv[2] * valueScale).coerceIn(0.80f, 1.0f)
+    hsv[2] = (hsv[2] * valueScale).coerceIn(0.85f, 1.0f)
     val rgb = android.graphics.Color.HSVToColor(hsv)
     return Color(rgb)
 }
 
 /**
- * 3-Layer Translucent Multi-Chromatic Neon Glass Waveform Seekbar.
- * Features 3 fluid, distinct-hued neon wave layers derived from the theme and album art,
- * filled down to the baseline with thin luminous crest highlights,
+ * Premium Odyssey Glowing Neon Waveform Seekbar.
+ * Features 3 fluid, multi-chromatic neon wave hills (electric blue, indigo, and glowing purple)
+ * filled down to a crisp glowing baseline with razor-sharp rim highlights,
  * quintic smootherstep boundary convergence, and a clean straight unplayed baseline.
  */
 @Composable
@@ -90,17 +89,17 @@ fun WavySeekBar(
     val shownFraction = if (dragging) dragFraction else currentFraction
     val shownMs = (shownFraction * durationMs).toLong()
 
-    val rawBaseColor = if (isTranslucent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary
+    val rawBaseColor = MaterialTheme.colorScheme.primary
 
-    // 3 Harmonious Neon Hues derived from theme / album art
+    // 3 Distinct Glowing Neon Hues (Electric Blue, Deep Indigo, Vivid Purple)
     val color1 = remember(rawBaseColor, isTranslucent) {
-        if (isTranslucent) Color(0xFF00E5FF) else rawBaseColor.shiftNeonHue(-35f) // Electric Cyan / Ocean Neon
+        if (isTranslucent) Color(0xFF448AFF) else rawBaseColor.shiftNeonHue(-32f) // Electric Blue / Cyan Neon
     }
     val color2 = remember(rawBaseColor, isTranslucent) {
-        if (isTranslucent) Color(0xFFD500F9) else rawBaseColor.shiftNeonHue(+30f) // Electric Magenta / Violet Neon
+        if (isTranslucent) Color(0xFF7C4DFF) else rawBaseColor.shiftNeonHue(+25f) // Rich Glowing Purple
     }
     val color3 = remember(rawBaseColor, isTranslucent) {
-        if (isTranslucent) Color(0xFF7C4DFF) else rawBaseColor.shiftNeonHue(0f)   // Primary Vibrant Neon
+        if (isTranslucent) Color(0xFFB388FF) else rawBaseColor.shiftNeonHue(0f)   // Luminous Violet / Primary
     }
 
     val inactiveColor = if (isTranslucent) {
@@ -115,13 +114,13 @@ fun WavySeekBar(
     }
 
     // Faster, highly fluid wave animations
-    val infiniteTransition = rememberInfiniteTransition(label = "NeonGlassWaveAnimation")
+    val infiniteTransition = rememberInfiniteTransition(label = "OdysseyNeonWaveAnimation")
 
     val phase1 by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2000, easing = LinearEasing),
+            animation = tween(durationMillis = 2200, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase1",
@@ -131,7 +130,7 @@ fun WavySeekBar(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1500, easing = LinearEasing),
+            animation = tween(durationMillis = 1650, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase2",
@@ -141,7 +140,7 @@ fun WavySeekBar(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1100, easing = LinearEasing),
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase3",
@@ -154,9 +153,9 @@ fun WavySeekBar(
 
     // 3-Tier Amplitudes with smooth dampening on seek
     val density = LocalDensity.current
-    val baseAmp1Px = with(density) { 13.5.dp.toPx() } // Deepest ambient neon layer
-    val baseAmp2Px = with(density) { 10.5.dp.toPx() } // Middle translucent neon layer
-    val baseAmp3Px = with(density) { 7.8.dp.toPx() }  // Foreground glowing neon layer
+    val baseAmp1Px = with(density) { 14.0.dp.toPx() } // Deepest blue hill
+    val baseAmp2Px = with(density) { 11.0.dp.toPx() } // Glowing purple hill
+    val baseAmp3Px = with(density) { 8.2.dp.toPx() }  // Foreground violet hill
     val draggingAmpPx = with(density) { 1.2.dp.toPx() }
 
     val amp1 by animateFloatAsState(
@@ -175,20 +174,20 @@ fun WavySeekBar(
         label = "Amp3",
     )
 
-    // Broad wavelengths for fewer, more elegant crests across the width
-    val waveLength1Px = with(density) { 165.dp.toPx() }
-    val waveLength2Px = with(density) { 130.dp.toPx() }
-    val waveLength3Px = with(density) { 98.dp.toPx() }
+    // Broad wavelengths for smooth rolling hills
+    val waveLength1Px = with(density) { 160.dp.toPx() }
+    val waveLength2Px = with(density) { 125.dp.toPx() }
+    val waveLength3Px = with(density) { 95.dp.toPx() }
 
     val baseTrackThicknessPx = with(density) { 4.5.dp.toPx() }
     val thumbRadiusPx = with(density) { 7.5.dp.toPx() }
-    val transitionLengthPx = with(density) { 30.dp.toPx() }
+    val transitionLengthPx = with(density) { 28.dp.toPx() }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp)
+                .height(52.dp)
                 .pointerInput(state.durationMs) {
                     if (state.durationMs <= 0) return@pointerInput
                     detectTapGestures(
@@ -227,7 +226,7 @@ fun WavySeekBar(
         ) {
             val width = size.width
             val height = size.height
-            val centerY = height / 2f + 7.dp.toPx()
+            val centerY = height / 2f + 8.dp.toPx()
             val thumbX = (shownFraction * width).coerceIn(0f, width)
             val halfThickness = baseTrackThicknessPx / 2f
             val bottomY = centerY + halfThickness
@@ -282,7 +281,7 @@ fun WavySeekBar(
                         filledPath.lineTo(0f, topBaselineY)
                         contourPath.moveTo(0f, topBaselineY)
 
-                        val step = 0.9f // Fine sub-pixel sampling resolution for ultra-smooth rendering
+                        val step = 0.9f // Sub-pixel resolution
                         var x = 0f
                         while (x <= thumbX) {
                             val startEnv = smootherstep(x / transitionLengthPx)
@@ -307,70 +306,84 @@ fun WavySeekBar(
                     val (filled2, contour2) = buildFilledWave(waveLength2Px, amp2, currPhase2)
                     val (filled3, contour3) = buildFilledWave(waveLength3Px, amp3, currPhase3)
 
-                    // Layer 1: Ambient Neon Glass Layer (Cyan/Indigo hue offset, ~28% opacity)
+                    // Layer 1: Electric Blue / Cyan Neon Hill (~35% opacity)
                     drawPath(
                         path = filled1,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                color1.copy(alpha = 0.32f),
-                                color1.copy(alpha = 0.10f),
+                                color1.copy(alpha = 0.42f),
+                                color1.copy(alpha = 0.12f),
                             ),
-                            startY = centerY - 20.dp.toPx(),
+                            startY = centerY - 22.dp.toPx(),
                             endY = bottomY,
                         ),
                     )
-                    // Delicate crest highlight
                     drawPath(
                         path = contour1,
-                        color = color1.copy(alpha = 0.45f),
-                        style = Stroke(width = 0.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        color = color1.copy(alpha = 0.55f),
+                        style = Stroke(width = 1.0.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 2: Middle Neon Glass Layer (Magenta/Violet hue offset, ~60% opacity)
+                    // Layer 2: Glowing Purple / Indigo Neon Hill (~68% opacity)
                     drawPath(
                         path = filled2,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                color2.copy(alpha = 0.65f),
-                                color2.copy(alpha = 0.28f),
+                                color2.copy(alpha = 0.72f),
+                                color2.copy(alpha = 0.25f),
                             ),
-                            startY = centerY - 15.dp.toPx(),
+                            startY = centerY - 16.dp.toPx(),
                             endY = bottomY,
                         ),
                     )
-                    // Refined crest highlight
                     drawPath(
                         path = contour2,
-                        color = color2.copy(alpha = 0.78f),
-                        style = Stroke(width = 1.1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        color = color2.copy(alpha = 0.82f),
+                        style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 3: Foreground Primary Neon Glass Layer (~95% opacity)
+                    // Layer 3: Vibrant Violet / Primary Neon Hill (~96% opacity)
                     drawPath(
                         path = filled3,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                color3.copy(alpha = 0.96f),
-                                color3.copy(alpha = 0.62f),
+                                color3.copy(alpha = 0.98f),
+                                color3.copy(alpha = 0.55f),
                             ),
-                            startY = centerY - 10.dp.toPx(),
+                            startY = centerY - 11.dp.toPx(),
                             endY = bottomY,
                         ),
                     )
-                    // Crisp luminous crest highlight
                     drawPath(
                         path = contour3,
                         color = color3,
-                        style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                    )
+
+                    // 3. Crisp Illuminated Baseline Highlight
+                    drawLine(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                color1.copy(alpha = 0.85f),
+                                color2.copy(alpha = 0.90f),
+                                color3.copy(alpha = 0.95f),
+                            ),
+                            startX = 0f,
+                            endX = thumbX,
+                        ),
+                        start = Offset(0f, centerY),
+                        end = Offset(thumbX, centerY),
+                        strokeWidth = baseTrackThicknessPx,
+                        cap = StrokeCap.Round,
                     )
                 }
             }
 
-            // 3. Leading Thumb Indicator
+            // 4. Leading Thumb Indicator
             if (state.durationMs > 0) {
                 // Soft glowing halo
                 drawCircle(
-                    color = color3.copy(alpha = 0.32f),
+                    color = color3.copy(alpha = 0.35f),
                     radius = thumbRadiusPx + 3.dp.toPx(),
                     center = Offset(thumbX, centerY),
                 )
