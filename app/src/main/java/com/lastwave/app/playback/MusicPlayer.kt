@@ -24,7 +24,6 @@ import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.CacheWriter
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
-import android.media.AudioManager
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -377,10 +376,10 @@ class MusicPlayer @Inject constructor(
         }
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 30_000,
-                /* maxBufferMs = */ 60_000,
-                /* bufferForPlaybackMs = */ 3_000,
-                /* bufferForPlaybackAfterRebufferMs = */ 6_000,
+                /* minBufferMs = */ 45_000,
+                /* maxBufferMs = */ 120_000,
+                /* bufferForPlaybackMs = */ 4_000,
+                /* bufferForPlaybackAfterRebufferMs = */ 8_000,
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(15_000, true)
@@ -396,21 +395,25 @@ class MusicPlayer @Inject constructor(
                     .setEnableAudioTrackPlaybackParams(true)
                     .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
                     .build()
-                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                val nativeMixerRate = audioManager
-                    ?.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
-                    ?.toIntOrNull()
-                    ?.takeIf { it in 8_000..192_000 }
-                    ?: 48_000
                 val engine = runCatching { nativeAudioEngine.get() }.getOrNull()
                 if (engine?.isAvailable != true) return platformSink
                 return NativeProcessingAudioSink(
+                    context = context,
                     delegate = platformSink,
-                    processor = NativePcmAudioProcessor(engine, nativeMixerRate),
+                    engine = engine,
+                    processor = NativePcmAudioProcessor(engine),
                 )
             }
         }.apply {
+            // FFmpeg-first decoding, the Poweramp/VLC model: every codec the
+            // bundled GPL build supports (FLAC 24/96-192, Opus, AAC, MP3,
+            // Vorbis) decodes through the same battle-tested software path on
+            // every device, eliminating per-OEM platform codec bugs that
+            // surface as noise/distortion. setEnableDecoderFallback keeps the
+            // platform decoder for anything FFmpeg rejects.
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+            setEnableDecoderFallback(true)
+            setMediaCodecSelector(flacSafeMediaCodecSelector)
             setEnableAudioTrackPlaybackParams(true)
             setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
                 val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(
@@ -861,8 +864,9 @@ class MusicPlayer @Inject constructor(
 
 
     /**
-     * Pre-resolves and streams the first 512KB of the upcoming track directly into
-     * the local disk cache while the current song is playing, guaranteeing instant 0ms track transitions.
+     * Pre-resolves a useful opening window of the upcoming track into the disk
+     * cache. This reduces transition stalls without downloading the full track
+     * or competing indefinitely with current playback.
      */
     private fun preloadNextTrack(nextTrack: PlayableTrack?) {
         if (nextTrack == null) return
@@ -875,7 +879,7 @@ class MusicPlayer @Inject constructor(
             val dataSpec = DataSpec.Builder()
                 .setUri(Uri.parse(resolved.url))
                 .setPosition(0)
-                .setLength(512 * 1024L) // 512 KB audio chunk pre-buffer
+                .setLength(NEXT_TRACK_PREFETCH_BYTES)
                 .build()
 
             runCatching {
@@ -1275,7 +1279,8 @@ class MusicPlayer @Inject constructor(
         const val TICKER_PERSIST_INTERVAL_MS = 2_000L
         /** Hard ceiling for the blocking data-spec stream resolution inside ExoPlayer's loader. */
         const val RESOLVE_DATA_SPEC_TIMEOUT_MS = 25_000L
-        const val MEDIA_STREAM_CACHE_BYTES = 64L * 1024 * 1024
+        const val MEDIA_STREAM_CACHE_BYTES = 256L * 1024 * 1024
+        const val NEXT_TRACK_PREFETCH_BYTES = 4L * 1024 * 1024
         val PERMANENT_HTTP_STATUS_CODES = setOf(401, 404, 410, 451)
         val PERMANENT_PLAYBACK_ERROR_CODES = setOf(
             PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
@@ -1334,6 +1339,42 @@ fun GeneratedTrack.toPlayableTrack() = PlayableTrack(
 )
 
 private fun PlayableTrack.queueKey(): String = "$title|$artist".lowercase()
+
+/**
+ * Samsung One UI ships vendor FLAC decoders (c2.sec.flac.decoder,
+ * OMX.SEC.FLAC.Decoder, OMX.Exynos.FLAC.Decoder) that decode 24-bit hi-res
+ * FLAC to packed 24-bit PCM while failing to advertise
+ * KEY_PCM_ENCODING = ENCODING_PCM_24BIT_PACKED in the output MediaFormat.
+ * The 3-byte samples are then consumed as 2-byte: buffers drain exactly
+ * 3/2 faster — chipmunk pitch at ~1.5x speed — and broken Left/Right byte
+ * boundaries surface as harsh digital noise. Only FLAC is affected;
+ * Opus/AAC/MP3 play normally, which is why the fault isolated to Samsung
+ * hardware playing lossless files.
+ *
+ * Demotes Samsung vendor decoders to the end of the FLAC codec list so the
+ * reliable reference AOSP software decoder (c2.android.flac.decoder) wins.
+ * Every other mime type keeps Android's default codec order untouched.
+ */
+@OptIn(UnstableApi::class)
+private val flacSafeMediaCodecSelector =
+    MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+        val decoderInfos = MediaCodecSelector.DEFAULT.getDecoderInfos(
+            mimeType,
+            requiresSecureDecoder,
+            requiresTunnelingDecoder,
+        )
+        if (mimeType.equals(MimeTypes.AUDIO_FLAC, ignoreCase = true)) {
+            decoderInfos.sortedBy { info -> flacDecoderPriority(info.name) }
+        } else {
+            decoderInfos
+        }
+    }
+
+/** 0 = trusted order kept, 1 = known-broken Samsung vendor FLAC decoder (sent last). */
+private fun flacDecoderPriority(name: String): Int {
+    val lower = name.lowercase()
+    return if (lower.contains("sec.") || lower.contains("exynos")) 1 else 0
+}
 
 private fun PlayableTrack.searchQueueTitleKey(): String = title
     .lowercase()

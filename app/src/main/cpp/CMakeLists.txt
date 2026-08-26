@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Support 16 KB page sizes on Android 15+ (e.g. Galaxy S25 series)
+# Android 15+ devices may run 16 KB memory-page kernels. Shared libraries
+# that are only 4 KB ELF-aligned trigger loader compatibility warnings (or
+# fail outright) on such devices. Directory-wide so the bundled soxr shared
+# library inherits the same alignment.
 add_link_options("-Wl,-z,max-page-size=16384")
 
 find_package(oboe REQUIRED CONFIG)

@@ -49,14 +49,13 @@ data class MiscSettings(
     /** Preferred quality preset for Qobuz streaming (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k).
      *  If a track does not support the requested quality, the worker automatically selects the highest available. */
     val qobuzQuality: Int = 27,
-    /** Audiophile Studio Clarity — studio-grade clarity curve (vocal presence +
-     *  air sparkle + anti-clipping limiter) that delivers pristine sound out of the box.
-     *  Defaults to true on fresh install. */
-    val isStudioMasterClarityEnabled: Boolean = true,
+    /** Optional studio-clarity curve. Disabled by default because fixed tone
+     *  shaping cannot be neutral on every speaker, headset and OEM spatializer. */
+    val isStudioMasterClarityEnabled: Boolean = false,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     /** Experimental output gain. Disabled by default; when enabled the DSP
-     *  can raise track level from 100% up to a bounded 200%. */
+     *  can raise quiet-track level from 100% up to a bounded 150%. */
     val volumeBoostEnabled: Boolean = false,
     val volumeBoostPercent: Int = 100,
     /** Experimental full screen cover art mode with translucent glassmorphic controls. */
@@ -97,10 +96,10 @@ class SettingsPreferences @Inject constructor(
                 pinnedFriends = p.readSafely(Keys.PINNED_FRIENDS) ?: emptySet(),
                 preferQobuzStreaming = p.readSafely(Keys.PREFER_QOBUZ_STREAMING) ?: true,
                 qobuzQuality = p.readSafely(Keys.QOBUZ_QUALITY)?.takeIf { it in QOBUZ_QUALITIES } ?: 27,
-                isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: true,
+                isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: false,
                 lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
                 volumeBoostEnabled = p.readSafely(Keys.VOLUME_BOOST_ENABLED) ?: false,
-                volumeBoostPercent = (p.readSafely(Keys.VOLUME_BOOST_PERCENT) ?: 100).coerceIn(100, 200),
+                volumeBoostPercent = (p.readSafely(Keys.VOLUME_BOOST_PERCENT) ?: 100).coerceIn(100, 150),
                 fullScreenCoverArtEnabled = p.readSafely(Keys.FULL_SCREEN_COVER_ART) ?: false,
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 10),
@@ -136,7 +135,7 @@ class SettingsPreferences @Inject constructor(
     }
 
     suspend fun setVolumeBoostPercent(percent: Int) {
-        dataStore.edit { it[Keys.VOLUME_BOOST_PERCENT] = percent.coerceIn(100, 200) }
+        dataStore.edit { it[Keys.VOLUME_BOOST_PERCENT] = percent.coerceIn(100, 150) }
     }
 
     suspend fun setFullScreenCoverArt(enabled: Boolean) {

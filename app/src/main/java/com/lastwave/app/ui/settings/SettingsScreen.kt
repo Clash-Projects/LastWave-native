@@ -584,9 +584,9 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 title = "Volume Boost",
                                 subtitle = if (misc.volumeBoostEnabled) {
-                                    "Native clean gain • ${misc.volumeBoostPercent}% • -1 dBFS protected"
+                                    "Native clean gain • ${misc.volumeBoostPercent}% • -2 dBFS protected"
                                 } else {
-                                    "Optional native adaptive gain up to 200%"
+                                    "Optional native adaptive gain up to 150%"
                                 },
                                 onClick = { showVolumeBoostSheet = true },
                                 position = position,
@@ -597,9 +597,9 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = "Full Screen Cover Art",
                                 subtitle = if (misc.fullScreenCoverArtEnabled) {
-                                    "Single cover with a seamless lower control gradient"
+                                    "Artwork fills the screen"
                                 } else {
-                                    "Standard centered artwork layout"
+                                    "Standard artwork view"
                                 },
                                 checked = misc.fullScreenCoverArtEnabled,
                                 onCheckedChange = viewModel::setFullScreenCoverArt,
@@ -2707,7 +2707,7 @@ private fun VolumeBoostSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var sliderValue by remember(percent) { mutableStateOf(percent.coerceIn(100, 200).toFloat()) }
+    var sliderValue by remember(percent) { mutableStateOf(percent.coerceIn(100, 150).toFloat()) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -2735,7 +2735,7 @@ private fun VolumeBoostSheet(
                 Column(Modifier.weight(1f)) {
                     Text("Volume Boost", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        "Raise quiet tracks up to 200% with bounded gain",
+                        "Raise quiet tracks up to 150% with bounded gain",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -2766,12 +2766,12 @@ private fun VolumeBoostSheet(
                     onSetPercent(selectedPercent)
                     onSetEnabled(selectedPercent > 100)
                 },
-                valueRange = 100f..200f,
-                steps = 19,
+                valueRange = 100f..150f,
+                steps = 9,
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(
-                "Higher gain can reveal clipping on heavily mastered songs. It is off by default.",
+                "Peak-safe gain for quiet masters. It is off by default.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

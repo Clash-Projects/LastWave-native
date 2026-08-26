@@ -239,7 +239,7 @@ class SettingsViewModel @Inject constructor(
         launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostEnabled(enabled) }
     }
     fun setVolumeBoostPercent(percent: Int) {
-        val safePercent = percent.coerceIn(100, 200)
+        val safePercent = percent.coerceIn(100, 150)
         runCatching { audioEngine.get().setVolumeBoost(misc.value.volumeBoostEnabled, safePercent) }
         launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostPercent(safePercent) }
     }

@@ -25,6 +25,9 @@ android {
             cmake {
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
+                    // Android 15+ can boot with 16 KB memory pages; all native
+                    // libraries must be built/aligned accordingly. Ignored
+                    // harmlessly by NDK toolchains that predate the flag.
                     "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
                 )
                 cFlags += "-Wl,-z,max-page-size=16384"
@@ -73,6 +76,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Required by org.jellyfin.media3:media3-ffmpeg-decoder AAR metadata.
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
         jvmTarget = "17"
@@ -159,6 +164,15 @@ dependencies {
     // Native in-app audio playback, background service, system media
     // controls, Bluetooth/headset controls and a MediaController-backed UI.
     implementation("androidx.media3:media3-exoplayer:1.2.1")
+
+    // GPLv3 Media3-matched FFmpeg software decoder (distribution must comply).
+    // The renderer factory prefers FFmpeg for every codec it supports so all
+    // devices decode through one deterministic, OEM-bug-free path; platform
+    // decoders remain as automatic fallbacks.
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.2.1+1")
+
+    // Core library desugaring required by the FFmpeg decoder AAR metadata.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 
     // Low-latency native output. Version 1.10 remains API-compatible with the
     // requested Oboe 1.8+ baseline and exposes its CMake target through Prefab.

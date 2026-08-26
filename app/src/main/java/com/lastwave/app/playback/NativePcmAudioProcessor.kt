@@ -6,11 +6,18 @@ import androidx.media3.common.audio.BaseAudioProcessor
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-/** Converts every decoded Media3 PCM format to Float32 and runs the C++ DSP in place. */
+/**
+ * Converts decoded Media3 PCM to Float32 and runs the C++ DSP in place.
+ * The platform fallback preserves source rates through 192 kHz. Oboe output
+ * instead targets its actual device rate through the native libsoxr HQ path.
+ */
 class NativePcmAudioProcessor(
     private val engine: NativeAudioEngine,
-    val nativeOutputSampleRate: Int,
+    private val maxOutputSampleRateHz: Int = MAX_OUTPUT_SAMPLE_RATE_HZ,
 ) : BaseAudioProcessor() {
+    var nativeOutputSampleRate: Int = DEFAULT_OUTPUT_SAMPLE_RATE_HZ
+        private set
+
     val isAvailable: Boolean
         get() = engine.isAvailable
 
@@ -22,11 +29,35 @@ class NativePcmAudioProcessor(
     private var configuredEndTrimFrames = 0
     private var startTrimFramesRemaining = 0
     private var retainedEndBytes = 0
+    private var outputSampleRateOverrideHz: Int? = null
 
     fun setTrimFrameCount(startFrames: Int, endFrames: Int) {
         configuredStartTrimFrames = startFrames.coerceIn(0, MAX_TRIM_FRAMES)
         configuredEndTrimFrames = endFrames.coerceIn(0, MAX_TRIM_FRAMES)
     }
+
+    /**
+     * Begins a new input stream for gapless playback without tearing down
+     * the native pipeline. Only per-stream trim accounting is reset; the
+     * libsoxr resampler and every DSP filter keep their state so consecutive
+     * same-format tracks join sample-exactly, exactly like one continuous
+     * stream. Must only be called when the core audio format is unchanged.
+     */
+    fun beginStream(startFrames: Int, endFrames: Int) {
+        setTrimFrameCount(startFrames, endFrames)
+        startTrimFramesRemaining = configuredStartTrimFrames
+        retainedEndBytes = 0
+        retainedEndBuffer.clear()
+    }
+
+    fun setOutputSampleRateOverride(sampleRateHz: Int?) {
+        require(sampleRateHz == null || sampleRateHz in MIN_OUTPUT_SAMPLE_RATE_HZ..MAX_OUTPUT_SAMPLE_RATE_HZ)
+        outputSampleRateOverrideHz = sampleRateHz
+    }
+
+    fun outputSampleRateFor(inputSampleRate: Int): Int =
+        outputSampleRateOverrideHz
+            ?: inputSampleRate.coerceIn(MIN_OUTPUT_SAMPLE_RATE_HZ, maxOutputSampleRateHz)
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         if (inputAudioFormat.channelCount !in 1..2) {
@@ -42,6 +73,7 @@ class NativePcmAudioProcessor(
             C.ENCODING_PCM_FLOAT -> NativePcmEncoding.PCM_FLOAT
             else -> throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
+        nativeOutputSampleRate = outputSampleRateFor(inputAudioFormat.sampleRate)
         val endTrimBytes = Math.multiplyExact(
             configuredEndTrimFrames,
             inputAudioFormat.bytesPerFrame,
@@ -220,6 +252,9 @@ class NativePcmAudioProcessor(
     }
 
     private companion object {
+        const val MIN_OUTPUT_SAMPLE_RATE_HZ = 8_000
+        const val MAX_OUTPUT_SAMPLE_RATE_HZ = 192_000
+        const val DEFAULT_OUTPUT_SAMPLE_RATE_HZ = 48_000
         const val MAX_TRIM_FRAMES = 1_000_000
         const val RESAMPLER_OUTPUT_HEADROOM_FRAMES = 4_096
         const val RESAMPLER_FLUSH_CAPACITY_FRAMES = 65_536

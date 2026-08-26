@@ -58,6 +58,15 @@ public:
         return readable;
     }
 
+    // Drops all buffered samples. The producer must be quiesced and the
+    // consumer parked on another buffer before calling this. Advancing the
+    // read index (instead of zeroing both) keeps any already-in-flight read
+    // copying from untouched memory.
+    void clear() noexcept {
+        const auto write = writeIndex_.load(std::memory_order_acquire);
+        readIndex_.store(write, std::memory_order_release);
+    }
+
 private:
     void copyIntoRing(const T* source, std::size_t count, std::size_t offset) noexcept {
         const auto first = std::min(count, capacity_ - offset);

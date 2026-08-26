@@ -1,4 +1,4 @@
-#include "AudioEngine.h"
+﻿#include "AudioEngine.h"
 
 #include <soxr.h>
 
@@ -20,12 +20,16 @@ soxr_t asSoxr(void* handle) noexcept {
 
 AudioEngine::~AudioEngine() {
     stop();
-    std::lock_guard processorLock(mediaProcessorMutex_);
+    std::lock_guard<std::mutex> processorLock(mediaProcessorMutex_);
     if (mediaResampler_ != nullptr) soxr_delete(asSoxr(mediaResampler_));
 }
 
 bool AudioEngine::start(std::int32_t preferredOutputSampleRate) {
-    std::lock_guard controlLock(controlMutex_);
+    std::lock_guard<std::mutex> controlLock(controlMutex_);
+    playbackEnabled_.store(false, std::memory_order_release);
+    inputAlreadyProcessed_.store(false, std::memory_order_release);
+    renderedFrames_.store(0, std::memory_order_release);
+    underrunCount_.store(0, std::memory_order_release);
     restartAllowed_.store(true, std::memory_order_release);
     return startLocked(preferredOutputSampleRate);
 }
@@ -33,63 +37,116 @@ bool AudioEngine::start(std::int32_t preferredOutputSampleRate) {
 bool AudioEngine::startLocked(std::int32_t preferredOutputSampleRate) {
     if (stream_ != nullptr) return true;
 
-    requestedOutputSampleRate_ = std::max(preferredOutputSampleRate, 0);
+    // The engine never assumes a device accepted a configuration: everything
+    // downstream keys off openedStream->getSampleRate(), read back below.
+    const std::int32_t requestedRate = std::max(preferredOutputSampleRate, 0);
+    requestedOutputSampleRate_.store(requestedRate, std::memory_order_release);
+    // Streaming music values route stability over minimum round-trip latency.
+    // Shared mode coexists reliably with Bluetooth, calls, accessibility and
+    // OEM spatializers; exclusive mode is intentionally avoided. The default
+    // performance mode (not LowLatency) matches Poweramp/VLC-class players:
+    // music must survive aggressive OEM CPU throttling, and One UI's Dolby
+    // Atmos/Sound Assistant effect chains behave best with regular buffers
+    // instead of MMAP fast-track deadlines.
     std::shared_ptr<oboe::AudioStream> openedStream;
-    const auto openWithSharingMode = [this, &openedStream](oboe::SharingMode sharingMode) {
-        oboe::AudioStreamBuilder builder;
-        builder.setDirection(oboe::Direction::Output)
-            ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
-            ->setSharingMode(sharingMode)
-            ->setFormat(oboe::AudioFormat::Float)
-            ->setChannelCount(kOutputChannels)
-            ->setDataCallback(this)
-            ->setErrorCallback(this);
-        if (requestedOutputSampleRate_ > 0) {
-            builder.setSampleRate(requestedOutputSampleRate_);
-        }
-        return builder.openStream(openedStream);
-    };
-    auto openResult = openWithSharingMode(oboe::SharingMode::Exclusive);
-    if (openResult != oboe::Result::OK || openedStream == nullptr) {
-        // Exclusive streams are routinely denied by OEM policy, Bluetooth,
-        // calls, accessibility services, and other active media apps.
-        // Shared low-latency output is the portable fallback.
-        if (openedStream != nullptr) openedStream->close();
-        openedStream.reset();
-        openResult = openWithSharingMode(oboe::SharingMode::Shared);
+    oboe::AudioStreamBuilder builder;
+    builder.setDirection(oboe::Direction::Output)
+        ->setPerformanceMode(oboe::PerformanceMode::None)
+        ->setSharingMode(oboe::SharingMode::Shared)
+        ->setUsage(oboe::Usage::Media)
+        ->setContentType(oboe::ContentType::Music)
+        ->setFormat(oboe::AudioFormat::Float)
+        ->setChannelCount(kOutputChannels)
+        ->setDataCallback(this)
+        ->setErrorCallback(this);
+    if (requestedRate > 0) {
+        builder.setSampleRate(requestedRate);
     }
+    const auto openResult = builder.openStream(openedStream);
     if (openResult != oboe::Result::OK || openedStream == nullptr) {
         restartAllowed_.store(false, std::memory_order_release);
         return false;
     }
 
     const std::int32_t sampleRate = openedStream->getSampleRate();
-    if (sampleRate <= 0 || openedStream->getChannelCount() != kOutputChannels ||
+    if (sampleRate <= 0 || sampleRate > 384000 ||
+        openedStream->getChannelCount() != kOutputChannels ||
         openedStream->getFormat() != oboe::AudioFormat::Float) {
+        // A device reporting an unusable configuration must never be trusted
+        // with audio: fail cleanly and let the caller pick its fallback path.
         openedStream->close();
         restartAllowed_.store(false, std::memory_order_release);
         return false;
     }
+    // Oboe's OpenSL ES compatibility backend varies widely across older OEM
+    // devices. Media3 AudioTrack is the safer music path there; retain Oboe for
+    // its native AAudio backend and fall back cleanly otherwise.
+    if (!openedStream->usesAAudio()) {
+        openedStream->close();
+        restartAllowed_.store(false, std::memory_order_release);
+        return false;
+    }
+    streamOpenCount_.fetch_add(1, std::memory_order_release);
+    if (requestedRate > 0 && sampleRate != requestedRate) {
+        // The device silently substituted its own rate (common on Samsung
+        // paths). Count it so diagnostics can distinguish "we asked for X and
+        // got Y" from a genuine native-rate selection.
+        rateAdaptationCount_.fetch_add(1, std::memory_order_release);
+    }
+
+    const auto framesPerBurst = std::max(openedStream->getFramesPerBurst(), 1);
+    // A medium device buffer (~60 ms when capacity allows) absorbs OEM CPU
+    // governor spikes â€” the primary source of One UI crackle. The ring
+    // buffer in front of the device already provides gapless continuity, so
+    // this costs no perceptible latency for a streaming music player.
+    const auto targetDeviceBufferFrames = std::min(
+        openedStream->getBufferCapacityInFrames(),
+        std::max(
+            framesPerBurst * 4,
+            static_cast<std::int32_t>(
+                static_cast<std::int64_t>(sampleRate) *
+                kTargetDeviceBufferMilliseconds / 1000)));
+    if (targetDeviceBufferFrames > 0) {
+        (void) openedStream->setBufferSizeInFrames(targetDeviceBufferFrames);
+    }
 
     {
-        std::lock_guard producerLock(producerMutex_);
+        std::lock_guard<std::mutex> producerLock(producerMutex_);
+        // Never let a stale ring pointer outlive the state rebuild below.
+        activeRingBuffer_.store(nullptr, std::memory_order_release);
         releaseProducerStateLocked();
         const auto capacitySamples = static_cast<std::size_t>(sampleRate) *
-            kRingSeconds * kOutputChannels;
+            kRingMilliseconds * kOutputChannels / 1000U;
         ringBuffer_ = std::make_unique<LockFreeRingBuffer<float>>(capacitySamples);
         rawScratch_.resize(kProducerChunkFrames * kOutputChannels);
         stereoScratch_.resize(kProducerChunkFrames * kOutputChannels);
         resampledScratch_.resize(kMaxResampledFrames * kOutputChannels);
     }
 
+    oboeDsp_.setPeakProtectionEnabled(true);
     oboeDsp_.configure(sampleRate);
     buildFadeCurve(sampleRate);
     underrunFadePosition_ = fadeInCurve_.size();
     recoveryFadePosition_ = fadeInCurve_.size();
     underrunActive_ = false;
     recoveryFading_ = false;
+    prebuffering_ = true;
+    prebufferWaitCallbacks_ = kPrebufferMaxCallbacks;
+    prebufferFrames_ = std::min(
+        static_cast<std::size_t>(sampleRate) * kRingMilliseconds / 2000U,
+        std::max(
+            static_cast<std::size_t>(framesPerBurst * 4),
+            static_cast<std::size_t>(sampleRate) * kPrebufferMilliseconds / 1000U));
+    prebufferBaseFrames_ = prebufferFrames_;
+    underrunDecayIntervalFrames_ =
+        static_cast<std::size_t>(sampleRate) * kUnderrunDecaySeconds;
+    cleanFrames_ = 0;
     underrunAnchor_.fill(0.0F);
     lastOutput_.fill(0.0F);
+    currentOutputVolume_ = std::clamp(
+        targetOutputVolume_.load(std::memory_order_acquire), 0.0F, 1.0F);
+    outputVolumeRampStep_ = 1.0F /
+        std::max(1.0F, static_cast<float>(sampleRate) * 0.005F);
 
     outputSampleRate_.store(sampleRate, std::memory_order_release);
     activeRingBuffer_.store(ringBuffer_.get(), std::memory_order_release);
@@ -99,7 +156,7 @@ bool AudioEngine::startLocked(std::int32_t preferredOutputSampleRate) {
         stream_->close();
         stream_.reset();
         outputSampleRate_.store(0, std::memory_order_release);
-        std::lock_guard producerLock(producerMutex_);
+        std::lock_guard<std::mutex> producerLock(producerMutex_);
         releaseProducerStateLocked();
         restartAllowed_.store(false, std::memory_order_release);
         return false;
@@ -108,7 +165,8 @@ bool AudioEngine::startLocked(std::int32_t preferredOutputSampleRate) {
 }
 
 void AudioEngine::stop() noexcept {
-    std::lock_guard controlLock(controlMutex_);
+    std::lock_guard<std::mutex> controlLock(controlMutex_);
+    playbackEnabled_.store(false, std::memory_order_release);
     restartAllowed_.store(false, std::memory_order_release);
     activeRingBuffer_.store(nullptr, std::memory_order_release);
     if (stream_ != nullptr) {
@@ -117,8 +175,40 @@ void AudioEngine::stop() noexcept {
         stream_.reset();
     }
     outputSampleRate_.store(0, std::memory_order_release);
-    std::lock_guard producerLock(producerMutex_);
+    renderedFrames_.store(0, std::memory_order_release);
+    std::lock_guard<std::mutex> producerLock(producerMutex_);
     releaseProducerStateLocked();
+}
+
+bool AudioEngine::isRunning() const noexcept {
+    std::lock_guard<std::mutex> controlLock(controlMutex_);
+    return stream_ != nullptr &&
+        outputSampleRate_.load(std::memory_order_acquire) > 0;
+}
+
+void AudioEngine::flushOutput() noexcept {
+    std::lock_guard<std::mutex> controlLock(controlMutex_);
+    auto* ring = activeRingBuffer_.load(std::memory_order_acquire);
+    if (ring == nullptr || stream_ == nullptr) return;
+    // Park the consumer on silence first so the callback stops touching the
+    // ring while its contents are dropped. The stream itself stays open:
+    // reopening AAudio per track/seek is what produced pops on OEM stacks.
+    activeRingBuffer_.store(nullptr, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> producerLock(producerMutex_);
+        ring->clear();
+        resamplerFlushing_ = false;
+    }
+    underrunActive_ = false;
+    recoveryFading_ = false;
+    underrunFadePosition_ = fadeInCurve_.size();
+    recoveryFadePosition_ = 0;
+    prebuffering_ = true;
+    prebufferWaitCallbacks_ = kPrebufferMaxCallbacks;
+    lastOutput_.fill(0.0F);
+    underrunAnchor_.fill(0.0F);
+    cleanFrames_ = 0;
+    activeRingBuffer_.store(ring, std::memory_order_release);
 }
 
 std::size_t AudioEngine::writePcm(
@@ -133,13 +223,14 @@ std::size_t AudioEngine::writePcm(
         return 0;
     }
 
-    std::lock_guard producerLock(producerMutex_);
+    std::lock_guard<std::mutex> producerLock(producerMutex_);
     auto* ring = activeRingBuffer_.load(std::memory_order_acquire);
     const std::int32_t destinationRate = outputSampleRate_.load(std::memory_order_acquire);
     if (ring == nullptr || destinationRate <= 0 ||
         !configureResamplerLocked(inputSampleRate)) {
         return 0;
     }
+    inputAlreadyProcessed_.store(false, std::memory_order_release);
 
     const auto* inputBytes = static_cast<const std::uint8_t*>(pcm);
     const std::size_t bytesPerFrame = PcmConverter::bytesPerSample(format) *
@@ -213,8 +304,61 @@ std::size_t AudioEngine::writePcm(
     return consumedFrames;
 }
 
+std::size_t AudioEngine::writeProcessedPcm(
+    const float* pcm,
+    std::size_t frameCount,
+    std::int32_t inputSampleRate,
+    std::int32_t inputChannelCount) {
+    if (pcm == nullptr || frameCount == 0 || inputSampleRate <= 0 ||
+        (inputChannelCount != 1 && inputChannelCount != kOutputChannels)) {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> producerLock(producerMutex_);
+    auto* ring = activeRingBuffer_.load(std::memory_order_acquire);
+    const auto destinationRate = outputSampleRate_.load(std::memory_order_acquire);
+    if (ring == nullptr || inputSampleRate != destinationRate) return 0;
+    inputAlreadyProcessed_.store(true, std::memory_order_release);
+
+    const std::size_t writableFrames = std::min(
+        frameCount,
+        ring->availableToWrite() / kOutputChannels);
+    if (writableFrames == 0) return 0;
+    if (inputChannelCount == kOutputChannels) {
+        return ring->write(pcm, writableFrames * kOutputChannels) / kOutputChannels;
+    }
+
+    std::size_t writtenFrames = 0;
+    while (writtenFrames < writableFrames) {
+        const std::size_t chunkFrames = std::min(
+            writableFrames - writtenFrames,
+            kProducerChunkFrames);
+        for (std::size_t frame = 0; frame < chunkFrames; ++frame) {
+            const float sample = pcm[writtenFrames + frame];
+            stereoScratch_[frame * kOutputChannels] = sample;
+            stereoScratch_[frame * kOutputChannels + 1U] = sample;
+        }
+        const std::size_t writtenSamples = ring->write(
+            stereoScratch_.data(),
+            chunkFrames * kOutputChannels);
+        const std::size_t chunkWrittenFrames = writtenSamples / kOutputChannels;
+        writtenFrames += chunkWrittenFrames;
+        if (chunkWrittenFrames != chunkFrames) break;
+    }
+    return writtenFrames;
+}
+
+void AudioEngine::setPlaying(bool playing) noexcept {
+    playbackEnabled_.store(playing, std::memory_order_release);
+}
+
+void AudioEngine::setOutputVolume(float volume) noexcept {
+    if (!std::isfinite(volume)) volume = 1.0F;
+    targetOutputVolume_.store(std::clamp(volume, 0.0F, 1.0F), std::memory_order_release);
+}
+
 void AudioEngine::flushResampler() {
-    std::lock_guard producerLock(producerMutex_);
+    std::lock_guard<std::mutex> producerLock(producerMutex_);
     auto* ring = activeRingBuffer_.load(std::memory_order_acquire);
     if (ring == nullptr || resampler_ == nullptr) return;
     resamplerFlushing_ = true;
@@ -273,7 +417,7 @@ bool AudioEngine::configureMediaProcessor(
         (channelCount != 1 && channelCount != 2)) {
         return false;
     }
-    std::lock_guard processorLock(mediaProcessorMutex_);
+    std::lock_guard<std::mutex> processorLock(mediaProcessorMutex_);
     if (mediaResampler_ != nullptr) {
         soxr_delete(asSoxr(mediaResampler_));
         mediaResampler_ = nullptr;
@@ -282,8 +426,9 @@ bool AudioEngine::configureMediaProcessor(
     mediaOutputSampleRate_ = outputSampleRate;
     mediaChannelCount_ = channelCount;
     mediaScratch_.resize(kProducerChunkFrames * static_cast<std::size_t>(channelCount));
-    // Resample first, then run tone/peak processing at the actual AudioTrack
-    // rate so sinc overshoot is included in the final -1 dBFS protection.
+    // Resample first, then run tone/peak processing at the actual output rate
+    // so sinc overshoot is included in final peak protection.
+    mediaDsp_.setPeakProtectionEnabled(true);
     mediaDsp_.configure(outputSampleRate);
     return configureMediaResamplerLocked();
 }
@@ -300,7 +445,7 @@ bool AudioEngine::processMediaPcm(
         outputCapacityFrames == 0) {
         return false;
     }
-    std::lock_guard processorLock(mediaProcessorMutex_);
+    std::lock_guard<std::mutex> processorLock(mediaProcessorMutex_);
     if (mediaInputSampleRate_ <= 0 || mediaOutputSampleRate_ <= 0 ||
         mediaChannelCount_ <= 0 || mediaScratch_.empty()) {
         return false;
@@ -362,7 +507,7 @@ bool AudioEngine::flushMediaProcessor(
     std::size_t& outputFrameCount) {
     outputFrameCount = 0;
     if (output == nullptr || outputCapacityFrames == 0) return false;
-    std::lock_guard processorLock(mediaProcessorMutex_);
+    std::lock_guard<std::mutex> processorLock(mediaProcessorMutex_);
     if (mediaResampler_ == nullptr) return true;
     const std::size_t channels = static_cast<std::size_t>(mediaChannelCount_);
     while (outputFrameCount < outputCapacityFrames) {
@@ -387,7 +532,7 @@ bool AudioEngine::flushMediaProcessor(
 }
 
 void AudioEngine::resetMediaProcessor() {
-    std::lock_guard processorLock(mediaProcessorMutex_);
+    std::lock_guard<std::mutex> processorLock(mediaProcessorMutex_);
     mediaDsp_.reset();
     if (mediaResampler_ != nullptr) {
         soxr_delete(asSoxr(mediaResampler_));
@@ -426,7 +571,7 @@ bool AudioEngine::configureMediaResamplerLocked() {
 }
 
 std::size_t AudioEngine::bufferedFrames() const noexcept {
-    std::lock_guard producerLock(producerMutex_);
+    std::lock_guard<std::mutex> producerLock(producerMutex_);
     const auto* ring = activeRingBuffer_.load(std::memory_order_acquire);
     return ring == nullptr ? 0 : ring->availableToRead() / kOutputChannels;
 }
@@ -440,14 +585,51 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
     if (output == nullptr || numFrames <= 0) return oboe::DataCallbackResult::Continue;
 
     const std::size_t requestedFrames = static_cast<std::size_t>(numFrames);
-    const std::size_t readSamples = ring == nullptr
-        ? 0
-        : ring->read(output, requestedFrames * kOutputChannels);
+    // While the ring is unpublished, stop()/flushOutput()/restart own every
+    // piece of fade/prebuffer state below. The callback then renders plain
+    // silence and touches nothing, which turns "null ring" into a proper
+    // handoff instead of a data race.
+    if (ring == nullptr) {
+        std::memset(output, 0, requestedFrames * kOutputChannels * sizeof(float));
+        return oboe::DataCallbackResult::Continue;
+    }
+
+    const bool playingNow = playbackEnabled_.load(std::memory_order_acquire);
+    // While paused, keep draining any queued tail under the 5 ms output
+    // volume ramp instead of hard-cutting to silence â€” a mid-sample gate is
+    // audible as a click on every device class.
+    const bool drainingPauseTail =
+        !playingNow && currentOutputVolume_ > 0.0F &&
+        ring->availableToRead() >= kOutputChannels;
+    if (!playingNow && !drainingPauseTail) {
+        std::memset(output, 0, requestedFrames * kOutputChannels * sizeof(float));
+        underrunActive_ = false;
+        recoveryFading_ = false;
+        prebuffering_ = true;
+        prebufferWaitCallbacks_ = kPrebufferMaxCallbacks;
+        lastOutput_.fill(0.0F);
+        return oboe::DataCallbackResult::Continue;
+    }
+    const std::size_t availableFrames = ring->availableToRead() / kOutputChannels;
+    if (prebuffering_ && playingNow &&
+        (availableFrames == 0 ||
+            (availableFrames < prebufferFrames_ && prebufferWaitCallbacks_-- > 0))) {
+        std::memset(output, 0, requestedFrames * kOutputChannels * sizeof(float));
+        return oboe::DataCallbackResult::Continue;
+    }
+    if (prebuffering_) {
+        prebuffering_ = false;
+        recoveryFading_ = true;
+        recoveryFadePosition_ = 0;
+    }
+    const std::size_t readSamples = ring->read(output, requestedFrames * kOutputChannels);
     const std::size_t validFrames = readSamples / kOutputChannels;
     const bool wasUnderrun = underrunActive_;
 
     if (validFrames > 0) {
-        oboeDsp_.process(output, static_cast<std::int32_t>(validFrames));
+        if (!inputAlreadyProcessed_.load(std::memory_order_acquire)) {
+            oboeDsp_.process(output, static_cast<std::int32_t>(validFrames));
+        }
         if (wasUnderrun) {
             recoveryFading_ = true;
             recoveryFadePosition_ = 0;
@@ -463,30 +645,83 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
                 }
             }
             const std::size_t offset = frame * kOutputChannels;
-            output[offset] *= recoveryGain;
-            output[offset + 1U] *= recoveryGain;
+            // Pausing fades toward zero through the same ramp; resuming fades
+            // back up â€” both click-free.
+            const float volumeTarget = playingNow
+                ? targetOutputVolume_.load(std::memory_order_relaxed)
+                : 0.0F;
+            const float volumeDelta = volumeTarget - currentOutputVolume_;
+            currentOutputVolume_ += std::clamp(
+                volumeDelta,
+                -outputVolumeRampStep_,
+                outputVolumeRampStep_);
+            const float gain = recoveryGain * currentOutputVolume_;
+            output[offset] *= gain;
+            output[offset + 1U] *= gain;
         }
         lastOutput_[0] = output[(validFrames - 1U) * kOutputChannels];
         lastOutput_[1] = output[(validFrames - 1U) * kOutputChannels + 1U];
+        renderedFrames_.fetch_add(validFrames, std::memory_order_release);
     }
 
     if (validFrames < requestedFrames) {
-        if (!wasUnderrun || validFrames > 0) {
-            underrunAnchor_ = lastOutput_;
-            underrunFadePosition_ = 0;
+        if (playingNow) {
+            if (!wasUnderrun || validFrames > 0) {
+                underrunCount_.fetch_add(1, std::memory_order_release);
+            }
+            if (!wasUnderrun || validFrames > 0) {
+                underrunAnchor_ = lastOutput_;
+                underrunFadePosition_ = 0;
+            }
+            recoveryFading_ = false;
+            for (std::size_t frame = validFrames; frame < requestedFrames; ++frame) {
+                const float fadeOut = underrunFadePosition_ < fadeInCurve_.size()
+                    ? 1.0F - fadeInCurve_[underrunFadePosition_++]
+                    : 0.0F;
+                const std::size_t offset = frame * kOutputChannels;
+                output[offset] = underrunAnchor_[0] * fadeOut;
+                output[offset + 1U] = underrunAnchor_[1] * fadeOut;
+            }
+            underrunActive_ = true;
+            prebuffering_ = true;
+            prebufferWaitCallbacks_ = kPrebufferMaxCallbacks;
+            cleanFrames_ = 0;
+            // Adaptive resume runway: every episode doubles the required
+            // prebuffer (capped at half the ring) so cascading starvation on
+            // a throttling device self-extinguishes instead of repeating.
+            const auto capacityFrames = ring->capacity() / kOutputChannels;
+            prebufferFrames_ = std::max(
+                prebufferBaseFrames_,
+                std::min(prebufferFrames_ * 2U, capacityFrames / 2U));
+        } else {
+            // Pause tail fully drained: plain silence with no accounting so a
+            // long pause is never mistaken for playback starvation.
+            std::memset(
+                output + validFrames * kOutputChannels,
+                0,
+                (requestedFrames - validFrames) * kOutputChannels * sizeof(float));
+            underrunActive_ = false;
+            recoveryFading_ = false;
         }
-        recoveryFading_ = false;
-        for (std::size_t frame = validFrames; frame < requestedFrames; ++frame) {
-            const float fadeOut = underrunFadePosition_ < fadeInCurve_.size()
-                ? 1.0F - fadeInCurve_[underrunFadePosition_++]
-                : 0.0F;
-            const std::size_t offset = frame * kOutputChannels;
-            output[offset] = underrunAnchor_[0] * fadeOut;
-            output[offset + 1U] = underrunAnchor_[1] * fadeOut;
-        }
-        underrunActive_ = true;
     } else {
         underrunActive_ = false;
+        // Sustained glitch-free playback gradually forgives past underruns so
+        // a single transient CPU spike (navigation, camera, OEM throttling)
+        // can never accumulate into a permanent session downgrade, and steps
+        // the adaptive prebuffer back toward its baseline.
+        cleanFrames_ += requestedFrames;
+        while (cleanFrames_ >= underrunDecayIntervalFrames_) {
+            cleanFrames_ -= underrunDecayIntervalFrames_;
+            if (prebufferFrames_ > prebufferBaseFrames_) {
+                prebufferFrames_ = std::max(
+                    prebufferBaseFrames_, prebufferFrames_ / 2U);
+            }
+            auto current = underrunCount_.load(std::memory_order_acquire);
+            if (current == 0) break;
+            while (current > 0 && !underrunCount_.compare_exchange_weak(
+                current, current - 1, std::memory_order_release)) {
+            }
+        }
     }
 
     return oboe::DataCallbackResult::Continue;
@@ -496,21 +731,22 @@ void AudioEngine::onErrorAfterClose(
     oboe::AudioStream* audioStream,
     oboe::Result /* error */) {
     if (!restartAllowed_.load(std::memory_order_acquire)) return;
-    std::lock_guard controlLock(controlMutex_);
+    std::lock_guard<std::mutex> controlLock(controlMutex_);
     if (!restartAllowed_.load(std::memory_order_acquire) ||
         stream_ == nullptr || stream_.get() != audioStream) {
         return;
     }
 
+    streamRestartCount_.fetch_add(1, std::memory_order_release);
     activeRingBuffer_.store(nullptr, std::memory_order_release);
     stream_.reset();
     outputSampleRate_.store(0, std::memory_order_release);
     {
-        std::lock_guard producerLock(producerMutex_);
+        std::lock_guard<std::mutex> producerLock(producerMutex_);
         releaseProducerStateLocked();
     }
     try {
-        (void) startLocked(requestedOutputSampleRate_);
+        (void) startLocked(requestedOutputSampleRate_.load(std::memory_order_acquire));
     } catch (...) {
         // This callback runs on Oboe's recovery thread, outside a JNI frame.
         // Never allow an allocation failure during restart to terminate the

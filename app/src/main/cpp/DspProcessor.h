@@ -16,6 +16,7 @@ public:
     void configure(double sampleRate) noexcept;
     void reset() noexcept;
     void setStudioMasterClarity(bool enabled) noexcept;
+    void setPeakProtectionEnabled(bool enabled) noexcept;
     void setVolumeBoost(bool enabled, std::int32_t percent) noexcept;
     void setEqualizer(
         bool enabled,
@@ -73,9 +74,10 @@ private:
     };
 
     double sampleRate_{48000.0};
-    float currentWet_{1.0F};
+    float currentWet_{0.0F};
     float rampPerFrame_{1.0F / 2400.0F};
-    std::atomic<bool> targetEnabled_{true};
+    std::atomic<bool> targetEnabled_{false};
+    std::atomic<bool> peakProtectionEnabled_{false};
     std::atomic<bool> targetEqualizerEnabled_{false};
     std::atomic<float> targetOutputGain_{1.0F};
     std::atomic<std::uint32_t> targetEqualizerRevision_{0};
@@ -86,17 +88,27 @@ private:
     std::int32_t equalizerHeadroomCountdown_{0};
     std::uint32_t appliedEqualizerRevision_{0};
     std::uint16_t activeEqualizerBands_{0};
-    float currentPreampDb_{-1.0F};
-    float currentPreampGain_{0.891250938F};
+    float currentPreampDb_{0.0F};
+    float currentPreampGain_{1.0F};
     float equalizerMaximumBoostDb_{0.0F};
     float limiterGain_{1.0F};
     float currentOutputGain_{1.0F};
     float outputGainSmoothing_{0.001F};
     float equalizerGainSmoothing_{0.1F};
     float limiterRelease_{0.001F};
+    // Smoothed ~1.5 ms limiter attack: gain reduction approaches the target
+    // exponentially instead of slamming in one frame, which removes the
+    // zipper/grit artifact on transients while the hard sample clamp remains
+    // as a final safety.
+    float limiterAttack_{1.0F};
+    // One-pole DC blocker (10 Hz). Removes stream DC offset so peaks keep the
+    // full symmetric headroom; transparent for DC-free program material.
+    float dcBlockerR_{0.999F};
+    std::array<double, 2> dcXPrev_{};
+    std::array<double, 2> dcYPrev_{};
     std::int32_t microFadeFrameCount_{96};
     std::int32_t microFadePosition_{0};
-    bool clarityChainActive_{true};
+    bool clarityChainActive_{false};
     Biquad subBassHighPass_{};
     Biquad lowMidSeparation_{};
     Biquad airDetail_{};

@@ -22,8 +22,8 @@ enum class NativePcmEncoding(internal val nativeValue: Int, internal val bytesPe
 
 /**
  * Process-wide owner of the C++17 DSP/Oboe engine. Normal app playback enters
- * through [NativeProcessingAudioSink], preserving Media3's one AudioTrack
- * clock; [start]/[writePcm] remain available for a direct Oboe producer.
+ * through [NativeProcessingAudioSink] as decoded Float32 PCM; the platform
+ * AudioTrack sink remains the compatibility fallback when Oboe cannot open.
  */
 @Singleton
 class NativeAudioEngine @Inject constructor(
@@ -57,7 +57,7 @@ class NativeAudioEngine @Inject constructor(
             }
             applicationScope.launch(Dispatchers.Default) {
                 settingsPreferences.settings
-                    .map { it.volumeBoostEnabled to it.volumeBoostPercent.coerceIn(100, 200) }
+                    .map { it.volumeBoostEnabled to it.volumeBoostPercent.coerceIn(100, 150) }
                     .distinctUntilChanged()
                     .collect { (enabled, percent) -> setVolumeBoost(enabled, percent) }
             }
@@ -77,14 +77,35 @@ class NativeAudioEngine @Inject constructor(
         withHandle(Unit) { nativeStop(it) }
     }
 
+    /** True while an Oboe stream is open; callers can reuse it without a reopen pop. */
+    val isRunning: Boolean
+        get() = withHandle(false, ::nativeIsRunning)
+
+    /**
+     * Drops queued output and resets fade/prebuffer state while keeping the
+     * stream open. Seeks and track transitions reuse this instead of a full
+     * stop/start cycle, which is audible as a click on several OEM stacks.
+     */
+    fun flushOutput() {
+        withHandle(Unit) { nativeFlushOutput(it) }
+    }
+
+    internal fun setPlaying(playing: Boolean) {
+        withHandle(Unit) { nativeSetPlaying(it, playing) }
+    }
+
+    internal fun setOutputVolume(volume: Float) {
+        withHandle(Unit) { nativeSetOutputVolume(it, volume.coerceIn(0f, 1f)) }
+    }
+
     /** Thread-safe; native DSP crossfades wet/dry over exactly 50 ms. */
     fun setStudioMasterClarity(enabled: Boolean) {
         withHandle(Unit) { nativeSetStudioMasterClarity(it, enabled) }
     }
 
-    /** Native adaptive gain; ramps smoothly and never exceeds the -1 dBFS ceiling. */
+    /** Native adaptive gain; ramps smoothly and never exceeds the -2 dBFS ceiling. */
     fun setVolumeBoost(enabled: Boolean, percent: Int) {
-        withHandle(Unit) { nativeSetVolumeBoost(it, enabled, percent.coerceIn(100, 200)) }
+        withHandle(Unit) { nativeSetVolumeBoost(it, enabled, percent.coerceIn(100, 150)) }
     }
 
     /** Updates the native 15-band EQ; its gains are smoothed in C++. */
@@ -180,6 +201,39 @@ class NativeAudioEngine @Inject constructor(
         return accepted
     }
 
+    /** Enqueues Float32 PCM already processed at the active Oboe sample rate. */
+    internal fun writeProcessedPcm(
+        buffer: ByteBuffer,
+        frameCount: Int,
+        inputSampleRate: Int,
+        inputChannelCount: Int,
+    ): Int {
+        require(buffer.isDirect) { "Processed PCM must use a direct ByteBuffer" }
+        require(inputChannelCount in 1..2)
+        require(inputSampleRate > 0)
+        require(frameCount >= 0)
+        val requiredBytes = frameCount.toLong() * inputChannelCount * Float.SIZE_BYTES
+        require(requiredBytes <= buffer.remaining().toLong()) { "Processed PCM buffer is too small" }
+        if (frameCount == 0) return 0
+
+        val accepted = withHandle(0) { handle ->
+            nativeWriteProcessedPcm(
+                handle,
+                buffer,
+                buffer.position(),
+                frameCount,
+                inputSampleRate,
+                inputChannelCount,
+            )
+        }
+        if (accepted > 0) {
+            buffer.position(
+                buffer.position() + accepted * inputChannelCount * Float.SIZE_BYTES,
+            )
+        }
+        return accepted
+    }
+
     /** Drains libsoxr's delayed sinc tail at end-of-stream. */
     fun flushResampler() {
         withHandle(Unit) { nativeFlushResampler(it) }
@@ -188,8 +242,30 @@ class NativeAudioEngine @Inject constructor(
     val outputSampleRate: Int
         get() = withHandle(0, ::nativeOutputSampleRate)
 
+    /** The rate requested when opening the current stream (0 = let Android choose). */
+    val requestedSampleRate: Int
+        get() = withHandle(0, ::nativeRequestedSampleRate)
+
     val bufferedFrames: Long
         get() = withHandle(0L, ::nativeBufferedFrames)
+
+    val renderedFrames: Long
+        get() = withHandle(0L, ::nativeRenderedFrames)
+
+    val underrunCount: Long
+        get() = withHandle(0L, ::nativeUnderrunCount)
+
+    /** Streams opened since process start — cumulative across stop/start cycles. */
+    val streamOpenCount: Long
+        get() = withHandle(0L, ::nativeStreamOpenCount)
+
+    /** Fatal stream errors that triggered an automatic in-place rebuild. */
+    val streamRestartCount: Long
+        get() = withHandle(0L, ::nativeStreamRestartCount)
+
+    /** Times the device substituted a different rate than requested. */
+    val rateAdaptationCount: Long
+        get() = withHandle(0L, ::nativeRateAdaptationCount)
 
     override fun close() {
         synchronized(handleLock) {
@@ -229,6 +305,10 @@ class NativeAudioEngine @Inject constructor(
     private external fun nativeDestroy(handle: Long)
     private external fun nativeStart(handle: Long, preferredOutputSampleRate: Int): Boolean
     private external fun nativeStop(handle: Long)
+    private external fun nativeIsRunning(handle: Long): Boolean
+    private external fun nativeFlushOutput(handle: Long)
+    private external fun nativeSetPlaying(handle: Long, playing: Boolean)
+    private external fun nativeSetOutputVolume(handle: Long, volume: Float)
     private external fun nativeSetStudioMasterClarity(handle: Long, enabled: Boolean)
     private external fun nativeSetVolumeBoost(handle: Long, enabled: Boolean, percent: Int)
     private external fun nativeSetEqualizer(handle: Long, enabled: Boolean, gainsDb: FloatArray)
@@ -264,9 +344,23 @@ class NativeAudioEngine @Inject constructor(
         inputSampleRate: Int,
         inputChannelCount: Int,
     ): Int
+    private external fun nativeWriteProcessedPcm(
+        handle: Long,
+        buffer: ByteBuffer,
+        byteOffset: Int,
+        frameCount: Int,
+        inputSampleRate: Int,
+        inputChannelCount: Int,
+    ): Int
     private external fun nativeFlushResampler(handle: Long)
     private external fun nativeOutputSampleRate(handle: Long): Int
+    private external fun nativeRequestedSampleRate(handle: Long): Int
     private external fun nativeBufferedFrames(handle: Long): Long
+    private external fun nativeUnderrunCount(handle: Long): Long
+    private external fun nativeRenderedFrames(handle: Long): Long
+    private external fun nativeStreamOpenCount(handle: Long): Long
+    private external fun nativeStreamRestartCount(handle: Long): Long
+    private external fun nativeRateAdaptationCount(handle: Long): Long
 
     private companion object {
         const val TAG = "NativeAudioEngine"

@@ -127,6 +127,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -903,53 +904,49 @@ private fun FullPlayer(
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             if (fullScreenCoverArt) {
-                // Full-bleed canvas, Apple-Music-style: the cover becomes the
-                // environment. A blurred, slightly oversized copy fills the
-                // whole display so the sharp square art can dissolve into a
-                // same-colored continuation instead of ending on a hard edge.
+                // ── Premium full-cover environment ───────────────────────
+                // Layer 1: soft, restrained blurred backdrop — the art's
+                // palette bleeds into the room at low intensity, never
+                // competing with the hero cover. Scale + opacity are
+                // deliberately gentle; heavy 1.25× / 0.90 was muddy.
                 PlayerArtwork(
                     track = track,
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
-                            scaleX = 1.25f
-                            scaleY = 1.25f
-                            alpha = 0.9f
+                            scaleX = 1.08f
+                            scaleY = 1.08f
+                            alpha = 0.34f
                         }
-                        .blur(64.dp),
+                        .blur(44.dp),
                     corner = 0.dp,
-                    decodeSizePx = 160,
+                    decodeSizePx = 140,
                 )
-                // The sharp cover: full width, anchored under the header,
-                // capped so tall screens keep control space. Its bottom edge
-                // alpha-fades inside an offscreen layer — the mask must not
-                // touch the backdrop beneath, only this art — melting it
-                // seamlessly into the blurred continuation.
-                val sharpArtworkSize = minOf(maxWidth, maxHeight * 0.58f)
-                PlayerArtwork(
-                    track = track,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .size(sharpArtworkSize)
-                        .graphicsLayer {
-                            compositingStrategy = CompositingStrategy.Offscreen
-                            val artworkWidth = size.width.coerceAtLeast(1f)
-                            alpha = (1f - abs(shownArtworkX) / (artworkWidth * 2f))
-                                .coerceIn(0.84f, 1f)
-                        }
-                        .drawWithContent {
-                            drawContent()
-                            drawRect(
-                                brush = Brush.verticalGradient(
-                                    0.00f to Color.Black,
-                                    0.70f to Color.Black,
-                                    0.96f to Color.Transparent,
+                // Layer 2: controlled dark veil — tames saturated artwork
+                // so whites remain crisp without an aggressive blur.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.44f)),
+                )
+                // Layer 3: subtle vignette, lighter than before. Real depth
+                // without the old 7-stop mid-band that ate legibility.
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.16f),
+                                    Color.Transparent,
                                 ),
-                                blendMode = BlendMode.DstIn,
-                            )
-                        },
-                    corner = 0.dp,
-                    decodeSizePx = 900,
+                                center = androidx.compose.ui.geometry.Offset(
+                                    size.width * 0.5f,
+                                    size.height * 0.42f,
+                                ),
+                                radius = maxOf(size.width, size.height) * 0.92f,
+                            ),
+                        ),
                 )
             } else {
                 PlayerArtwork(
@@ -971,18 +968,17 @@ private fun FullPlayer(
                     .fillMaxSize()
                     .background(
                         if (fullScreenCoverArt) {
-                            // Legibility-only scrim: gentle at the status
-                            // bar/header, fully clear over the artwork, then
-                            // a smooth ramp where title, seek bar and
-                            // controls sit — never a muddy mid-screen band.
+                            // Calm, premium legibility veil — barely there at
+                            // the top, fully open over the hero art, then a
+                            // single controlled ramp where text + controls live.
+                            // No mid-screen mud, no double-gradient heaviness.
                             Brush.verticalGradient(
-                                0.00f to Color.Black.copy(alpha = 0.35f),
-                                0.10f to Color.Black.copy(alpha = 0.12f),
-                                0.22f to Color.Transparent,
-                                0.46f to Color.Transparent,
-                                0.68f to Color.Black.copy(alpha = 0.38f),
-                                0.86f to Color.Black.copy(alpha = 0.62f),
-                                1.00f to Color.Black.copy(alpha = 0.78f),
+                                0.00f to Color.Black.copy(alpha = 0.22f),
+                                0.14f to Color.Black.copy(alpha = 0.06f),
+                                0.32f to Color.Transparent,
+                                0.56f to Color.Transparent,
+                                0.78f to Color.Black.copy(alpha = 0.50f),
+                                1.00f to Color.Black.copy(alpha = 0.74f),
                             )
                         } else {
                             Brush.verticalGradient(
@@ -999,12 +995,13 @@ private fun FullPlayer(
                 Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 20.dp),
+                    .padding(horizontal = if (fullScreenCoverArt) 22.dp else 20.dp),
             ) {
+                // ── Header: slimmer, calmer, premium ─────────────────────
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(52.dp)
+                        .height(if (fullScreenCoverArt) 48.dp else 52.dp)
                         .playerVerticalSwipe(enabled = currentTab != FullPlayerTab.NOW_PLAYING),
                 ) {
                     IconButton(
@@ -1017,18 +1014,18 @@ private fun FullPlayer(
                         },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .size(if (fullScreenCoverArt) 42.dp else 44.dp)
+                            .clip(RoundedCornerShape(if (fullScreenCoverArt) 14.dp else 16.dp))
                             .background(
-                                if (fullScreenCoverArt) Color.Black.copy(alpha = 0.30f)
+                                if (fullScreenCoverArt) Color.White.copy(alpha = 0.11f)
                                 else MaterialTheme.colorScheme.surfaceContainerHigh,
                             ),
                     ) {
                         Icon(
                             if (currentTab != FullPlayerTab.NOW_PLAYING) Icons.Filled.ArrowBack else Icons.Filled.ExpandMore,
                             if (currentTab != FullPlayerTab.NOW_PLAYING) "Back to player" else "Minimize player",
-                            modifier = Modifier.size(26.dp),
-                            tint = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(if (fullScreenCoverArt) 22.dp else 26.dp),
+                            tint = if (fullScreenCoverArt) Color.White.copy(alpha = 0.95f) else MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     Column(
@@ -1037,13 +1034,13 @@ private fun FullPlayer(
                     ) {
                         Text(
                             when (currentTab) {
-                                FullPlayerTab.NOW_PLAYING -> "NOW PLAYING"
+                                FullPlayerTab.NOW_PLAYING -> if (fullScreenCoverArt) "Now Playing" else "NOW PLAYING"
                                 FullPlayerTab.LYRICS -> "LYRICS"
                                 FullPlayerTab.QUEUE -> "PLAYING QUEUE"
                             },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
+                            style = if (fullScreenCoverArt) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
+                            color = if (fullScreenCoverArt) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.primary,
+                            fontWeight = if (fullScreenCoverArt) FontWeight.SemiBold else FontWeight.Bold,
                         )
                         Text(
                             if (currentTab == FullPlayerTab.LYRICS) {
@@ -1052,7 +1049,7 @@ private fun FullPlayer(
                                 state.sourceLabel.takeIf { it.isNotBlank() } ?: "LastWave"
                             },
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (fullScreenCoverArt) Color.White.copy(alpha = 0.72f)
+                            color = if (fullScreenCoverArt) Color.White.copy(alpha = 0.56f)
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -1062,23 +1059,23 @@ private fun FullPlayer(
                         onClick = { showTrackMenu = true },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .size(if (fullScreenCoverArt) 42.dp else 44.dp)
+                            .clip(RoundedCornerShape(if (fullScreenCoverArt) 14.dp else 16.dp))
                             .background(
-                                if (fullScreenCoverArt) Color.Black.copy(alpha = 0.30f)
+                                if (fullScreenCoverArt) Color.White.copy(alpha = 0.11f)
                                 else MaterialTheme.colorScheme.surfaceContainerHigh,
                             ),
                     ) {
                         Icon(
                             Icons.Filled.MoreVert,
                             "Song options",
-                            modifier = Modifier.size(22.dp),
-                            tint = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(if (fullScreenCoverArt) 20.dp else 22.dp),
+                            tint = if (fullScreenCoverArt) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
 
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(if (fullScreenCoverArt) 18.dp else 6.dp))
 
                 AnimatedContent(
                     targetState = currentTab,
@@ -1108,243 +1105,481 @@ private fun FullPlayer(
                         }
 
                         FullPlayerTab.NOW_PLAYING -> {
-                            Column(
-                                Modifier.fillMaxSize().padding(bottom = 12.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                BoxWithConstraints(
-                                    modifier = Modifier.fillMaxWidth().weight(1f),
-                                    contentAlignment = Alignment.Center,
+                            if (fullScreenCoverArt) {
+                                // ── Premium immersive layout ─────────────────
+                                // Balanced composition: header breathes, hero
+                                // art is truly centered (not top-jammed), info
+                                // floats with elegant rhythm, controls are
+                                // calm translucent glass. Inspired by Apple
+                                // Music's luxurious negative space.
+                                Column(
+                                    Modifier.fillMaxSize(),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
-                                    val artworkSize = (minOf(maxWidth, maxHeight) - 6.dp)
-                                        .coerceAtLeast(0.dp)
-                                        .coerceAtMost(370.dp)
-                                    Surface(
-                                        shape = RoundedCornerShape(32.dp),
-                                        color = if (fullScreenCoverArt) Color.Transparent
-                                        else MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        tonalElevation = if (fullScreenCoverArt) 0.dp else 8.dp,
-                                        shadowElevation = if (fullScreenCoverArt) 0.dp else 18.dp,
-                                        modifier = Modifier
-                                            .size(artworkSize)
-                                            .graphicsLayer {
-                                                if (!fullScreenCoverArt) {
-                                                    translationX = shownArtworkX
-                                                    rotationZ = shownArtworkX / 80f
-                                                }
-                                            }
-                                            .pointerInput(track.videoId, track.title) {
-                                                awaitEachGesture {
-                                                    val down = awaitFirstDown(requireUnconsumed = false)
-                                                    var isDrag = false
-                                                    val touchSlop = viewConfiguration.touchSlop
-                                                    val initialX = down.position.x
-                                                    val initialY = down.position.y
-
-                                                    while (true) {
-                                                        val event = awaitPointerEvent()
-                                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-
-                                                        if (!change.pressed) {
-                                                            if (isDrag) {
-                                                                when {
-                                                                    artworkDragX < -swipeThreshold -> player.next()
-                                                                    artworkDragX > swipeThreshold -> player.previous()
-                                                                }
-                                                                artworkDragX = 0f
-                                                            } else {
-                                                                // Use initial tap-down coordinate to strictly anchor side
-                                                                val isLeft = initialX < size.width * 0.5f
-                                                                val side = if (isLeft) SeekDirection.REWIND else SeekDirection.FORWARD
-                                                                val now = SystemClock.elapsedRealtime()
-
-                                                                if (lastTapSide != side) {
-                                                                    // Switched sides: immediately dismiss opposite overlay & start new side
-                                                                    seekResetJob?.cancel()
-                                                                    seekOverlayDirection = null
-                                                                    lastTapSide = side
-                                                                    lastTapTimestamp = now
-                                                                } else if (now - lastTapTimestamp < 450L) {
-                                                                    // Consecutive multi-tap on the same side
-                                                                    val newSeconds = if (seekOverlayDirection == side) seekOverlaySeconds + 5 else 5
-                                                                    seekOverlaySeconds = newSeconds
-                                                                    seekOverlayDirection = side
-                                                                    lastTapTimestamp = now
-                                                                    val deltaMs = if (side == SeekDirection.FORWARD) 5_000L else -5_000L
-                                                                    val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
-                                                                    player.seekTo(newPos)
-
-                                                                    seekResetJob?.cancel()
-                                                                    seekResetJob = coroutineScope.launch {
-                                                                        delay(700L)
-                                                                        seekOverlayDirection = null
-                                                                        lastTapSide = null
-                                                                    }
-                                                                } else {
-                                                                    // First tap on this side
-                                                                    lastTapTimestamp = now
-                                                                    lastTapSide = side
-                                                                    // Hide the previous feedback before waiting for the second tap.
-                                                                    // Keep its value until the exit animation completes so the UI
-                                                                    // can never render a transient "+0s" or "-0s" frame.
-                                                                    seekOverlayDirection = null
-                                                                }
-                                                            }
-                                                            break
-                                                        }
-
-                                                        if (change.isConsumed) {
-                                                            artworkDragX = 0f
-                                                            break
-                                                        }
-
-                                                        val dx = change.position.x - initialX
-                                                        val dy = change.position.y - initialY
-                                                        if (!isDrag) {
-                                                            if (kotlin.math.abs(dx) > touchSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
-                                                                isDrag = true
-                                                                change.consume()
-                                                            }
-                                                        } else {
-                                                            change.consume()
-                                                            artworkDragX = dx
-                                                        }
-                                                    }
-                                                }
-                                            },
+                                    // ── Hero artwork: centered, elegantly framed ──
+                                    BoxWithConstraints(
+                                        modifier = Modifier.fillMaxWidth().weight(1f),
+                                        contentAlignment = Alignment.Center,
                                     ) {
-                                        Box(Modifier.fillMaxSize()) {
-                                            if (!fullScreenCoverArt) {
-                                                PlayerArtwork(track, Modifier.fillMaxSize(), 32.dp)
-                                            }
-
-                                            // Dedicated Left Rewind Overlay (strictly anchored to left half)
-                                            androidx.compose.animation.AnimatedVisibility(
-                                                visible = seekOverlayDirection == SeekDirection.REWIND,
-                                                enter = fadeIn(tween(100)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.88f),
-                                                exit = fadeOut(tween(200)),
-                                                modifier = Modifier
-                                                    .align(Alignment.CenterStart)
-                                                    .fillMaxHeight()
-                                                    .fillMaxWidth(0.5f),
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxSize()
-                                                        .clip(RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp, topEnd = 120.dp, bottomEnd = 120.dp))
-                                                        .background(Color.Black.copy(alpha = 0.58f)),
-                                                    contentAlignment = Alignment.Center,
-                                                ) {
-                                                    Column(
-                                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                                        verticalArrangement = Arrangement.Center,
-                                                    ) {
-                                                        Surface(
-                                                            shape = CircleShape,
-                                                            color = Color.White.copy(alpha = 0.22f),
-                                                            modifier = Modifier.size(52.dp),
-                                                        ) {
-                                                            Box(contentAlignment = Alignment.Center) {
-                                                                Icon(
-                                                                    Icons.Filled.FastRewind,
-                                                                    contentDescription = "Seek rewind",
-                                                                    tint = Color.White,
-                                                                    modifier = Modifier.size(28.dp),
-                                                                )
+                                        // Premium sizing — generous horizontal
+                                        // inset + vertical ratio keeps breathing
+                                        // room on every screen size. Capped so
+                                        // tall tablets don't eat the controls.
+                                        val artworkSize = remember(maxWidth, maxHeight) {
+                                            val inset = 22.dp * 2
+                                            // maxWidth here is already inside
+                                            // the parent's 22dp horizontal pad.
+                                            // Leave 8dp extra air inside the zone.
+                                            (minOf(maxWidth - 8.dp, maxHeight - 8.dp))
+                                                .coerceAtLeast(180.dp)
+                                                .coerceAtMost(400.dp)
+                                        }
+                                        // Subtle depth: soft shadow + hairline
+                                        // highlight lifts the art off the dark
+                                        // environment without heavy card chrome.
+                                        Surface(
+                                            shape = RoundedCornerShape(26.dp),
+                                            color = Color.White.copy(alpha = 0.04f),
+                                            shadowElevation = 26.dp,
+                                            modifier = Modifier
+                                                .size(artworkSize)
+                                                .graphicsLayer {
+                                                    // Gentle, damped parallax
+                                                    // during swipe — no spin.
+                                                    translationX = shownArtworkX * 0.55f
+                                                    alpha = (1f - abs(shownArtworkX) / (size.width.coerceAtLeast(1f) * 2.2f))
+                                                        .coerceIn(0.86f, 1f)
+                                                }
+                                                .pointerInput(track.videoId, track.title) {
+                                                    awaitEachGesture {
+                                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                                        var isDrag = false
+                                                        val touchSlop = viewConfiguration.touchSlop
+                                                        val initialX = down.position.x
+                                                        val initialY = down.position.y
+                                                        while (true) {
+                                                            val event = awaitPointerEvent()
+                                                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                                            if (!change.pressed) {
+                                                                if (isDrag) {
+                                                                    when {
+                                                                        artworkDragX < -swipeThreshold -> player.next()
+                                                                        artworkDragX > swipeThreshold -> player.previous()
+                                                                    }
+                                                                    artworkDragX = 0f
+                                                                } else {
+                                                                    val isLeft = initialX < size.width * 0.5f
+                                                                    val side = if (isLeft) SeekDirection.REWIND else SeekDirection.FORWARD
+                                                                    val now = SystemClock.elapsedRealtime()
+                                                                    if (lastTapSide != side) {
+                                                                        seekResetJob?.cancel()
+                                                                        seekOverlayDirection = null
+                                                                        lastTapSide = side
+                                                                        lastTapTimestamp = now
+                                                                    } else if (now - lastTapTimestamp < 450L) {
+                                                                        val newSeconds = if (seekOverlayDirection == side) seekOverlaySeconds + 5 else 5
+                                                                        seekOverlaySeconds = newSeconds
+                                                                        seekOverlayDirection = side
+                                                                        lastTapTimestamp = now
+                                                                        val deltaMs = if (side == SeekDirection.FORWARD) 5_000L else -5_000L
+                                                                        val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
+                                                                        player.seekTo(newPos)
+                                                                        seekResetJob?.cancel()
+                                                                        seekResetJob = coroutineScope.launch {
+                                                                            delay(700L)
+                                                                            seekOverlayDirection = null
+                                                                            lastTapSide = null
+                                                                        }
+                                                                    } else {
+                                                                        lastTapTimestamp = now
+                                                                        lastTapSide = side
+                                                                        seekOverlayDirection = null
+                                                                    }
+                                                                }
+                                                                break
+                                                            }
+                                                            if (change.isConsumed) {
+                                                                artworkDragX = 0f
+                                                                break
+                                                            }
+                                                            val dx = change.position.x - initialX
+                                                            val dy = change.position.y - initialY
+                                                            if (!isDrag) {
+                                                                if (kotlin.math.abs(dx) > touchSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                                                                    isDrag = true
+                                                                    change.consume()
+                                                                }
+                                                            } else {
+                                                                change.consume()
+                                                                artworkDragX = dx
                                                             }
                                                         }
-                                                        Spacer(Modifier.height(6.dp))
-                                                        Text(
-                                                            "-${seekOverlaySeconds}s",
-                                                            style = MaterialTheme.typography.titleMedium,
-                                                            fontWeight = FontWeight.ExtraBold,
-                                                            color = Color.White,
-                                                        )
+                                                    }
+                                                },
+                                        ) {
+                                            Box(
+                                                Modifier
+                                                    .fillMaxSize()
+                                                    .clip(RoundedCornerShape(26.dp))
+                                                    .background(Color.White.copy(alpha = 0.06f)),
+                                            ) {
+                                                // Hairline highlight — faint
+                                                // top edge catch-light for depth.
+                                                Box(
+                                                    Modifier
+                                                        .fillMaxSize()
+                                                        .clip(RoundedCornerShape(26.dp)),
+                                                ) {
+                                                    PlayerArtwork(track, Modifier.fillMaxSize(), 26.dp)
+                                                }
+                                                Box(
+                                                    Modifier
+                                                        .fillMaxSize()
+                                                        .clip(RoundedCornerShape(26.dp))
+                                                        .background(
+                                                            Brush.verticalGradient(
+                                                                0f to Color.White.copy(alpha = 0.10f),
+                                                                0.14f to Color.Transparent,
+                                                            ),
+                                                        ),
+                                                )
+                                                // ── Seek overlays (softer, premium) ──
+                                                androidx.compose.animation.AnimatedVisibility(
+                                                    visible = seekOverlayDirection == SeekDirection.REWIND,
+                                                    enter = fadeIn(tween(140)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.90f),
+                                                    exit = fadeOut(tween(200)),
+                                                    modifier = Modifier
+                                                        .align(Alignment.CenterStart)
+                                                        .fillMaxHeight()
+                                                        .fillMaxWidth(0.5f),
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .clip(RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp, topEnd = 80.dp, bottomEnd = 80.dp))
+                                                            .background(Color.Black.copy(alpha = 0.44f)),
+                                                        contentAlignment = Alignment.Center,
+                                                    ) {
+                                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                            Surface(shape = CircleShape, color = Color.White.copy(alpha = 0.16f), modifier = Modifier.size(48.dp)) {
+                                                                Box(contentAlignment = Alignment.Center) {
+                                                                    Icon(Icons.Filled.FastRewind, null, tint = Color.White, modifier = Modifier.size(26.dp))
+                                                                }
+                                                            }
+                                                            Spacer(Modifier.height(6.dp))
+                                                            Text("-${seekOverlaySeconds}s", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                                                        }
                                                     }
                                                 }
-                                            }
-
-                                            // Dedicated Right Fast-Forward Overlay (strictly anchored to right half)
-                                            androidx.compose.animation.AnimatedVisibility(
-                                                visible = seekOverlayDirection == SeekDirection.FORWARD,
-                                                enter = fadeIn(tween(100)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.88f),
-                                                exit = fadeOut(tween(200)),
-                                                modifier = Modifier
-                                                    .align(Alignment.CenterEnd)
-                                                    .fillMaxHeight()
-                                                    .fillMaxWidth(0.5f),
-                                            ) {
-                                                Box(
+                                                androidx.compose.animation.AnimatedVisibility(
+                                                    visible = seekOverlayDirection == SeekDirection.FORWARD,
+                                                    enter = fadeIn(tween(140)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.90f),
+                                                    exit = fadeOut(tween(200)),
                                                     modifier = Modifier
-                                                        .fillMaxSize()
-                                                        .clip(RoundedCornerShape(topEnd = 32.dp, bottomEnd = 32.dp, topStart = 120.dp, bottomStart = 120.dp))
-                                                        .background(Color.Black.copy(alpha = 0.58f)),
-                                                    contentAlignment = Alignment.Center,
+                                                        .align(Alignment.CenterEnd)
+                                                        .fillMaxHeight()
+                                                        .fillMaxWidth(0.5f),
                                                 ) {
-                                                    Column(
-                                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                                        verticalArrangement = Arrangement.Center,
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .clip(RoundedCornerShape(topEnd = 26.dp, bottomEnd = 26.dp, topStart = 80.dp, bottomStart = 80.dp))
+                                                            .background(Color.Black.copy(alpha = 0.44f)),
+                                                        contentAlignment = Alignment.Center,
                                                     ) {
-                                                        Surface(
-                                                            shape = CircleShape,
-                                                            color = Color.White.copy(alpha = 0.22f),
-                                                            modifier = Modifier.size(52.dp),
-                                                        ) {
-                                                            Box(contentAlignment = Alignment.Center) {
-                                                                Icon(
-                                                                    Icons.Filled.FastForward,
-                                                                    contentDescription = "Seek forward",
-                                                                    tint = Color.White,
-                                                                    modifier = Modifier.size(28.dp),
-                                                                )
+                                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                            Surface(shape = CircleShape, color = Color.White.copy(alpha = 0.16f), modifier = Modifier.size(48.dp)) {
+                                                                Box(contentAlignment = Alignment.Center) {
+                                                                    Icon(Icons.Filled.FastForward, null, tint = Color.White, modifier = Modifier.size(26.dp))
+                                                                }
                                                             }
+                                                            Spacer(Modifier.height(6.dp))
+                                                            Text("+${seekOverlaySeconds}s", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = Color.White)
                                                         }
-                                                        Spacer(Modifier.height(6.dp))
-                                                        Text(
-                                                            "+${seekOverlaySeconds}s",
-                                                            style = MaterialTheme.typography.titleMedium,
-                                                            fontWeight = FontWeight.ExtraBold,
-                                                            color = Color.White,
-                                                        )
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                                Spacer(Modifier.height(12.dp))
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(Modifier.weight(1f)) {
+
+                                    // ── Song identity: calm, centered, high-contrast ──
+                                    Spacer(Modifier.height(22.dp))
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                    ) {
                                         Text(
                                             track.title,
-                                            style = MaterialTheme.typography.headlineSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.onSurface,
+                                            style = MaterialTheme.typography.titleLarge.copy(
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = (-0.3).sp,
+                                                lineHeight = 26.sp,
+                                            ),
+                                            color = Color.White,
                                             maxLines = 2,
                                             overflow = TextOverflow.Ellipsis,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                            modifier = Modifier.graphicsLayer { alpha = 0.98f },
                                         )
-                                        Spacer(Modifier.height(4.dp))
+                                        Spacer(Modifier.height(5.dp))
                                         val splitArtists = remember(track.artist) {
                                             com.lastwave.app.util.ArtistHelper.splitArtists(track.artist)
                                         }
-                                        if (fullScreenCoverArt) {
-                                            Text(
-                                                track.artist,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = Color.White.copy(alpha = 0.76f),
+                                        Text(
+                                            splitArtists.firstOrNull() ?: track.artist,
+                                            style = MaterialTheme.typography.titleSmall.copy(
                                                 fontWeight = FontWeight.Medium,
+                                                letterSpacing = 0.1.sp,
+                                            ),
+                                            color = Color.White.copy(alpha = 0.62f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                            modifier = Modifier.clickable {
+                                                splitArtists.firstOrNull()?.let(onOpenArtist)
+                                            },
+                                        )
+                                        // Optional second line: album / source — only if it adds value, kept whisper-light
+                                        val subline = remember(track.album, state.sourceLabel) {
+                                            when {
+                                                track.album.isNotBlank() -> track.album
+                                                state.sourceLabel.isNotBlank() && state.sourceLabel != "LastWave" -> state.sourceLabel
+                                                else -> null
+                                            }
+                                        }
+                                        if (subline != null) {
+                                            Spacer(Modifier.height(2.dp))
+                                            Text(
+                                                subline,
+                                                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.4.sp),
+                                                color = Color.White.copy(alpha = 0.40f),
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.clickable {
-                                                    splitArtists.firstOrNull()?.let(onOpenArtist)
-                                                },
+                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                             )
-                                        } else {
+                                        }
+                                    }
+
+                                    Spacer(Modifier.height(16.dp))
+                                    SeekBar(state, player::seekTo, isTranslucent = true)
+                                    Spacer(Modifier.height(14.dp))
+                                    MainControls(state, player, isTranslucent = true)
+                                    Spacer(Modifier.height(14.dp))
+                                    PlayerUtilityControls(state, player, isTranslucent = true)
+                                    Spacer(Modifier.height(6.dp))
+                                }
+                            } else {
+                                // ── Standard layout (unchanged) ────────────────
+                                Column(
+                                    Modifier.fillMaxSize().padding(bottom = 12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                ) {
+                                    BoxWithConstraints(
+                                        modifier = Modifier.fillMaxWidth().weight(1f),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        val artworkSize = (minOf(maxWidth, maxHeight) - 6.dp)
+                                            .coerceAtLeast(0.dp)
+                                            .coerceAtMost(370.dp)
+                                        Surface(
+                                            shape = RoundedCornerShape(32.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                            tonalElevation = 8.dp,
+                                            shadowElevation = 18.dp,
+                                            modifier = Modifier
+                                                .size(artworkSize)
+                                                .graphicsLayer {
+                                                    translationX = shownArtworkX
+                                                    rotationZ = shownArtworkX / 80f
+                                                }
+                                                .pointerInput(track.videoId, track.title) {
+                                                    awaitEachGesture {
+                                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                                        var isDrag = false
+                                                        val touchSlop = viewConfiguration.touchSlop
+                                                        val initialX = down.position.x
+                                                        val initialY = down.position.y
+
+                                                        while (true) {
+                                                            val event = awaitPointerEvent()
+                                                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                                                            if (!change.pressed) {
+                                                                if (isDrag) {
+                                                                    when {
+                                                                        artworkDragX < -swipeThreshold -> player.next()
+                                                                        artworkDragX > swipeThreshold -> player.previous()
+                                                                    }
+                                                                    artworkDragX = 0f
+                                                                } else {
+                                                                    val isLeft = initialX < size.width * 0.5f
+                                                                    val side = if (isLeft) SeekDirection.REWIND else SeekDirection.FORWARD
+                                                                    val now = SystemClock.elapsedRealtime()
+
+                                                                    if (lastTapSide != side) {
+                                                                        seekResetJob?.cancel()
+                                                                        seekOverlayDirection = null
+                                                                        lastTapSide = side
+                                                                        lastTapTimestamp = now
+                                                                    } else if (now - lastTapTimestamp < 450L) {
+                                                                        val newSeconds = if (seekOverlayDirection == side) seekOverlaySeconds + 5 else 5
+                                                                        seekOverlaySeconds = newSeconds
+                                                                        seekOverlayDirection = side
+                                                                        lastTapTimestamp = now
+                                                                        val deltaMs = if (side == SeekDirection.FORWARD) 5_000L else -5_000L
+                                                                        val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
+                                                                        player.seekTo(newPos)
+
+                                                                        seekResetJob?.cancel()
+                                                                        seekResetJob = coroutineScope.launch {
+                                                                            delay(700L)
+                                                                            seekOverlayDirection = null
+                                                                            lastTapSide = null
+                                                                        }
+                                                                    } else {
+                                                                        lastTapTimestamp = now
+                                                                        lastTapSide = side
+                                                                        seekOverlayDirection = null
+                                                                    }
+                                                                }
+                                                                break
+                                                            }
+
+                                                            if (change.isConsumed) {
+                                                                artworkDragX = 0f
+                                                                break
+                                                            }
+
+                                                            val dx = change.position.x - initialX
+                                                            val dy = change.position.y - initialY
+                                                            if (!isDrag) {
+                                                                if (kotlin.math.abs(dx) > touchSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                                                                    isDrag = true
+                                                                    change.consume()
+                                                                }
+                                                            } else {
+                                                                change.consume()
+                                                                artworkDragX = dx
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                        ) {
+                                            Box(Modifier.fillMaxSize()) {
+                                                PlayerArtwork(track, Modifier.fillMaxSize(), 32.dp)
+
+                                                androidx.compose.animation.AnimatedVisibility(
+                                                    visible = seekOverlayDirection == SeekDirection.REWIND,
+                                                    enter = fadeIn(tween(100)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.88f),
+                                                    exit = fadeOut(tween(200)),
+                                                    modifier = Modifier
+                                                        .align(Alignment.CenterStart)
+                                                        .fillMaxHeight()
+                                                        .fillMaxWidth(0.5f),
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .clip(RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp, topEnd = 120.dp, bottomEnd = 120.dp))
+                                                            .background(Color.Black.copy(alpha = 0.58f)),
+                                                        contentAlignment = Alignment.Center,
+                                                    ) {
+                                                        Column(
+                                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                                            verticalArrangement = Arrangement.Center,
+                                                        ) {
+                                                            Surface(
+                                                                shape = CircleShape,
+                                                                color = Color.White.copy(alpha = 0.22f),
+                                                                modifier = Modifier.size(52.dp),
+                                                            ) {
+                                                                Box(contentAlignment = Alignment.Center) {
+                                                                    Icon(
+                                                                        Icons.Filled.FastRewind,
+                                                                        contentDescription = "Seek rewind",
+                                                                        tint = Color.White,
+                                                                        modifier = Modifier.size(28.dp),
+                                                                    )
+                                                                }
+                                                            }
+                                                            Spacer(Modifier.height(6.dp))
+                                                            Text(
+                                                                "-${seekOverlaySeconds}s",
+                                                                style = MaterialTheme.typography.titleMedium,
+                                                                fontWeight = FontWeight.ExtraBold,
+                                                                color = Color.White,
+                                                            )
+                                                        }
+                                                    }
+                                                }
+
+                                                androidx.compose.animation.AnimatedVisibility(
+                                                    visible = seekOverlayDirection == SeekDirection.FORWARD,
+                                                    enter = fadeIn(tween(100)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.88f),
+                                                    exit = fadeOut(tween(200)),
+                                                    modifier = Modifier
+                                                        .align(Alignment.CenterEnd)
+                                                        .fillMaxHeight()
+                                                        .fillMaxWidth(0.5f),
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .clip(RoundedCornerShape(topEnd = 32.dp, bottomEnd = 32.dp, topStart = 120.dp, bottomStart = 120.dp))
+                                                            .background(Color.Black.copy(alpha = 0.58f)),
+                                                        contentAlignment = Alignment.Center,
+                                                    ) {
+                                                        Column(
+                                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                                            verticalArrangement = Arrangement.Center,
+                                                        ) {
+                                                            Surface(
+                                                                shape = CircleShape,
+                                                                color = Color.White.copy(alpha = 0.22f),
+                                                                modifier = Modifier.size(52.dp),
+                                                            ) {
+                                                                Box(contentAlignment = Alignment.Center) {
+                                                                    Icon(
+                                                                        Icons.Filled.FastForward,
+                                                                        contentDescription = "Seek forward",
+                                                                        tint = Color.White,
+                                                                        modifier = Modifier.size(28.dp),
+                                                                    )
+                                                                }
+                                                            }
+                                                            Spacer(Modifier.height(6.dp))
+                                                            Text(
+                                                                "+${seekOverlaySeconds}s",
+                                                                style = MaterialTheme.typography.titleMedium,
+                                                                fontWeight = FontWeight.ExtraBold,
+                                                                color = Color.White,
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.height(12.dp))
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                track.title,
+                                                style = MaterialTheme.typography.headlineSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Spacer(Modifier.height(4.dp))
+                                            val splitArtists = remember(track.artist) {
+                                                com.lastwave.app.util.ArtistHelper.splitArtists(track.artist)
+                                            }
                                             FlowRow(
                                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                                 verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -1368,36 +1603,34 @@ private fun FullPlayer(
                                                 }
                                             }
                                         }
-                                    }
 
-                                    Spacer(Modifier.width(12.dp))
+                                        Spacer(Modifier.width(12.dp))
 
-                                    // Lyrics button in circled position
-                                    Surface(
-                                        onClick = { onTabChange(FullPlayerTab.LYRICS) },
-                                        shape = RoundedCornerShape(18.dp),
-                                        color = if (fullScreenCoverArt) Color.Black.copy(alpha = 0.30f)
-                                        else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        contentColor = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.primary,
-                                        tonalElevation = if (fullScreenCoverArt) 0.dp else 2.dp,
-                                        modifier = Modifier.size(50.dp),
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                Icons.Filled.Lyrics,
-                                                contentDescription = "Show lyrics",
-                                                modifier = Modifier.size(24.dp),
-                                                tint = if (fullScreenCoverArt) Color.White else MaterialTheme.colorScheme.primary,
-                                            )
+                                        Surface(
+                                            onClick = { onTabChange(FullPlayerTab.LYRICS) },
+                                            shape = RoundedCornerShape(18.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            contentColor = MaterialTheme.colorScheme.primary,
+                                            tonalElevation = 2.dp,
+                                            modifier = Modifier.size(50.dp),
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Filled.Lyrics,
+                                                    contentDescription = "Show lyrics",
+                                                    modifier = Modifier.size(24.dp),
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                )
+                                            }
                                         }
                                     }
+                                    Spacer(Modifier.height(10.dp))
+                                    SeekBar(state, player::seekTo, isTranslucent = false)
+                                    Spacer(Modifier.height(10.dp))
+                                    MainControls(state, player, isTranslucent = false)
+                                    Spacer(Modifier.height(16.dp))
+                                    PlayerUtilityControls(state, player, isTranslucent = false)
                                 }
-                                Spacer(Modifier.height(10.dp))
-                                SeekBar(state, player::seekTo, isTranslucent = fullScreenCoverArt)
-                                Spacer(Modifier.height(10.dp))
-                                MainControls(state, player, isTranslucent = fullScreenCoverArt)
-                                Spacer(Modifier.height(16.dp))
-                                PlayerUtilityControls(state, player, isTranslucent = fullScreenCoverArt)
                             }
                         }
                     }
@@ -1472,21 +1705,26 @@ private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit, isTransluce
             colors = if (isTranslucent) {
                 SliderDefaults.colors(
                     thumbColor = Color.White,
-                    activeTrackColor = Color.White,
-                    inactiveTrackColor = Color.White.copy(alpha = 0.30f),
+                    activeTrackColor = Color.White.copy(alpha = 0.96f),
+                    inactiveTrackColor = Color.White.copy(alpha = 0.18f),
+                    activeTickColor = Color.Transparent,
+                    inactiveTickColor = Color.Transparent,
+                    disabledThumbColor = Color.White.copy(alpha = 0.52f),
+                    disabledActiveTrackColor = Color.White.copy(alpha = 0.40f),
+                    disabledInactiveTrackColor = Color.White.copy(alpha = 0.14f),
                 )
             } else SliderDefaults.colors(),
         )
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 formatTime(shown.toLong()),
-                style = MaterialTheme.typography.labelMedium,
-                color = if (isTranslucent) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
+                color = if (isTranslucent) Color.White.copy(alpha = 0.64f) else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
                 "−${formatTime((state.durationMs - shown.toLong()).coerceAtLeast(0))}",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (isTranslucent) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
+                color = if (isTranslucent) Color.White.copy(alpha = 0.64f) else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -1496,50 +1734,54 @@ private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit, isTransluce
 private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslucent: Boolean = false) {
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+        horizontalArrangement = Arrangement.spacedBy(if (isTranslucent) 18.dp else 16.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(
             onClick = player::previous,
-            shape = RoundedCornerShape(22.dp),
-            color = if (isTranslucent) Color.Black.copy(alpha = 0.28f) else MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.size(58.dp),
+            shape = RoundedCornerShape(if (isTranslucent) 18.dp else 22.dp),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.11f) else MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSecondaryContainer,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(31.dp))
+                Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
             }
         }
         Surface(
             onClick = player::togglePlayPause,
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(if (isTranslucent) 22.dp else 28.dp),
             color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary,
             contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
-            tonalElevation = 4.dp,
-            shadowElevation = 8.dp,
-            modifier = Modifier.size(76.dp),
+            tonalElevation = if (isTranslucent) 0.dp else 4.dp,
+            shadowElevation = if (isTranslucent) 10.dp else 8.dp,
+            modifier = Modifier.size(if (isTranslucent) 72.dp else 76.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (state.isBuffering) {
                     ExpressiveInlineLoadingIndicator(
-                        size = 30.dp,
+                        size = if (isTranslucent) 28.dp else 30.dp,
                         color = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
                         strokeWidth = 3.dp,
                     )
                 } else {
-                    AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(39.dp))
+                    AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(if (isTranslucent) 36.dp else 39.dp))
                 }
             }
         }
         Surface(
             onClick = player::next,
-            shape = RoundedCornerShape(22.dp),
-            color = if (isTranslucent) Color.Black.copy(alpha = 0.28f) else MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.size(58.dp),
+            shape = RoundedCornerShape(if (isTranslucent) 18.dp else 22.dp),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.11f) else MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSecondaryContainer,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.SkipNext, "Next", Modifier.size(31.dp))
+                Icon(Icons.Filled.SkipNext, "Next", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
             }
         }
     }
@@ -1549,34 +1791,39 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
 private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, isTranslucent: Boolean = false) {
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (isTranslucent) 10.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Surface(
             onClick = player::toggleShuffle,
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(if (isTranslucent) 14.dp else 18.dp),
             color = when {
-                isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.24f)
-                isTranslucent -> Color.Black.copy(alpha = 0.26f)
+                isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.18f)
+                isTranslucent -> Color.White.copy(alpha = 0.09f)
                 state.shuffleEnabled -> MaterialTheme.colorScheme.primaryContainer
                 else -> MaterialTheme.colorScheme.surfaceContainerHigh
             },
             contentColor = when {
-                isTranslucent -> Color.White
+                isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.98f)
+                isTranslucent -> Color.White.copy(alpha = 0.70f)
                 state.shuffleEnabled -> MaterialTheme.colorScheme.onPrimaryContainer
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             },
-            modifier = Modifier.weight(1f).height(48.dp),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Shuffle, "Shuffle", modifier = Modifier.size(20.dp))
+                Icon(Icons.Filled.Shuffle, "Shuffle", modifier = Modifier.size(if (isTranslucent) 19.dp else 20.dp))
             }
         }
         Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = if (isTranslucent) Color.Black.copy(alpha = 0.26f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(if (isTranslucent) 14.dp else 18.dp),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.09f) else MaterialTheme.colorScheme.surfaceContainerHigh,
             contentColor = if (isTranslucent) Color.White else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1.3f).height(48.dp),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            modifier = Modifier.weight(1.3f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
             Row(
                 Modifier.fillMaxSize().padding(horizontal = 8.dp),
@@ -1586,41 +1833,43 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
                 Icon(
                     Icons.Filled.HighQuality,
                     null,
-                    tint = if (isTranslucent) Color.White else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
+                    tint = if (isTranslucent) Color.White.copy(alpha = 0.88f) else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(17.dp),
                 )
                 Text(
                     qualityLabel(state),
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isTranslucent) Color.White else Color.Unspecified,
+                    style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 0.3.sp) else MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = if (isTranslucent) Color.White.copy(alpha = 0.90f) else Color.Unspecified,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = 4.dp),
+                    modifier = Modifier.padding(start = 5.dp),
                 )
             }
         }
         Surface(
             onClick = player::cycleRepeatMode,
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(if (isTranslucent) 14.dp else 18.dp),
             color = when {
-                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.24f)
-                isTranslucent -> Color.Black.copy(alpha = 0.26f)
+                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.18f)
+                isTranslucent -> Color.White.copy(alpha = 0.09f)
                 state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.primaryContainer
                 else -> MaterialTheme.colorScheme.surfaceContainerHigh
             },
             contentColor = when {
-                isTranslucent -> Color.White
+                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.98f)
+                isTranslucent -> Color.White.copy(alpha = 0.70f)
                 state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.onPrimaryContainer
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             },
-            modifier = Modifier.weight(1f).height(48.dp),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Filled.RepeatOne else Icons.Filled.Repeat,
                     "Repeat mode",
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(if (isTranslucent) 19.dp else 20.dp),
                 )
             }
         }

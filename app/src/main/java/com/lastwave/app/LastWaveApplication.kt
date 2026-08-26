@@ -31,6 +31,7 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
         // so OEM framework threads that throw during startup are contained.
         CrashGuard.install(this)
         super.onCreate()
+        com.lastwave.app.playback.PlaybackDiagnostics.install(this)
         com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.initialize(this)
         applicationScope.launch(Dispatchers.IO) {
             // A process kill can bypass TrackDownloadManager's finally block
