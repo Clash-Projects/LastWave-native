@@ -44,9 +44,9 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * Ultra-smooth Multi-Layer Waveform Seekbar.
- * Uses mathematical quintic smootherstep envelopes and 1px sub-pixel sampling
- * for perfectly fluid, tangent-continuous organic liquid waves.
+ * Ultra-smooth Bidirectional Multi-Layer Waveform Seekbar.
+ * Features 3 glowing translucent wave ribbons that undulate both above and below
+ * the horizontal center line with quintic smootherstep boundary convergence.
  */
 @Composable
 fun WavySeekBar(
@@ -113,11 +113,11 @@ fun WavySeekBar(
     val currPhase2 = if (isPlaying) phase2 + 1.0f else 1.0f
     val currPhase3 = if (isPlaying) phase3 else 0f
 
-    // Softly dampened amplitudes
+    // Softly dampened amplitudes for smooth seeking
     val density = LocalDensity.current
-    val baseAmp1Px = with(density) { 10.5.dp.toPx() } // Deep ambient swell
-    val baseAmp2Px = with(density) { 8.0.dp.toPx() }  // Mid-harmonic wave
-    val baseAmp3Px = with(density) { 5.8.dp.toPx() }  // Foreground ribbon
+    val baseAmp1Px = with(density) { 9.5.dp.toPx() }  // Ambient swell
+    val baseAmp2Px = with(density) { 7.5.dp.toPx() }  // Mid-harmonic wave
+    val baseAmp3Px = with(density) { 5.5.dp.toPx() }  // Foreground ribbon
     val draggingAmpPx = with(density) { 1.0.dp.toPx() }
 
     val amp1 by animateFloatAsState(
@@ -136,9 +136,9 @@ fun WavySeekBar(
         label = "Amp3",
     )
 
-    val waveLength1Px = with(density) { 125.dp.toPx() }
-    val waveLength2Px = with(density) { 98.dp.toPx() }
-    val waveLength3Px = with(density) { 76.dp.toPx() }
+    val waveLength1Px = with(density) { 120.dp.toPx() }
+    val waveLength2Px = with(density) { 95.dp.toPx() }
+    val waveLength3Px = with(density) { 75.dp.toPx() }
 
     val baseTrackThicknessPx = with(density) { 4.5.dp.toPx() }
     val thumbRadiusPx = with(density) { 7.5.dp.toPx() }
@@ -187,11 +187,9 @@ fun WavySeekBar(
         ) {
             val width = size.width
             val height = size.height
-            val centerY = height / 2f + 5.dp.toPx()
+            val centerY = height / 2f
             val thumbX = (shownFraction * width).coerceIn(0f, width)
             val halfThickness = baseTrackThicknessPx / 2f
-            val bottomY = centerY + halfThickness
-            val topBaselineY = centerY - halfThickness
 
             // 1. Inactive background track: Straight capsule bar from thumbX to end
             if (thumbX < width) {
@@ -204,7 +202,7 @@ fun WavySeekBar(
                 )
             }
 
-            // 2. Active waves: Confined strictly to [0, thumbX] with smootherstep interpolation
+            // 2. Active waves: Bidirectional flowing ribbon oscillating above and below centerY
             if (thumbX > 0f) {
                 val clipBounds = Path().apply {
                     addRoundRect(
@@ -224,24 +222,23 @@ fun WavySeekBar(
                 }
 
                 clipPath(clipBounds) {
-                    // Quintic smootherstep function for seamless C² continuity (zero jerk at boundaries)
+                    // Quintic smootherstep function for seamless C² continuity
                     fun smootherstep(t: Float): Float {
                         val c = t.coerceIn(0f, 1f)
                         return c * c * c * (c * (c * 6f - 15f) + 10f)
                     }
 
-                    fun buildSilkWavPath(
+                    fun buildBidirectionalWave(
                         wavelength: Float,
                         amplitude: Float,
                         phase: Float,
                     ): Pair<Path, Path> {
                         val filledPath = Path()
-                        val contourPath = Path()
-                        filledPath.moveTo(0f, bottomY)
-                        filledPath.lineTo(0f, topBaselineY)
-                        contourPath.moveTo(0f, topBaselineY)
+                        val topContourPath = Path()
 
-                        val step = 1.0f // 1px sampling resolution for silky smooth curves
+                        val step = 1.0f // 1px sampling resolution
+
+                        // Forward pass: trace top edge from 0 to thumbX
                         var x = 0f
                         while (x <= thumbX) {
                             val startEnv = smootherstep(x / transitionLengthPx)
@@ -249,22 +246,42 @@ fun WavySeekBar(
                             val envelope = startEnv * endEnv
 
                             val angle = ((x / wavelength) * 2 * PI).toFloat() - phase
-                            val waveHeight = (0.5f + 0.5f * sin(angle)) * amplitude * envelope
-                            val y = topBaselineY - waveHeight
+                            // Oscillates both above (-sin) and below (+sin) centerY
+                            val waveCenterY = centerY - sin(angle) * amplitude * envelope
+                            val topY = waveCenterY - halfThickness
 
-                            filledPath.lineTo(x, y)
-                            contourPath.lineTo(x, y)
+                            if (x == 0f) {
+                                filledPath.moveTo(0f, topY)
+                                topContourPath.moveTo(0f, topY)
+                            } else {
+                                filledPath.lineTo(x, topY)
+                                topContourPath.lineTo(x, topY)
+                            }
                             x += step
                         }
-                        filledPath.lineTo(thumbX, bottomY)
+
+                        // Backward pass: trace bottom edge from thumbX back to 0
+                        x = thumbX
+                        while (x >= 0f) {
+                            val startEnv = smootherstep(x / transitionLengthPx)
+                            val endEnv = smootherstep((thumbX - x) / transitionLengthPx)
+                            val envelope = startEnv * endEnv
+
+                            val angle = ((x / wavelength) * 2 * PI).toFloat() - phase
+                            val waveCenterY = centerY - sin(angle) * amplitude * envelope
+                            val bottomY = waveCenterY + halfThickness
+
+                            filledPath.lineTo(x, bottomY)
+                            x -= step
+                        }
                         filledPath.close()
 
-                        return Pair(filledPath, contourPath)
+                        return Pair(filledPath, topContourPath)
                     }
 
-                    val (filled1, contour1) = buildSilkWavPath(waveLength1Px, amp1, currPhase1)
-                    val (filled2, contour2) = buildSilkWavPath(waveLength2Px, amp2, currPhase2)
-                    val (filled3, contour3) = buildSilkWavPath(waveLength3Px, amp3, currPhase3)
+                    val (filled1, contour1) = buildBidirectionalWave(waveLength1Px, amp1, currPhase1)
+                    val (filled2, contour2) = buildBidirectionalWave(waveLength2Px, amp2, currPhase2)
+                    val (filled3, contour3) = buildBidirectionalWave(waveLength3Px, amp3, currPhase3)
 
                     // Layer 1: Ambient Background Layer
                     drawPath(
@@ -272,10 +289,10 @@ fun WavySeekBar(
                         brush = Brush.verticalGradient(
                             colors = listOf(
                                 activeColor.copy(alpha = if (isTranslucent) 0.35f else 0.30f),
-                                activeColor.copy(alpha = if (isTranslucent) 0.15f else 0.10f),
+                                activeColor.copy(alpha = if (isTranslucent) 0.15f else 0.12f),
                             ),
-                            startY = centerY - 16.dp.toPx(),
-                            endY = bottomY,
+                            startY = centerY - 14.dp.toPx(),
+                            endY = centerY + 14.dp.toPx(),
                         ),
                     )
                     drawPath(
@@ -290,10 +307,10 @@ fun WavySeekBar(
                         brush = Brush.verticalGradient(
                             colors = listOf(
                                 activeColor.copy(alpha = if (isTranslucent) 0.65f else 0.60f),
-                                activeColor.copy(alpha = if (isTranslucent) 0.30f else 0.25f),
+                                activeColor.copy(alpha = if (isTranslucent) 0.30f else 0.26f),
                             ),
-                            startY = centerY - 12.dp.toPx(),
-                            endY = bottomY,
+                            startY = centerY - 10.dp.toPx(),
+                            endY = centerY + 10.dp.toPx(),
                         ),
                     )
                     drawPath(
@@ -310,8 +327,8 @@ fun WavySeekBar(
                                 activeColor.copy(alpha = if (isTranslucent) 0.95f else 0.92f),
                                 activeColor.copy(alpha = if (isTranslucent) 0.60f else 0.55f),
                             ),
-                            startY = centerY - 8.dp.toPx(),
-                            endY = bottomY,
+                            startY = centerY - 6.dp.toPx(),
+                            endY = centerY + 6.dp.toPx(),
                         ),
                     )
                     drawPath(
