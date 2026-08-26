@@ -1053,19 +1053,14 @@ private fun FullPlayer(
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .size(44.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(CircleShape)
                             .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.94f),
-                                        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.80f),
-                                    ),
-                                ),
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f),
                             )
                             .border(
                                 1.dp,
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f),
-                                RoundedCornerShape(16.dp),
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
+                                CircleShape,
                             ),
                     ) {
                         Icon(
@@ -1107,19 +1102,14 @@ private fun FullPlayer(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .size(44.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(CircleShape)
                             .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.94f),
-                                        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.80f),
-                                    ),
-                                ),
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f),
                             )
                             .border(
                                 1.dp,
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f),
-                                RoundedCornerShape(16.dp),
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
+                                CircleShape,
                             ),
                     ) {
                         Icon(
@@ -1385,28 +1375,31 @@ private fun FullPlayer(
                                                 com.lastwave.app.util.ArtistHelper.splitArtists(track.artist)
                                             }
                                             FlowRow(
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(0.dp),
+                                                verticalArrangement = Arrangement.spacedBy(2.dp),
                                             ) {
-                                                splitArtists.forEach { artName ->
-                                                    Surface(
-                                                        onClick = { onOpenArtist(artName) },
-                                                        shape = RoundedCornerShape(10.dp),
-                                                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.80f),
-                                                        border = BorderStroke(
-                                                            1.dp,
-                                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                                                splitArtists.forEachIndexed { index, artName ->
+                                                    Text(
+                                                        text = artName,
+                                                        style = MaterialTheme.typography.titleMedium.copy(
+                                                            fontSize = 17.sp,
+                                                            fontWeight = FontWeight.Medium,
                                                         ),
-                                                        tonalElevation = 0.dp,
-                                                    ) {
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
+                                                        modifier = Modifier
+                                                            .clickable(
+                                                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                                                indication = null,
+                                                            ) { onOpenArtist(artName) },
+                                                    )
+                                                    if (index < splitArtists.lastIndex) {
                                                         Text(
-                                                            artName,
-                                                            style = MaterialTheme.typography.titleMedium,
-                                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f),
-                                                            fontWeight = FontWeight.SemiBold,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis,
-                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                            text = ", ",
+                                                            style = MaterialTheme.typography.titleMedium.copy(
+                                                                fontSize = 17.sp,
+                                                                fontWeight = FontWeight.Normal,
+                                                            ),
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.60f),
                                                         )
                                                     }
                                                 }
@@ -1586,12 +1579,12 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::previous,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
             border = BorderStroke(
                 1.dp,
                 if (isTranslucent) Color.White.copy(alpha = 0.14f)
-                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f),
+                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
             ),
             tonalElevation = if (isTranslucent) 0.dp else 1.dp,
             shadowElevation = if (isTranslucent) 0.dp else 3.dp,
@@ -1630,12 +1623,12 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::next,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
             border = BorderStroke(
                 1.dp,
                 if (isTranslucent) Color.White.copy(alpha = 0.14f)
-                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f),
+                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
             ),
             tonalElevation = if (isTranslucent) 0.dp else 1.dp,
             shadowElevation = if (isTranslucent) 0.dp else 3.dp,
@@ -1657,29 +1650,29 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
     ) {
         Surface(
             onClick = player::toggleShuffle,
-            shape = RoundedCornerShape(if (isTranslucent) 14.dp else 18.dp),
+            shape = CircleShape,
             color = when {
-                isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.18f)
+                isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.22f)
                 isTranslucent -> Color.White.copy(alpha = 0.12f)
                 state.shuffleEnabled -> MaterialTheme.colorScheme.primaryContainer
-                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f)
             },
             contentColor = when {
-                isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.98f)
-                isTranslucent -> Color.White.copy(alpha = 0.82f)
+                isTranslucent && state.shuffleEnabled -> Color.White
+                isTranslucent -> Color.White.copy(alpha = 0.85f)
                 state.shuffleEnabled -> MaterialTheme.colorScheme.onPrimaryContainer
-                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f)
+                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
             },
             border = BorderStroke(
                 1.dp,
                 when {
-                    isTranslucent -> Color.White.copy(alpha = 0.12f)
-                    state.shuffleEnabled -> MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)
-                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
+                    isTranslucent -> Color.White.copy(alpha = 0.16f)
+                    state.shuffleEnabled -> MaterialTheme.colorScheme.primary.copy(alpha = 0.40f)
+                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
                 },
             ),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+            tonalElevation = 1.dp,
+            shadowElevation = 2.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1687,16 +1680,27 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             }
         }
         Surface(
-            shape = RoundedCornerShape(if (isTranslucent) 14.dp else 18.dp),
-            color = if (isTranslucent) Color.White.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = if (isTranslucent) Color.White else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f),
+            shape = RoundedCornerShape(24.dp),
+            color = when {
+                isTranslucent -> Color.White.copy(alpha = 0.12f)
+                state.isQobuz -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f)
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f)
+            },
+            contentColor = when {
+                isTranslucent -> Color.White
+                state.isQobuz -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
+            },
             border = BorderStroke(
                 1.dp,
-                if (isTranslucent) Color.White.copy(alpha = 0.12f)
-                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f),
+                when {
+                    isTranslucent -> Color.White.copy(alpha = 0.16f)
+                    state.isQobuz -> MaterialTheme.colorScheme.primary.copy(alpha = 0.40f)
+                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
+                },
             ),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+            tonalElevation = 1.dp,
+            shadowElevation = 2.dp,
             modifier = Modifier.weight(1.3f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
             Row(
@@ -1707,7 +1711,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
                 Icon(
                     Icons.Filled.HighQuality,
                     null,
-                    tint = if (isTranslucent) Color.White.copy(alpha = 0.92f) else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f),
+                    tint = if (isTranslucent) Color.White.copy(alpha = 0.92f) else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f),
                     modifier = Modifier.size(17.dp),
                 )
                 Text(
@@ -1722,29 +1726,29 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         }
         Surface(
             onClick = player::cycleRepeatMode,
-            shape = RoundedCornerShape(if (isTranslucent) 14.dp else 18.dp),
+            shape = CircleShape,
             color = when {
-                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.18f)
+                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.22f)
                 isTranslucent -> Color.White.copy(alpha = 0.12f)
                 state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.primaryContainer
-                else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f)
             },
             contentColor = when {
-                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.98f)
-                isTranslucent -> Color.White.copy(alpha = 0.82f)
+                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White
+                isTranslucent -> Color.White.copy(alpha = 0.85f)
                 state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.onPrimaryContainer
-                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f)
+                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
             },
             border = BorderStroke(
                 1.dp,
                 when {
-                    isTranslucent -> Color.White.copy(alpha = 0.12f)
-                    state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)
-                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
+                    isTranslucent -> Color.White.copy(alpha = 0.16f)
+                    state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.primary.copy(alpha = 0.40f)
+                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
                 },
             ),
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+            tonalElevation = 1.dp,
+            shadowElevation = 2.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
