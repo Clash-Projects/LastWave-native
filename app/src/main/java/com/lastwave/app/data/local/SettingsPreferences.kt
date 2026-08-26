@@ -58,8 +58,6 @@ data class MiscSettings(
      *  can raise quiet-track level from 100% up to a bounded 150%. */
     val volumeBoostEnabled: Boolean = false,
     val volumeBoostPercent: Int = 100,
-    /** Experimental full screen cover art mode with translucent glassmorphic controls. */
-    val fullScreenCoverArtEnabled: Boolean = false,
     /** Blend the end of one queued track into the beginning of the next. */
     val crossfadeEnabled: Boolean = false,
     /** Crossfade length in seconds; kept within the native settings slider range. */
@@ -82,7 +80,6 @@ class SettingsPreferences @Inject constructor(
         val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
         val VOLUME_BOOST_ENABLED = booleanPreferencesKey("lw_volume_boost_enabled")
         val VOLUME_BOOST_PERCENT = androidx.datastore.preferences.core.intPreferencesKey("lw_volume_boost_percent")
-        val FULL_SCREEN_COVER_ART = booleanPreferencesKey("lw_fullscreen_cover_art")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
         val CROSSFADE_SECONDS = androidx.datastore.preferences.core.intPreferencesKey("lw_crossfade_seconds")
     }
@@ -100,7 +97,6 @@ class SettingsPreferences @Inject constructor(
                 lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
                 volumeBoostEnabled = p.readSafely(Keys.VOLUME_BOOST_ENABLED) ?: false,
                 volumeBoostPercent = (p.readSafely(Keys.VOLUME_BOOST_PERCENT) ?: 100).coerceIn(100, 150),
-                fullScreenCoverArtEnabled = p.readSafely(Keys.FULL_SCREEN_COVER_ART) ?: false,
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 10),
             )
@@ -136,10 +132,6 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setVolumeBoostPercent(percent: Int) {
         dataStore.edit { it[Keys.VOLUME_BOOST_PERCENT] = percent.coerceIn(100, 150) }
-    }
-
-    suspend fun setFullScreenCoverArt(enabled: Boolean) {
-        dataStore.edit { it[Keys.FULL_SCREEN_COVER_ART] = enabled }
     }
 
     suspend fun setCrossfadeEnabled(enabled: Boolean) {

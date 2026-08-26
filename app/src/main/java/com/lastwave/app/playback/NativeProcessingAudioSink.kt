@@ -29,7 +29,7 @@ import kotlin.math.abs
 /**
  * Media3 PCM sink backed by Oboe Float32 output. The native stage performs
  * gapless trim, libsoxr HQ rate conversion and optional DSP before the Oboe
- * ring. Android's AudioTrack sink remains an automatic fallback whenever
+ * ring. Android's AudioTrack remains an automatic output fallback whenever
  * native output cannot open, keeps underrunning or cannot follow an audio
  * device change — and automatically comes back after a probation window.
  *
@@ -50,6 +50,8 @@ class NativeProcessingAudioSink(
     private val mainHandler = Handler(Looper.getMainLooper())
     private var listener: AudioSink.Listener? = null
     private var nativeActive = false
+    /** Native Float32 DSP feeding the platform AudioTrack when Oboe cannot run. */
+    private var platformDspActive = false
 
     /** Written from the render thread, read from the main thread — see [nativeOnProbation]. */
     @Volatile
@@ -70,10 +72,20 @@ class NativeProcessingAudioSink(
     private var pendingInput: ByteBuffer? = null
     private var pendingInputLimit = 0
     private var pendingOutput: ByteBuffer = AudioProcessor.EMPTY_BUFFER
+    private var pendingPresentationTimeUs = C.TIME_UNSET
+    private var pendingEncodedAccessUnitCount = 0
+    private var lastPresentationTimeUs = 0L
     private var endOfStreamOutput: ByteBuffer = AudioProcessor.EMPTY_BUFFER
     private var nativeEndOfStreamQueued = false
+    private var platformEndOfStreamQueued = false
+    private var platformEndOfStreamDeferred = false
     private var speedEndOfStreamQueued = false
     private var endOfStreamComplete = false
+
+    /** Set when EOS completion had to bail (ring full / route rebuild) and
+     *  must be re-driven from the [isEnded] poll instead of being lost. */
+    @Volatile
+    private var endOfStreamDeferred = false
     private var positionAnchorMediaUs = C.TIME_UNSET
     private var positionAnchorRenderedFrames = 0L
     private var positionAdvancingNotified = false
@@ -196,6 +208,7 @@ class NativeProcessingAudioSink(
             configuredOutputChannels = outputChannels?.clone()
             outputChannelCount = format.channelCount
             processorOutputFormat = AudioProcessor.AudioFormat.NOT_SET
+            platformDspActive = false
             delegate.flush()
             // A healthy Oboe stream is reused across track changes and seeks;
             // only its queued audio is dropped. Tearing down and reopening
@@ -218,6 +231,17 @@ class NativeProcessingAudioSink(
                         "Oboe open failed $nativeOpenFailures times consecutively",
                     )
                 }
+            }
+
+            // Oboe is an output optimization, not a requirement for sound
+            // processing. Keep the same native Float32 DSP in front of the
+            // platform AudioTrack fallback so clarity/EQ/boost never become
+            // silent no-op switches on devices whose AAudio stream cannot run.
+            if (processor.isAvailable && canProcess(format) &&
+                configurePlatformDsp(format, applyGaplessTrim = true)
+            ) {
+                platformDspActive = true
+                return
             }
 
             processor.reset()
@@ -268,7 +292,7 @@ class NativeProcessingAudioSink(
         presentationTimeUs: Long,
         encodedAccessUnitCount: Int,
     ): Boolean {
-        if (!nativeActive) {
+        if (!nativeActive && !platformDspActive) {
             return delegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
         }
         // The lock is uncontended on this hot path (control paths hold it only
@@ -276,6 +300,34 @@ class NativeProcessingAudioSink(
         // main-thread route rebuild can never reset the processor chain while
         // a buffer is being fed through it.
         synchronized(configurationLock) {
+            if (platformDspActive) {
+                if (!buffer.hasRemaining()) return true
+                if (pendingInput == null) {
+                    processor.queueInput(buffer.duplicate())
+                    pendingInput = buffer
+                    pendingInputLimit = buffer.limit()
+                    pendingPresentationTimeUs = presentationTimeUs
+                    lastPresentationTimeUs = presentationTimeUs
+                    pendingEncodedAccessUnitCount = encodedAccessUnitCount
+                    pendingOutput = processor.getOutput()
+                } else {
+                    check(pendingInput === buffer) {
+                        "AudioSink input changed before platform DSP output drained"
+                    }
+                }
+                if (pendingOutput.hasRemaining() &&
+                    !delegate.handleBuffer(
+                        pendingOutput,
+                        pendingPresentationTimeUs,
+                        pendingEncodedAccessUnitCount,
+                    )
+                ) {
+                    return false
+                }
+                buffer.position(pendingInputLimit)
+                clearPending()
+                return true
+            }
             if (routeRebuildInProgress || !nativeActive) return false
             if (engine.underrunCount >= MAX_NATIVE_UNDERRUN_EPISODES) {
                 putNativeOnProbation(
@@ -284,7 +336,7 @@ class NativeProcessingAudioSink(
                 )
                 switchToPlatformOutput("sustained Oboe underruns (${engine.underrunCount})")
                 listener?.onPositionDiscontinuity()
-                return delegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+                return handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
             }
             if (!buffer.hasRemaining()) return true
 
@@ -312,45 +364,128 @@ class NativeProcessingAudioSink(
     }
 
     override fun playToEndOfStream() {
+        if (platformDspActive) {
+            synchronized(configurationLock) {
+                tryCompletePlatformEndOfStreamLocked()
+            }
+            return
+        }
         if (!nativeActive) {
             delegate.playToEndOfStream()
             return
         }
         synchronized(configurationLock) {
-            // The main-thread route rebuild owns the stream right now; the
-            // renderer simply retries once it finishes.
-            if (routeRebuildInProgress || !nativeActive) return
-            if (pendingOutput.hasRemaining() && !drainToOboe(pendingOutput)) return
-
-            if (!nativeEndOfStreamQueued) {
-                processor.queueEndOfStream()
-                endOfStreamOutput = speedProcessor.queueInput(processor.getOutput())
-                nativeEndOfStreamQueued = true
-            }
-            if (endOfStreamOutput.hasRemaining() && !drainToOboe(endOfStreamOutput)) return
-
-            if (!speedEndOfStreamQueued) {
-                speedProcessor.queueEndOfStream()
-                speedEndOfStreamQueued = true
-            }
-            endOfStreamOutput = speedProcessor.getOutput()
-            if (endOfStreamOutput.hasRemaining() && !drainToOboe(endOfStreamOutput)) return
-            endOfStreamComplete = speedProcessor.isEnded
+            tryCompleteEndOfStreamLocked()
         }
     }
 
-    override fun isEnded(): Boolean = if (nativeActive) {
-        endOfStreamComplete && !hasPendingData()
-    } else {
-        delegate.isEnded()
+    private fun tryCompletePlatformEndOfStreamLocked() {
+        if (!platformDspActive) return
+        if (pendingOutput.hasRemaining() &&
+            !delegate.handleBuffer(
+                pendingOutput,
+                pendingPresentationTimeUs,
+                pendingEncodedAccessUnitCount,
+            )
+        ) {
+            platformEndOfStreamDeferred = true
+            return
+        }
+        if (!platformEndOfStreamQueued) {
+            processor.queueEndOfStream()
+            endOfStreamOutput = processor.getOutput()
+            platformEndOfStreamQueued = true
+        }
+        if (endOfStreamOutput.hasRemaining() &&
+            !delegate.handleBuffer(
+                endOfStreamOutput,
+                lastPresentationTimeUs,
+                1,
+            )
+        ) {
+            platformEndOfStreamDeferred = true
+            return
+        }
+        platformEndOfStreamDeferred = false
+        delegate.playToEndOfStream()
     }
 
-    override fun hasPendingData(): Boolean = if (nativeActive) {
-        pendingOutput.hasRemaining() ||
-            endOfStreamOutput.hasRemaining() ||
-            engine.bufferedFrames > 0L
-    } else {
-        delegate.hasPendingData()
+    /**
+     * Advances the end-of-stream handoff one step. Every stage is idempotent
+     * and resumable: Media3 invokes [playToEndOfStream] exactly once per
+     * stream, but the Oboe ring can be momentarily full or a route rebuild
+     * may own the stream at that instant. Bailing out there used to swallow
+     * EOS forever — the renderer polled [isEnded], got false eternally, and
+     * the player sat frozen at the final position without ever advancing.
+     * Deferring and re-driving completion from the [isEnded] poll (which the
+     * renderer performs continuously) removes that lost-EOS window.
+     */
+    private fun tryCompleteEndOfStreamLocked() {
+        if (endOfStreamComplete || !nativeActive) return
+        if (routeRebuildInProgress) {
+            endOfStreamDeferred = true
+            return
+        }
+        if (pendingOutput.hasRemaining() && !drainToOboe(pendingOutput)) {
+            endOfStreamDeferred = true
+            return
+        }
+
+        if (!nativeEndOfStreamQueued) {
+            processor.queueEndOfStream()
+            endOfStreamOutput = speedProcessor.queueInput(processor.getOutput())
+            nativeEndOfStreamQueued = true
+        }
+        if (endOfStreamOutput.hasRemaining() && !drainToOboe(endOfStreamOutput)) {
+            endOfStreamDeferred = true
+            return
+        }
+
+        if (!speedEndOfStreamQueued) {
+            speedProcessor.queueEndOfStream()
+            speedEndOfStreamQueued = true
+        }
+        endOfStreamOutput = speedProcessor.getOutput()
+        if (endOfStreamOutput.hasRemaining() && !drainToOboe(endOfStreamOutput)) {
+            endOfStreamDeferred = true
+            return
+        }
+        endOfStreamDeferred = false
+        endOfStreamComplete = speedProcessor.isEnded
+    }
+
+    override fun isEnded(): Boolean {
+        return when {
+            nativeActive -> {
+                // Renderer polls this every frame while output is ending; use it to
+                // drive any previously deferred EOS completion to the finish line.
+                synchronized(configurationLock) {
+                    if (endOfStreamDeferred || (!endOfStreamComplete && nativeEndOfStreamQueued)) {
+                        tryCompleteEndOfStreamLocked()
+                    }
+                }
+                endOfStreamComplete && !hasPendingData()
+            }
+            platformDspActive -> {
+                synchronized(configurationLock) {
+                    if (platformEndOfStreamDeferred) tryCompletePlatformEndOfStreamLocked()
+                }
+                delegate.isEnded() && !pendingOutput.hasRemaining() && !endOfStreamOutput.hasRemaining()
+            }
+            else -> delegate.isEnded()
+        }
+    }
+
+    override fun hasPendingData(): Boolean {
+        return when {
+            nativeActive -> pendingOutput.hasRemaining() ||
+                endOfStreamOutput.hasRemaining() ||
+                engine.bufferedFrames > 0L
+            platformDspActive -> pendingOutput.hasRemaining() ||
+                endOfStreamOutput.hasRemaining() ||
+                delegate.hasPendingData()
+            else -> delegate.hasPendingData()
+        }
     }
 
     override fun setPlaybackParameters(playbackParameters: PlaybackParameters) {
@@ -423,7 +558,12 @@ class NativeProcessingAudioSink(
             clearPending()
             clearEndOfStream()
             clearPosition()
-            if (nativeActive) restartNativeOutput() else delegate.flush()
+            if (nativeActive) {
+                restartNativeOutput()
+            } else {
+                if (platformDspActive) processor.flush()
+                delegate.flush()
+            }
         }
     }
 
@@ -433,6 +573,7 @@ class NativeProcessingAudioSink(
             clearEndOfStream()
             clearPosition()
             nativeActive = false
+            platformDspActive = false
             playing = false
             configuredFormat = null
             processorOutputFormat = AudioProcessor.AudioFormat.NOT_SET
@@ -450,10 +591,67 @@ class NativeProcessingAudioSink(
             runCatching {
                 appAudioManager?.unregisterAudioDeviceCallback(deviceChangedCallback)
             }
+            nativeActive = false
+            platformDspActive = false
             engine.stop()
             processor.reset()
             speedProcessor.reset()
             delegate.release()
+        }
+    }
+
+    /**
+     * Keeps the native Float32 media processor active while AudioTrack owns the
+     * final output. This is the compatibility path for devices where Oboe is
+     * unavailable or on probation; decoded Opus, FLAC, AAC and MP3 still pass
+     * through clarity, EQ, volume boost and peak protection.
+     */
+    private fun configurePlatformDsp(format: Format, applyGaplessTrim: Boolean): Boolean {
+        return try {
+            engine.setPlaying(false)
+            nativeActive = false
+            platformDspActive = false
+            engine.stop()
+            processor.reset()
+            processor.setOutputSampleRateOverride(null)
+            processor.setTrimFrameCount(
+                if (applyGaplessTrim) format.encoderDelay else 0,
+                if (applyGaplessTrim) format.encoderPadding else 0,
+            )
+            processorOutputFormat = processor.configure(AudioProcessor.AudioFormat(format))
+            processor.flush()
+
+            val processedFormat = format.buildUpon()
+                .setSampleMimeType(MimeTypes.AUDIO_RAW)
+                .setSampleRate(processorOutputFormat.sampleRate)
+                .setChannelCount(processorOutputFormat.channelCount)
+                .setPcmEncoding(C.ENCODING_PCM_FLOAT)
+                .setEncoderDelay(0)
+                .setEncoderPadding(0)
+                .build()
+            delegate.flush()
+            delegate.setPlaybackParameters(playbackParameters)
+            delegate.setVolume(volume)
+            // The source buffer size describes its original PCM encoding;
+            // AudioTrack should size itself again for processed Float32 output.
+            delegate.configure(processedFormat, 0, configuredOutputChannels)
+            if (playing) delegate.play()
+            PlaybackDiagnostics.event(
+                TAG,
+                "Native Float32 DSP active through platform AudioTrack at ${processedFormat.sampleRate} Hz",
+            )
+            true
+        } catch (error: Exception) {
+            Log.e(TAG, "Platform DSP configuration failed; using unprocessed Android audio", error)
+            PlaybackDiagnostics.event(TAG, "Platform DSP configure failed: ${error.message}")
+            processor.reset()
+            processor.setOutputSampleRateOverride(null)
+            processorOutputFormat = AudioProcessor.AudioFormat.NOT_SET
+            false
+        } catch (error: LinkageError) {
+            Log.e(TAG, "Platform DSP symbols unavailable; using unprocessed Android audio", error)
+            processorOutputFormat = AudioProcessor.AudioFormat.NOT_SET
+            false
         }
     }
 
@@ -537,6 +735,7 @@ class NativeProcessingAudioSink(
             Log.w(TAG, "$reason; temporarily using Android audio output")
             PlaybackDiagnostics.counter(PlaybackDiagnostics.nativeFallbacks, TAG, reason)
             nativeActive = false
+            platformDspActive = false
             engine.setPlaying(false)
             engine.stop()
             clearPending()
@@ -546,6 +745,12 @@ class NativeProcessingAudioSink(
             processor.setOutputSampleRateOverride(null)
             processorOutputFormat = AudioProcessor.AudioFormat.NOT_SET
             speedProcessor.reset()
+            if (processor.isAvailable && canProcess(format) &&
+                configurePlatformDsp(format, applyGaplessTrim = false)
+            ) {
+                platformDspActive = true
+                return
+            }
             delegate.flush()
             delegate.setPlaybackParameters(playbackParameters)
             delegate.setVolume(volume)
@@ -722,19 +927,25 @@ class NativeProcessingAudioSink(
         pendingInput = null
         pendingInputLimit = 0
         pendingOutput = AudioProcessor.EMPTY_BUFFER
+        pendingPresentationTimeUs = C.TIME_UNSET
+        pendingEncodedAccessUnitCount = 0
     }
 
     private fun clearEndOfStream() {
         endOfStreamOutput = AudioProcessor.EMPTY_BUFFER
         nativeEndOfStreamQueued = false
+        platformEndOfStreamQueued = false
+        platformEndOfStreamDeferred = false
         speedEndOfStreamQueued = false
         endOfStreamComplete = false
+        endOfStreamDeferred = false
     }
 
     private fun clearPosition() {
         positionAnchorMediaUs = C.TIME_UNSET
         positionAnchorRenderedFrames = 0L
         positionAdvancingNotified = false
+        lastPresentationTimeUs = 0L
     }
 
     /** Float32 -> TPDF-dithered -> Media3 Sonic (Int16) -> Float32, active only away from 1x. */

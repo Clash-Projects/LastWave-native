@@ -108,8 +108,6 @@ fun ArtistDetailScreen(
     genreBridge: ArtistDetailGenreBridge = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val isFullScreen = settings.fullScreenCoverArtEnabled
     val musicPlayer = LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
@@ -163,22 +161,14 @@ fun ArtistDetailScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(if (isFullScreen) 460.dp else 380.dp)
+                        .height(380.dp)
                         .background(
                             Brush.verticalGradient(
-                                colors = if (isFullScreen) {
-                                    listOf(
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.38f),
-                                        MaterialTheme.colorScheme.secondary.copy(alpha = 0.18f),
-                                        Color.Transparent,
-                                    )
-                                } else {
-                                    listOf(
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
-                                        MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f),
-                                        Color.Transparent,
-                                    )
-                                },
+                                colors = listOf(
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f),
+                                    Color.Transparent,
+                                ),
                                 startY = 0f,
                                 endY = 1000f,
                             ),
@@ -207,9 +197,9 @@ fun ArtistDetailScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(if (isFullScreen) 320.dp else 260.dp)
+                                    .height(260.dp)
                                     .shadow(
-                                        elevation = if (isFullScreen) 24.dp else 16.dp,
+                                        elevation = 16.dp,
                                         shape = RoundedCornerShape(28.dp),
                                         ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                                         spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),

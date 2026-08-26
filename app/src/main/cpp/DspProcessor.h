@@ -47,6 +47,11 @@ private:
             double frequency,
             double q,
             double gainDb) noexcept;
+        static Biquad highShelf(
+            double sampleRate,
+            double frequency,
+            double slope,
+            double gainDb) noexcept;
         void setPeaking(
             double sampleRate,
             double frequency,
@@ -96,11 +101,6 @@ private:
     float outputGainSmoothing_{0.001F};
     float equalizerGainSmoothing_{0.1F};
     float limiterRelease_{0.001F};
-    // Smoothed ~1.5 ms limiter attack: gain reduction approaches the target
-    // exponentially instead of slamming in one frame, which removes the
-    // zipper/grit artifact on transients while the hard sample clamp remains
-    // as a final safety.
-    float limiterAttack_{1.0F};
     // One-pole DC blocker (10 Hz). Removes stream DC offset so peaks keep the
     // full symmetric headroom; transparent for DC-free program material.
     float dcBlockerR_{0.999F};
@@ -110,7 +110,9 @@ private:
     std::int32_t microFadePosition_{0};
     bool clarityChainActive_{false};
     Biquad subBassHighPass_{};
+    Biquad bassFoundation_{};
     Biquad lowMidSeparation_{};
+    Biquad presenceDetail_{};
     Biquad airDetail_{};
     Crossfeed crossfeed_{};
 };

@@ -52,7 +52,6 @@ import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BubbleChart
@@ -530,7 +529,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Experimental")
-                    SettingsGroup(rowCount = 6) { index, position ->
+                    SettingsGroup(rowCount = 5) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.BubbleChart,
@@ -584,25 +583,11 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 title = "Volume Boost",
                                 subtitle = if (misc.volumeBoostEnabled) {
-                                    "Native clean gain • ${misc.volumeBoostPercent}% • -2 dBFS protected"
+                                    "Native clean gain • ${misc.volumeBoostPercent}% • -1 dBFS protected"
                                 } else {
                                     "Optional native adaptive gain up to 150%"
                                 },
                                 onClick = { showVolumeBoostSheet = true },
-                                position = position,
-                            )
-                            5 -> SettingsToggleCard(
-                                icon = Icons.Filled.Fullscreen,
-                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Full Screen Cover Art",
-                                subtitle = if (misc.fullScreenCoverArtEnabled) {
-                                    "Artwork fills the screen"
-                                } else {
-                                    "Standard artwork view"
-                                },
-                                checked = misc.fullScreenCoverArtEnabled,
-                                onCheckedChange = viewModel::setFullScreenCoverArt,
                                 position = position,
                             )
                         }

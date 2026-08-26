@@ -45,7 +45,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -103,39 +102,34 @@ fun LyricsPanel(
     val track = state.current ?: return
     val liquidGlass = LocalLiquidGlass.current
 
-    // Static ambient glass glow: depth without continuously invalidating the
-    // full lyrics viewport while text is scrolling and animating.
-    val ambientModifier = if (liquidGlass) {
-        val primary = MaterialTheme.colorScheme.primary
-        val tertiary = MaterialTheme.colorScheme.tertiary
-
-        Modifier.drawBehind {
-            val maxDim = maxOf(size.width, size.height).coerceAtLeast(1f)
-            drawRect(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        primary.copy(alpha = 0.16f),
-                        primary.copy(alpha = 0.04f),
-                        Color.Transparent,
-                    ),
-                    center = Offset(size.width * 0.28f, size.height * 0.25f),
-                    radius = maxDim * 0.80f,
+    // A restrained lyric-stage glow sits over the shared artwork background.
+    // It is static, so scrolling and per-line animations do not invalidate it.
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val ambientModifier = Modifier.drawBehind {
+        val maxDim = maxOf(size.width, size.height).coerceAtLeast(1f)
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    primary.copy(alpha = if (liquidGlass) 0.19f else 0.12f),
+                    primary.copy(alpha = if (liquidGlass) 0.055f else 0.025f),
+                    Color.Transparent,
                 ),
-            )
-            drawRect(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        tertiary.copy(alpha = 0.12f),
-                        tertiary.copy(alpha = 0.03f),
-                        Color.Transparent,
-                    ),
-                    center = Offset(size.width * 0.82f, size.height * 0.70f),
-                    radius = maxDim * 0.75f,
+                center = Offset(size.width * 0.22f, size.height * 0.22f),
+                radius = maxDim * 0.78f,
+            ),
+        )
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    tertiary.copy(alpha = if (liquidGlass) 0.14f else 0.085f),
+                    tertiary.copy(alpha = if (liquidGlass) 0.035f else 0.018f),
+                    Color.Transparent,
                 ),
-            )
-        }
-    } else {
-        Modifier
+                center = Offset(size.width * 0.88f, size.height * 0.72f),
+                radius = maxDim * 0.72f,
+            ),
+        )
     }
 
     Column(
@@ -235,6 +229,34 @@ fun LyricsPanel(
                     }
                 }
             }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(42.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.54f),
+                                Color.Transparent,
+                            ),
+                        ),
+                    ),
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.Transparent,
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.64f),
+                            ),
+                        ),
+                    ),
+            )
         }
 
         // Bottom compact playback bar in lyrics view
@@ -382,13 +404,13 @@ private fun SyncedLyricsList(
 
             // Alpha Floor
             val alphaTarget = when (animationStyle) {
-                LyricsAnimation.MINIMAL_WAVE -> if (isActive) 1f else 0.32f
-                LyricsAnimation.CINEMATIC_BLUR -> if (isActive) 1f else if (distance <= 1) 0.38f else 0.22f
-                LyricsAnimation.APPLE_ZOOM -> if (isActive) 1f else if (distance == 1) 0.45f else 0.28f
+                LyricsAnimation.MINIMAL_WAVE -> if (isActive) 1f else 0.48f
+                LyricsAnimation.CINEMATIC_BLUR -> if (isActive) 1f else if (distance <= 1) 0.52f else 0.36f
+                LyricsAnimation.APPLE_ZOOM -> if (isActive) 1f else if (distance == 1) 0.58f else 0.44f
                 else -> when {
                     isActive -> 1f
-                    isPast -> 0.42f
-                    else -> 0.30f
+                    isPast -> 0.56f
+                    else -> 0.46f
                 }
             }
             val alpha by animateFloatAsState(
@@ -406,7 +428,7 @@ private fun SyncedLyricsList(
                         else -> MaterialTheme.colorScheme.onSurface
                     }
                 } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
+                    MaterialTheme.colorScheme.onSurface
                 },
                 animationSpec = tween(140),
                 label = "lyricColor_$index",
@@ -415,12 +437,27 @@ private fun SyncedLyricsList(
             // Container Background & Border (Liquid Glass and Card Pop integration)
             val pillShape = RoundedCornerShape(18.dp)
             val cardBg = when {
-                isActive && liquidGlass -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.90f)
-                isActive && animationStyle == LyricsAnimation.CARD_POP -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f)
-                isActive -> primaryColor.copy(alpha = 0.08f)
                 liquidGlass && animationStyle == LyricsAnimation.CARD_POP -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.90f)
+                animationStyle == LyricsAnimation.CARD_POP -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.56f)
                 else -> Color.Transparent
             }
+            val activeBrush = if (isActive) {
+                Brush.linearGradient(
+                    colors = if (liquidGlass) {
+                        listOf(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.84f),
+                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.60f),
+                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.48f),
+                        )
+                    } else {
+                        listOf(
+                            primaryColor.copy(alpha = 0.18f),
+                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.10f),
+                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.38f),
+                        )
+                    },
+                )
+            } else null
 
             val strokeBorder = when {
                 isActive && liquidGlass -> BorderStroke(
@@ -436,6 +473,16 @@ private fun SyncedLyricsList(
                 isActive && animationStyle == LyricsAnimation.CARD_POP -> BorderStroke(
                     1.dp,
                     MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                )
+                isActive -> BorderStroke(
+                    1.dp,
+                    Brush.linearGradient(
+                        listOf(
+                            primaryColor.copy(alpha = 0.44f),
+                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.24f),
+                            Color.White.copy(alpha = 0.08f),
+                        ),
+                    ),
                 )
                 else -> null
             }
@@ -460,7 +507,10 @@ private fun SyncedLyricsList(
                         pillShape,
                         liquidGlass && (isActive || animationStyle == LyricsAnimation.CARD_POP),
                     )
-                    .background(cardBg, pillShape)
+                    .then(
+                        if (activeBrush != null) Modifier.background(activeBrush, pillShape)
+                        else Modifier.background(cardBg, pillShape),
+                    )
                     .then(if (strokeBorder != null) Modifier.border(strokeBorder, pillShape) else Modifier)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -514,16 +564,26 @@ private fun PlainLyricsView(
         Surface(
             shape = pillShape,
             color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
-            else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.70f),
-            border = if (liquidGlass) BorderStroke(
+            else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
+            border = BorderStroke(
                 1.dp,
-                Brush.linearGradient(
-                    listOf(
-                        Color.White.copy(alpha = 0.25f),
-                        Color.White.copy(alpha = 0.05f),
-                    ),
-                ),
-            ) else null,
+                if (liquidGlass) {
+                    Brush.linearGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.25f),
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                            Color.White.copy(alpha = 0.05f),
+                        ),
+                    )
+                } else {
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.26f),
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
+                        ),
+                    )
+                },
+            ),
             modifier = Modifier
                 .padding(bottom = 20.dp)
                 .liquidGlassChrome(pillShape, liquidGlass),
@@ -550,11 +610,12 @@ private fun PlainLyricsView(
         Text(
             text = plainLyrics,
             style = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = 18.sp,
-                lineHeight = 30.sp,
+                fontSize = 19.sp,
+                lineHeight = 32.sp,
                 fontWeight = FontWeight.Medium,
+                letterSpacing = 0.1.sp,
             ),
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f),
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.94f),
         )
     }
 }
@@ -581,13 +642,19 @@ private fun EmptyLyricsView(
             Surface(
                 shape = iconShape,
                 color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
-                else MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = if (liquidGlass) BorderStroke(
+                else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.62f),
+                border = BorderStroke(
                     1.dp,
                     Brush.linearGradient(
-                        listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.08f)),
+                        listOf(
+                            if (liquidGlass) Color.White.copy(alpha = 0.35f)
+                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.36f),
+                            Color.White.copy(alpha = 0.08f),
+                        ),
                     ),
-                ) else null,
+                ),
+                tonalElevation = 1.dp,
+                shadowElevation = 6.dp,
                 modifier = Modifier
                     .size(72.dp)
                     .liquidGlassChrome(iconShape, liquidGlass),
@@ -597,7 +664,8 @@ private fun EmptyLyricsView(
                         imageVector = if (isInstrumental) Icons.Filled.MusicOff else Icons.Filled.Lyrics,
                         contentDescription = null,
                         modifier = Modifier.size(34.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = if (liquidGlass) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
             }
@@ -644,15 +712,26 @@ private fun LyricsBottomControls(
 ) {
     val barShape = RoundedCornerShape(26.dp)
     val barBg = if (liquidGlass) {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.88f)
     } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f)
     }
 
     Surface(
         shape = barShape,
         color = barBg,
-        tonalElevation = 2.dp,
+        border = BorderStroke(
+            1.dp,
+            Brush.linearGradient(
+                listOf(
+                    Color.White.copy(alpha = if (liquidGlass) 0.32f else 0.12f),
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.24f),
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
+                ),
+            ),
+        ),
+        tonalElevation = 1.dp,
+        shadowElevation = 10.dp,
         modifier = modifier.liquidGlassChrome(barShape, liquidGlass),
     ) {
         Column(
@@ -666,7 +745,7 @@ private fun LyricsBottomControls(
             val end = state.durationMs.coerceAtLeast(1).toFloat()
             val shown = if (dragging) dragValue else state.positionMs.coerceIn(0, state.durationMs.coerceAtLeast(0)).toFloat()
 
-            Slider(
+            PlayerProgressSlider(
                 value = shown.coerceIn(0f, end),
                 onValueChange = { dragging = true; dragValue = it },
                 onValueChangeFinished = { player.seekTo(dragValue.toLong()); dragging = false },
@@ -685,7 +764,7 @@ private fun LyricsBottomControls(
                 Text(
                     formatTime(shown.toLong()),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
                 )
 
                 Row(
@@ -696,7 +775,12 @@ private fun LyricsBottomControls(
                         onClick = player::previous,
                         modifier = Modifier.size(38.dp),
                     ) {
-                        Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(24.dp))
+                        Icon(
+                            Icons.Filled.SkipPrevious,
+                            "Previous",
+                            Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
 
                     Surface(
@@ -704,6 +788,12 @@ private fun LyricsBottomControls(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f),
+                        ),
+                        tonalElevation = 2.dp,
+                        shadowElevation = 6.dp,
                         modifier = Modifier.size(44.dp),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -723,14 +813,19 @@ private fun LyricsBottomControls(
                         onClick = player::next,
                         modifier = Modifier.size(38.dp),
                     ) {
-                        Icon(Icons.Filled.SkipNext, "Next", Modifier.size(24.dp))
+                        Icon(
+                            Icons.Filled.SkipNext,
+                            "Next",
+                            Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
 
                 Text(
                     "−${formatTime((state.durationMs - shown.toLong()).coerceAtLeast(0))}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
                 )
             }
         }

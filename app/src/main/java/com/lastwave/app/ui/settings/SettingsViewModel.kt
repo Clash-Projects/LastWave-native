@@ -138,6 +138,8 @@ class SettingsViewModel @Inject constructor(
         .withSettingsFallback("equalizer preferences", EqualizerSettings())
         .stateIn(viewModelScope, SettingsSharing, EqualizerSettings())
     private var immediateEqGains = EqualizerSettings().gainsDb.toFloatArray()
+    private var immediateVolumeBoostEnabled = false
+    private var immediateVolumeBoostPercent = 100
 
     val downloadCount: StateFlow<Int> = downloadedTrackDao.count()
         .withSettingsFallback("download count", 0)
@@ -176,6 +178,12 @@ class SettingsViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             equalizer.collect { immediateEqGains = it.gainsDb.toFloatArray() }
+        }
+        viewModelScope.launch {
+            misc.collect { settings ->
+                immediateVolumeBoostEnabled = settings.volumeBoostEnabled
+                immediateVolumeBoostPercent = settings.volumeBoostPercent.coerceIn(100, 150)
+            }
         }
         viewModelScope.launch {
             generateRepository.observeRecommendationExclusions()
@@ -235,15 +243,16 @@ class SettingsViewModel @Inject constructor(
     }
     fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
     fun setVolumeBoostEnabled(enabled: Boolean) {
-        runCatching { audioEngine.get().setVolumeBoost(enabled, misc.value.volumeBoostPercent) }
+        immediateVolumeBoostEnabled = enabled
+        runCatching { audioEngine.get().setVolumeBoost(enabled, immediateVolumeBoostPercent) }
         launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostEnabled(enabled) }
     }
     fun setVolumeBoostPercent(percent: Int) {
         val safePercent = percent.coerceIn(100, 150)
-        runCatching { audioEngine.get().setVolumeBoost(misc.value.volumeBoostEnabled, safePercent) }
+        immediateVolumeBoostPercent = safePercent
+        runCatching { audioEngine.get().setVolumeBoost(immediateVolumeBoostEnabled, safePercent) }
         launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostPercent(safePercent) }
     }
-    fun setFullScreenCoverArt(enabled: Boolean) = launchSettingsAction("update cover art mode") { settingsPreferences.setFullScreenCoverArt(enabled) }
     fun setCrossfadeEnabled(enabled: Boolean) = launchSettingsAction("update crossfade") { settingsPreferences.setCrossfadeEnabled(enabled) }
     fun setCrossfadeSeconds(seconds: Int) = launchSettingsAction("update crossfade duration") {
         settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 10))

@@ -22,8 +22,8 @@ enum class NativePcmEncoding(internal val nativeValue: Int, internal val bytesPe
 
 /**
  * Process-wide owner of the C++17 DSP/Oboe engine. Normal app playback enters
- * through [NativeProcessingAudioSink] as decoded Float32 PCM; the platform
- * AudioTrack sink remains the compatibility fallback when Oboe cannot open.
+ * through [NativeProcessingAudioSink] as decoded Float32 PCM. When Oboe cannot
+ * open, the same native DSP feeds the platform AudioTrack compatibility path.
  */
 @Singleton
 class NativeAudioEngine @Inject constructor(
@@ -103,7 +103,7 @@ class NativeAudioEngine @Inject constructor(
         withHandle(Unit) { nativeSetStudioMasterClarity(it, enabled) }
     }
 
-    /** Native adaptive gain; ramps smoothly and never exceeds the -2 dBFS ceiling. */
+    /** Native adaptive gain; ramps smoothly and never exceeds the -1 dBFS ceiling. */
     fun setVolumeBoost(enabled: Boolean, percent: Int) {
         withHandle(Unit) { nativeSetVolumeBoost(it, enabled, percent.coerceIn(100, 150)) }
     }

@@ -100,8 +100,6 @@ fun AlbumDetailScreen(
     viewModel: AlbumViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val isFullScreen = settings.fullScreenCoverArtEnabled
     val musicPlayer = LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
     val haptic = LocalHapticFeedback.current
@@ -151,46 +149,25 @@ fun AlbumDetailScreen(
                 val isAlbumPlaying = playbackState.isPlaying &&
                     (playbackState.sourceLabel.contains(data.title, ignoreCase = true) || playbackState.current?.album.equals(data.title, ignoreCase = true))
 
-                // Ambient Mesh Backdrop / Full Screen Cover Art Gradient
+                // Ambient Mesh Backdrop Gradient
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(if (isFullScreen) 460.dp else 380.dp),
+                        .height(380.dp),
                 ) {
-                    if (isFullScreen && !data.artworkUrl.isNullOrBlank()) {
-                        coil.compose.AsyncImage(
-                            model = data.artworkUrl,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .graphicsLayer { alpha = 0.35f }
-                                .blur(32.dp),
-                        )
-                    }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .background(
-                                if (isFullScreen) {
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color.Black.copy(alpha = 0.25f),
-                                            Color.Black.copy(alpha = 0.60f),
-                                            MaterialTheme.colorScheme.background,
-                                        ),
-                                    )
-                                } else {
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
-                                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f),
-                                            Color.Transparent,
-                                        ),
-                                        startY = 0f,
-                                        endY = 1000f,
-                                    )
-                                },
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                                        MaterialTheme.colorScheme.tertiary.copy(alpha = 0.08f),
+                                        Color.Transparent,
+                                    ),
+                                    startY = 0f,
+                                    endY = 1000f,
+                                ),
                             ),
                     )
                 }
@@ -217,9 +194,9 @@ fun AlbumDetailScreen(
                             // Elevated Cover Artwork with dynamic shadow
                             Box(
                                 modifier = Modifier
-                                    .size(if (isFullScreen) 228.dp else 208.dp)
+                                    .size(208.dp)
                                     .shadow(
-                                        elevation = if (isFullScreen) 28.dp else 20.dp,
+                                        elevation = 20.dp,
                                         shape = RoundedCornerShape(26.dp),
                                         ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                                         spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),

@@ -4,11 +4,13 @@ package com.lastwave.app.ui.player
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -24,6 +26,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -79,6 +82,7 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -105,6 +109,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -112,8 +117,10 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -122,6 +129,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -132,6 +140,10 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.palette.graphics.Palette
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
 import androidx.media3.common.Player
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.lyrics.LyricsRepository
@@ -406,7 +418,6 @@ private fun ExpandedPlayer(
         player = viewModel.player,
         lyricsState = lyricsState,
         lyricsAnimation = settings.lyricsAnimation,
-        fullScreenCoverArt = settings.fullScreenCoverArtEnabled,
         currentTab = currentTab,
         onTabChange = onTabChange,
         onRetryLyrics = onRetryLyrics,
@@ -570,7 +581,7 @@ private fun MiniPlayer(
                     }
                     Surface(
                         onClick = onToggle,
-                        shape = RoundedCornerShape(18.dp),
+                        shape = CircleShape,
                         color = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(48.dp),
@@ -593,7 +604,7 @@ private fun MiniPlayer(
                         modifier = Modifier
                             .padding(start = 8.dp)
                             .size(44.dp)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.secondaryContainer),
                     ) {
                         Icon(
@@ -834,7 +845,6 @@ private fun FullPlayer(
     player: MusicPlayer,
     lyricsState: LyricsUiState,
     lyricsAnimation: com.lastwave.app.data.local.LyricsAnimation = com.lastwave.app.data.local.LyricsAnimation.APPLE_FLUID,
-    fullScreenCoverArt: Boolean = false,
     currentTab: FullPlayerTab,
     onTabChange: (FullPlayerTab) -> Unit,
     onRetryLyrics: () -> Unit,
@@ -864,6 +874,42 @@ private fun FullPlayer(
     )
     val swipeThreshold = with(LocalDensity.current) { 88.dp.toPx() }
 
+    // Dominant cover-art color for the ambient background glow. Extracted
+    // once per track through the shared Coil loader (normally a cache hit)
+    // with Palette; any failure leaves the standard surface gradient.
+    val context = LocalContext.current
+    var ambientArtColor by remember(track.videoId, track.artworkUrl) { mutableStateOf<Color?>(null) }
+    LaunchedEffect(track.videoId, track.artworkUrl) {
+        val url = track.artworkUrl?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        ambientArtColor = withContext(Dispatchers.IO) {
+            runCatching {
+                val request = ImageRequest.Builder(context)
+                    .data(url)
+                    .allowHardware(false)
+                    .size(96)
+                    .build()
+                val bitmap = ((context.imageLoader.execute(request) as? SuccessResult)?.drawable as? BitmapDrawable)?.bitmap
+                    ?: return@runCatching null
+                val palette = Palette.from(bitmap).clearFilters().generate()
+                val swatch = palette.vibrantSwatch
+                    ?: palette.dominantSwatch
+                    ?: palette.mutedSwatch
+                    ?: return@runCatching null
+                Color(swatch.rgb)
+            }.getOrNull()
+        }
+    }
+    val ambientColor by animateColorAsState(
+        targetValue = ambientArtColor ?: MaterialTheme.colorScheme.primary,
+        animationSpec = tween(700),
+        label = "playerAmbientColor",
+    )
+    val ambientCompanion = androidx.compose.ui.graphics.lerp(
+        MaterialTheme.colorScheme.tertiary,
+        ambientColor,
+        0.42f,
+    )
+
     fun Modifier.playerVerticalSwipe(enabled: Boolean): Modifier = if (!enabled) this else pointerInput(track.videoId, track.title, currentTab) {
         detectVerticalDragGestures(
             onDragStart = { isDismissDragging = true },
@@ -892,7 +938,7 @@ private fun FullPlayer(
     }
 
     Surface(
-        color = if (fullScreenCoverArt) Color.Black else MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.surface,
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
@@ -903,105 +949,97 @@ private fun FullPlayer(
             .playerVerticalSwipe(enabled = currentTab == FullPlayerTab.NOW_PLAYING),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            if (fullScreenCoverArt) {
-                // ── Premium full-cover environment ───────────────────────
-                // Layer 1: soft, restrained blurred backdrop — the art's
-                // palette bleeds into the room at low intensity, never
-                // competing with the hero cover. Scale + opacity are
-                // deliberately gentle; heavy 1.25× / 0.90 was muddy.
-                PlayerArtwork(
-                    track = track,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            scaleX = 1.08f
-                            scaleY = 1.08f
-                            alpha = 0.34f
-                        }
-                        .blur(44.dp),
-                    corner = 0.dp,
-                    decodeSizePx = 140,
-                )
-                // Layer 2: controlled dark veil — tames saturated artwork
-                // so whites remain crisp without an aggressive blur.
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.44f)),
-                )
-                // Layer 3: subtle vignette, lighter than before. Real depth
-                // without the old 7-stop mid-band that ate legibility.
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    Color.Black.copy(alpha = 0.16f),
-                                    Color.Transparent,
-                                ),
-                                center = androidx.compose.ui.geometry.Offset(
-                                    constraints.maxWidth * 0.5f,
-                                    constraints.maxHeight * 0.42f,
-                                ),
-                                radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.92f,
-                            ),
-                        ),
-                )
-            } else {
-                PlayerArtwork(
-                    track = track,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            alpha = 0.24f
-                            scaleX = 1.25f
-                            scaleY = 1.25f
-                        }
-                        .blur(72.dp),
-                    corner = 0.dp,
-                    decodeSizePx = 160,
-                )
-            }
+            PlayerArtwork(
+                track = track,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = 0.18f
+                        scaleX = 1.32f
+                        scaleY = 1.32f
+                    }
+                    .blur(88.dp),
+                corner = 0.dp,
+                decodeSizePx = 160,
+            )
+            // Artwork-led ambient light: a broad upper wash plus a quieter
+            // counter-color near the controls. Both stay behind the contrast
+            // veil so metadata and controls remain readable on vivid covers.
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
-                        if (fullScreenCoverArt) {
-                            // Calm, premium legibility veil — barely there at
-                            // the top, fully open over the hero art, then a
-                            // single controlled ramp where text + controls live.
-                            // No mid-screen mud, no double-gradient heaviness.
-                            Brush.verticalGradient(
-                                0.00f to Color.Black.copy(alpha = 0.22f),
-                                0.14f to Color.Black.copy(alpha = 0.06f),
-                                0.32f to Color.Transparent,
-                                0.56f to Color.Transparent,
-                                0.78f to Color.Black.copy(alpha = 0.50f),
-                                1.00f to Color.Black.copy(alpha = 0.74f),
-                            )
-                        } else {
-                            Brush.verticalGradient(
-                                listOf(
-                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.42f),
-                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
-                                    MaterialTheme.colorScheme.surface,
-                                ),
-                            )
-                        },
+                        Brush.radialGradient(
+                            0f to ambientColor.copy(alpha = 0.34f),
+                            0.46f to ambientColor.copy(alpha = 0.11f),
+                            1f to Color.Transparent,
+                            center = androidx.compose.ui.geometry.Offset(
+                                constraints.maxWidth * 0.30f,
+                                constraints.maxHeight * 0.20f,
+                            ),
+                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.82f,
+                        ),
+                    ),
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            0f to ambientCompanion.copy(alpha = 0.18f),
+                            0.58f to ambientCompanion.copy(alpha = 0.05f),
+                            1f to Color.Transparent,
+                            center = androidx.compose.ui.geometry.Offset(
+                                constraints.maxWidth * 0.92f,
+                                constraints.maxHeight * 0.66f,
+                            ),
+                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.68f,
+                        ),
+                    ),
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0.00f to androidx.compose.ui.graphics.lerp(
+                                MaterialTheme.colorScheme.surface,
+                                ambientColor,
+                                0.26f,
+                            ).copy(alpha = 0.74f),
+                            0.34f to MaterialTheme.colorScheme.surface.copy(alpha = 0.54f),
+                            0.68f to MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
+                            1.00f to MaterialTheme.colorScheme.surface,
+                        ),
+                    ),
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            0f to Color.Transparent,
+                            0.70f to Color.Transparent,
+                            1f to MaterialTheme.colorScheme.surface.copy(alpha = 0.32f),
+                            center = androidx.compose.ui.geometry.Offset(
+                                constraints.maxWidth * 0.50f,
+                                constraints.maxHeight * 0.36f,
+                            ),
+                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.78f,
+                        ),
                     ),
             )
             Column(
                 Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = if (fullScreenCoverArt) 22.dp else 20.dp),
+                    .padding(horizontal = 20.dp),
             ) {
                 // ── Header: slimmer, calmer, premium ─────────────────────
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(if (fullScreenCoverArt) 48.dp else 52.dp)
+                        .height(52.dp)
                         .playerVerticalSwipe(enabled = currentTab != FullPlayerTab.NOW_PLAYING),
                 ) {
                     IconButton(
@@ -1014,18 +1052,27 @@ private fun FullPlayer(
                         },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
-                            .size(if (fullScreenCoverArt) 42.dp else 44.dp)
-                            .clip(RoundedCornerShape(if (fullScreenCoverArt) 14.dp else 16.dp))
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .background(
-                                if (fullScreenCoverArt) Color.White.copy(alpha = 0.11f)
-                                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                Brush.linearGradient(
+                                    listOf(
+                                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.94f),
+                                        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.80f),
+                                    ),
+                                ),
+                            )
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f),
+                                RoundedCornerShape(16.dp),
                             ),
                     ) {
                         Icon(
                             if (currentTab != FullPlayerTab.NOW_PLAYING) Icons.Filled.ArrowBack else Icons.Filled.ExpandMore,
                             if (currentTab != FullPlayerTab.NOW_PLAYING) "Back to player" else "Minimize player",
-                            modifier = Modifier.size(if (fullScreenCoverArt) 22.dp else 26.dp),
-                            tint = if (fullScreenCoverArt) Color.White.copy(alpha = 0.95f) else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(26.dp),
+                            tint = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     Column(
@@ -1034,13 +1081,14 @@ private fun FullPlayer(
                     ) {
                         Text(
                             when (currentTab) {
-                                FullPlayerTab.NOW_PLAYING -> if (fullScreenCoverArt) "Now Playing" else "NOW PLAYING"
+                                FullPlayerTab.NOW_PLAYING -> "NOW PLAYING"
                                 FullPlayerTab.LYRICS -> "LYRICS"
                                 FullPlayerTab.QUEUE -> "PLAYING QUEUE"
                             },
-                            style = if (fullScreenCoverArt) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
-                            color = if (fullScreenCoverArt) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.primary,
-                            fontWeight = if (fullScreenCoverArt) FontWeight.SemiBold else FontWeight.Bold,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.9.sp,
                         )
                         Text(
                             if (currentTab == FullPlayerTab.LYRICS) {
@@ -1049,8 +1097,7 @@ private fun FullPlayer(
                                 state.sourceLabel.takeIf { it.isNotBlank() } ?: "LastWave"
                             },
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (fullScreenCoverArt) Color.White.copy(alpha = 0.56f)
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -1059,23 +1106,32 @@ private fun FullPlayer(
                         onClick = { showTrackMenu = true },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .size(if (fullScreenCoverArt) 42.dp else 44.dp)
-                            .clip(RoundedCornerShape(if (fullScreenCoverArt) 14.dp else 16.dp))
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(16.dp))
                             .background(
-                                if (fullScreenCoverArt) Color.White.copy(alpha = 0.11f)
-                                else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                Brush.linearGradient(
+                                    listOf(
+                                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.94f),
+                                        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.80f),
+                                    ),
+                                ),
+                            )
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f),
+                                RoundedCornerShape(16.dp),
                             ),
                     ) {
                         Icon(
                             Icons.Filled.MoreVert,
                             "Song options",
-                            modifier = Modifier.size(if (fullScreenCoverArt) 20.dp else 22.dp),
-                            tint = if (fullScreenCoverArt) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp),
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f),
                         )
                     }
                 }
 
-                Spacer(Modifier.height(if (fullScreenCoverArt) 18.dp else 6.dp))
+                Spacer(Modifier.height(6.dp))
 
                 AnimatedContent(
                     targetState = currentTab,
@@ -1105,270 +1161,6 @@ private fun FullPlayer(
                         }
 
                         FullPlayerTab.NOW_PLAYING -> {
-                            if (fullScreenCoverArt) {
-                                // ── Premium immersive layout ─────────────────
-                                // Balanced composition: header breathes, hero
-                                // art is truly centered (not top-jammed), info
-                                // floats with elegant rhythm, controls are
-                                // calm translucent glass. Inspired by Apple
-                                // Music's luxurious negative space.
-                                Column(
-                                    Modifier.fillMaxSize(),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                ) {
-                                    // ── Hero artwork: centered, elegantly framed ──
-                                    BoxWithConstraints(
-                                        modifier = Modifier.fillMaxWidth().weight(1f),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        // Premium sizing — generous horizontal
-                                        // inset + vertical ratio keeps breathing
-                                        // room on every screen size. Capped so
-                                        // tall tablets don't eat the controls.
-                                        val artworkSize = remember(maxWidth, maxHeight) {
-                                            val inset = 22.dp * 2
-                                            // maxWidth here is already inside
-                                            // the parent's 22dp horizontal pad.
-                                            // Leave 8dp extra air inside the zone.
-                                            (minOf(maxWidth - 8.dp, maxHeight - 8.dp))
-                                                .coerceAtLeast(180.dp)
-                                                .coerceAtMost(400.dp)
-                                        }
-                                        // Subtle depth: soft shadow + hairline
-                                        // highlight lifts the art off the dark
-                                        // environment without heavy card chrome.
-                                        Surface(
-                                            shape = RoundedCornerShape(26.dp),
-                                            color = Color.White.copy(alpha = 0.04f),
-                                            shadowElevation = 26.dp,
-                                            modifier = Modifier
-                                                .size(artworkSize)
-                                                .graphicsLayer {
-                                                    // Gentle, damped parallax
-                                                    // during swipe — no spin.
-                                                    translationX = shownArtworkX * 0.55f
-                                                    alpha = (1f - abs(shownArtworkX) / (size.width.coerceAtLeast(1f) * 2.2f))
-                                                        .coerceIn(0.86f, 1f)
-                                                }
-                                                .pointerInput(track.videoId, track.title) {
-                                                    awaitEachGesture {
-                                                        val down = awaitFirstDown(requireUnconsumed = false)
-                                                        var isDrag = false
-                                                        val touchSlop = viewConfiguration.touchSlop
-                                                        val initialX = down.position.x
-                                                        val initialY = down.position.y
-                                                        while (true) {
-                                                            val event = awaitPointerEvent()
-                                                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                                            if (!change.pressed) {
-                                                                if (isDrag) {
-                                                                    when {
-                                                                        artworkDragX < -swipeThreshold -> player.next()
-                                                                        artworkDragX > swipeThreshold -> player.previous()
-                                                                    }
-                                                                    artworkDragX = 0f
-                                                                } else {
-                                                                    val isLeft = initialX < size.width * 0.5f
-                                                                    val side = if (isLeft) SeekDirection.REWIND else SeekDirection.FORWARD
-                                                                    val now = SystemClock.elapsedRealtime()
-                                                                    if (lastTapSide != side) {
-                                                                        seekResetJob?.cancel()
-                                                                        seekOverlayDirection = null
-                                                                        lastTapSide = side
-                                                                        lastTapTimestamp = now
-                                                                    } else if (now - lastTapTimestamp < 450L) {
-                                                                        val newSeconds = if (seekOverlayDirection == side) seekOverlaySeconds + 5 else 5
-                                                                        seekOverlaySeconds = newSeconds
-                                                                        seekOverlayDirection = side
-                                                                        lastTapTimestamp = now
-                                                                        val deltaMs = if (side == SeekDirection.FORWARD) 5_000L else -5_000L
-                                                                        val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
-                                                                        player.seekTo(newPos)
-                                                                        seekResetJob?.cancel()
-                                                                        seekResetJob = coroutineScope.launch {
-                                                                            delay(700L)
-                                                                            seekOverlayDirection = null
-                                                                            lastTapSide = null
-                                                                        }
-                                                                    } else {
-                                                                        lastTapTimestamp = now
-                                                                        lastTapSide = side
-                                                                        seekOverlayDirection = null
-                                                                    }
-                                                                }
-                                                                break
-                                                            }
-                                                            if (change.isConsumed) {
-                                                                artworkDragX = 0f
-                                                                break
-                                                            }
-                                                            val dx = change.position.x - initialX
-                                                            val dy = change.position.y - initialY
-                                                            if (!isDrag) {
-                                                                if (kotlin.math.abs(dx) > touchSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
-                                                                    isDrag = true
-                                                                    change.consume()
-                                                                }
-                                                            } else {
-                                                                change.consume()
-                                                                artworkDragX = dx
-                                                            }
-                                                        }
-                                                    }
-                                                },
-                                        ) {
-                                            Box(
-                                                Modifier
-                                                    .fillMaxSize()
-                                                    .clip(RoundedCornerShape(26.dp))
-                                                    .background(Color.White.copy(alpha = 0.06f)),
-                                            ) {
-                                                // Hairline highlight — faint
-                                                // top edge catch-light for depth.
-                                                Box(
-                                                    Modifier
-                                                        .fillMaxSize()
-                                                        .clip(RoundedCornerShape(26.dp)),
-                                                ) {
-                                                    PlayerArtwork(track, Modifier.fillMaxSize(), 26.dp)
-                                                }
-                                                Box(
-                                                    Modifier
-                                                        .fillMaxSize()
-                                                        .clip(RoundedCornerShape(26.dp))
-                                                        .background(
-                                                            Brush.verticalGradient(
-                                                                0f to Color.White.copy(alpha = 0.10f),
-                                                                0.14f to Color.Transparent,
-                                                            ),
-                                                        ),
-                                                )
-                                                // ── Seek overlays (softer, premium) ──
-                                                androidx.compose.animation.AnimatedVisibility(
-                                                    visible = seekOverlayDirection == SeekDirection.REWIND,
-                                                    enter = fadeIn(tween(140)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.90f),
-                                                    exit = fadeOut(tween(200)),
-                                                    modifier = Modifier
-                                                        .align(Alignment.CenterStart)
-                                                        .fillMaxHeight()
-                                                        .fillMaxWidth(0.5f),
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .clip(RoundedCornerShape(topStart = 26.dp, bottomStart = 26.dp, topEnd = 80.dp, bottomEnd = 80.dp))
-                                                            .background(Color.Black.copy(alpha = 0.44f)),
-                                                        contentAlignment = Alignment.Center,
-                                                    ) {
-                                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                            Surface(shape = CircleShape, color = Color.White.copy(alpha = 0.16f), modifier = Modifier.size(48.dp)) {
-                                                                Box(contentAlignment = Alignment.Center) {
-                                                                    Icon(Icons.Filled.FastRewind, null, tint = Color.White, modifier = Modifier.size(26.dp))
-                                                                }
-                                                            }
-                                                            Spacer(Modifier.height(6.dp))
-                                                            Text("-${seekOverlaySeconds}s", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                                                        }
-                                                    }
-                                                }
-                                                androidx.compose.animation.AnimatedVisibility(
-                                                    visible = seekOverlayDirection == SeekDirection.FORWARD,
-                                                    enter = fadeIn(tween(140)) + scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.90f),
-                                                    exit = fadeOut(tween(200)),
-                                                    modifier = Modifier
-                                                        .align(Alignment.CenterEnd)
-                                                        .fillMaxHeight()
-                                                        .fillMaxWidth(0.5f),
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .clip(RoundedCornerShape(topEnd = 26.dp, bottomEnd = 26.dp, topStart = 80.dp, bottomStart = 80.dp))
-                                                            .background(Color.Black.copy(alpha = 0.44f)),
-                                                        contentAlignment = Alignment.Center,
-                                                    ) {
-                                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                            Surface(shape = CircleShape, color = Color.White.copy(alpha = 0.16f), modifier = Modifier.size(48.dp)) {
-                                                                Box(contentAlignment = Alignment.Center) {
-                                                                    Icon(Icons.Filled.FastForward, null, tint = Color.White, modifier = Modifier.size(26.dp))
-                                                                }
-                                                            }
-                                                            Spacer(Modifier.height(6.dp))
-                                                            Text("+${seekOverlaySeconds}s", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // ── Song identity: calm, centered, high-contrast ──
-                                    Spacer(Modifier.height(22.dp))
-                                    Column(
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                    ) {
-                                        Text(
-                                            track.title,
-                                            style = MaterialTheme.typography.titleLarge.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = (-0.3).sp,
-                                                lineHeight = 26.sp,
-                                            ),
-                                            color = Color.White,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                            modifier = Modifier.graphicsLayer { alpha = 0.98f },
-                                        )
-                                        Spacer(Modifier.height(5.dp))
-                                        val splitArtists = remember(track.artist) {
-                                            com.lastwave.app.util.ArtistHelper.splitArtists(track.artist)
-                                        }
-                                        Text(
-                                            splitArtists.firstOrNull() ?: track.artist,
-                                            style = MaterialTheme.typography.titleSmall.copy(
-                                                fontWeight = FontWeight.Medium,
-                                                letterSpacing = 0.1.sp,
-                                            ),
-                                            color = Color.White.copy(alpha = 0.62f),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                            modifier = Modifier.clickable {
-                                                splitArtists.firstOrNull()?.let(onOpenArtist)
-                                            },
-                                        )
-                                        // Optional second line: album / source — only if it adds value, kept whisper-light
-                                        val subline = remember(track.album, state.sourceLabel) {
-                                            when {
-                                                !track.album.isNullOrBlank() -> track.album
-                                                state.sourceLabel.isNotBlank() && state.sourceLabel != "LastWave" -> state.sourceLabel
-                                                else -> null
-                                            }
-                                        }
-                                        if (subline != null) {
-                                            Spacer(Modifier.height(2.dp))
-                                            Text(
-                                                subline,
-                                                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 0.4.sp),
-                                                color = Color.White.copy(alpha = 0.40f),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(Modifier.height(16.dp))
-                                    SeekBar(state, player::seekTo, isTranslucent = true)
-                                    Spacer(Modifier.height(14.dp))
-                                    MainControls(state, player, isTranslucent = true)
-                                    Spacer(Modifier.height(14.dp))
-                                    PlayerUtilityControls(state, player, isTranslucent = true)
-                                    Spacer(Modifier.height(6.dp))
-                                }
-                            } else {
                                 // ── Standard layout (unchanged) ────────────────
                                 Column(
                                     Modifier.fillMaxSize().padding(bottom = 12.dp),
@@ -1383,9 +1175,19 @@ private fun FullPlayer(
                                             .coerceAtMost(370.dp)
                                         Surface(
                                             shape = RoundedCornerShape(32.dp),
-                                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                            tonalElevation = 8.dp,
-                                            shadowElevation = 18.dp,
+                                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                Brush.linearGradient(
+                                                    listOf(
+                                                        Color.White.copy(alpha = 0.28f),
+                                                        ambientColor.copy(alpha = 0.34f),
+                                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f),
+                                                    ),
+                                                ),
+                                            ),
+                                            tonalElevation = 6.dp,
+                                            shadowElevation = 20.dp,
                                             modifier = Modifier
                                                 .size(artworkSize)
                                                 .graphicsLayer {
@@ -1570,8 +1372,10 @@ private fun FullPlayer(
                                         Column(Modifier.weight(1f)) {
                                             Text(
                                                 track.title,
-                                                style = MaterialTheme.typography.headlineSmall,
-                                                fontWeight = FontWeight.Bold,
+                                                style = MaterialTheme.typography.headlineSmall.copy(
+                                                    letterSpacing = (-0.35).sp,
+                                                ),
+                                                fontWeight = FontWeight.ExtraBold,
                                                 color = MaterialTheme.colorScheme.onSurface,
                                                 maxLines = 2,
                                                 overflow = TextOverflow.Ellipsis,
@@ -1588,12 +1392,17 @@ private fun FullPlayer(
                                                     Surface(
                                                         onClick = { onOpenArtist(artName) },
                                                         shape = RoundedCornerShape(10.dp),
-                                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                                                        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.80f),
+                                                        border = BorderStroke(
+                                                            1.dp,
+                                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                                                        ),
+                                                        tonalElevation = 0.dp,
                                                     ) {
                                                         Text(
                                                             artName,
                                                             style = MaterialTheme.typography.titleMedium,
-                                                            color = MaterialTheme.colorScheme.primary,
+                                                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f),
                                                             fontWeight = FontWeight.SemiBold,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis,
@@ -1608,10 +1417,15 @@ private fun FullPlayer(
 
                                         Surface(
                                             onClick = { onTabChange(FullPlayerTab.LYRICS) },
-                                            shape = RoundedCornerShape(18.dp),
-                                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            contentColor = MaterialTheme.colorScheme.primary,
-                                            tonalElevation = 2.dp,
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            border = BorderStroke(
+                                                1.dp,
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                                            ),
+                                            tonalElevation = 1.dp,
+                                            shadowElevation = 4.dp,
                                             modifier = Modifier.size(50.dp),
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
@@ -1619,7 +1433,7 @@ private fun FullPlayer(
                                                     Icons.Filled.Lyrics,
                                                     contentDescription = "Show lyrics",
                                                     modifier = Modifier.size(24.dp),
-                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                                 )
                                             }
                                         }
@@ -1631,7 +1445,6 @@ private fun FullPlayer(
                                     Spacer(Modifier.height(16.dp))
                                     PlayerUtilityControls(state, player, isTranslucent = false)
                                 }
-                            }
                         }
                     }
                 }
@@ -1689,42 +1502,96 @@ private fun FullPlayer(
 }
 
 @Composable
+internal fun PlayerProgressSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val inactive = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.20f else 0.12f)
+    val range = (valueRange.endInclusive - valueRange.start).coerceAtLeast(0.0001f)
+    val fraction = ((value - valueRange.start) / range).coerceIn(0f, 1f)
+
+    Slider(
+        value = value,
+        onValueChange = onValueChange,
+        onValueChangeFinished = onValueChangeFinished,
+        valueRange = valueRange,
+        enabled = enabled,
+        modifier = modifier.drawBehind {
+            val inset = 10.dp.toPx()
+            val startX = inset
+            val endX = (size.width - inset).coerceAtLeast(startX)
+            val activeEndX = startX + ((endX - startX) * fraction)
+            val centerY = size.height / 2f
+            drawLine(
+                color = inactive,
+                start = androidx.compose.ui.geometry.Offset(startX, centerY),
+                end = androidx.compose.ui.geometry.Offset(endX, centerY),
+                strokeWidth = 3.dp.toPx(),
+                cap = StrokeCap.Round,
+            )
+            if (activeEndX > startX) {
+                drawLine(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            primary.copy(alpha = if (enabled) 1f else 0.42f),
+                            tertiary.copy(alpha = if (enabled) 0.92f else 0.36f),
+                        ),
+                        startX = startX,
+                        endX = activeEndX,
+                    ),
+                    start = androidx.compose.ui.geometry.Offset(startX, centerY),
+                    end = androidx.compose.ui.geometry.Offset(activeEndX, centerY),
+                    strokeWidth = 4.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+            }
+        },
+        colors = SliderDefaults.colors(
+            thumbColor = primary,
+            activeTrackColor = Color.Transparent,
+            inactiveTrackColor = Color.Transparent,
+            activeTickColor = Color.Transparent,
+            inactiveTickColor = Color.Transparent,
+            disabledThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f),
+            disabledActiveTrackColor = Color.Transparent,
+            disabledInactiveTrackColor = Color.Transparent,
+            disabledActiveTickColor = Color.Transparent,
+            disabledInactiveTickColor = Color.Transparent,
+        ),
+    )
+}
+
+@Composable
 private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit, isTranslucent: Boolean = false) {
     var dragging by remember { mutableStateOf(false) }
     var dragValue by remember { mutableFloatStateOf(0f) }
     val end = state.durationMs.coerceAtLeast(1).toFloat()
     val shown = if (dragging) dragValue else state.positionMs.coerceIn(0, state.durationMs.coerceAtLeast(0)).toFloat()
     Column(Modifier.fillMaxWidth()) {
-        Slider(
+        PlayerProgressSlider(
             value = shown.coerceIn(0f, end),
             onValueChange = { dragging = true; dragValue = it },
             onValueChangeFinished = { onSeek(dragValue.toLong()); dragging = false },
             valueRange = 0f..end,
             enabled = state.durationMs > 0,
             modifier = Modifier.fillMaxWidth(),
-            colors = if (isTranslucent) {
-                SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.White.copy(alpha = 0.96f),
-                    inactiveTrackColor = Color.White.copy(alpha = 0.18f),
-                    activeTickColor = Color.Transparent,
-                    inactiveTickColor = Color.Transparent,
-                    disabledThumbColor = Color.White.copy(alpha = 0.52f),
-                    disabledActiveTrackColor = Color.White.copy(alpha = 0.40f),
-                    disabledInactiveTrackColor = Color.White.copy(alpha = 0.14f),
-                )
-            } else SliderDefaults.colors(),
         )
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 formatTime(shown.toLong()),
                 style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
-                color = if (isTranslucent) Color.White.copy(alpha = 0.64f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (isTranslucent) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
             )
             Text(
                 "−${formatTime((state.durationMs - shown.toLong()).coerceAtLeast(0))}",
                 style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
-                color = if (isTranslucent) Color.White.copy(alpha = 0.64f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (isTranslucent) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
             )
         }
     }
@@ -1739,11 +1606,16 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
     ) {
         Surface(
             onClick = player::previous,
-            shape = RoundedCornerShape(if (isTranslucent) 18.dp else 22.dp),
-            color = if (isTranslucent) Color.White.copy(alpha = 0.11f) else MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSecondaryContainer,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+            shape = CircleShape,
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f),
+            contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(
+                1.dp,
+                if (isTranslucent) Color.White.copy(alpha = 0.14f)
+                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f),
+            ),
+            tonalElevation = if (isTranslucent) 0.dp else 1.dp,
+            shadowElevation = if (isTranslucent) 0.dp else 3.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1752,11 +1624,16 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         }
         Surface(
             onClick = player::togglePlayPause,
-            shape = RoundedCornerShape(if (isTranslucent) 22.dp else 28.dp),
+            shape = CircleShape,
             color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary,
             contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
+            border = BorderStroke(
+                1.dp,
+                if (isTranslucent) Color.White.copy(alpha = 0.52f)
+                else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f),
+            ),
             tonalElevation = if (isTranslucent) 0.dp else 4.dp,
-            shadowElevation = if (isTranslucent) 10.dp else 8.dp,
+            shadowElevation = if (isTranslucent) 10.dp else 12.dp,
             modifier = Modifier.size(if (isTranslucent) 72.dp else 76.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1773,11 +1650,16 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         }
         Surface(
             onClick = player::next,
-            shape = RoundedCornerShape(if (isTranslucent) 18.dp else 22.dp),
-            color = if (isTranslucent) Color.White.copy(alpha = 0.11f) else MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSecondaryContainer,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+            shape = CircleShape,
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f),
+            contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(
+                1.dp,
+                if (isTranslucent) Color.White.copy(alpha = 0.14f)
+                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.38f),
+            ),
+            tonalElevation = if (isTranslucent) 0.dp else 1.dp,
+            shadowElevation = if (isTranslucent) 0.dp else 3.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1799,16 +1681,24 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             shape = RoundedCornerShape(if (isTranslucent) 14.dp else 18.dp),
             color = when {
                 isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.18f)
-                isTranslucent -> Color.White.copy(alpha = 0.09f)
+                isTranslucent -> Color.White.copy(alpha = 0.12f)
                 state.shuffleEnabled -> MaterialTheme.colorScheme.primaryContainer
                 else -> MaterialTheme.colorScheme.surfaceContainerHigh
             },
             contentColor = when {
                 isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.98f)
-                isTranslucent -> Color.White.copy(alpha = 0.70f)
+                isTranslucent -> Color.White.copy(alpha = 0.82f)
                 state.shuffleEnabled -> MaterialTheme.colorScheme.onPrimaryContainer
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f)
             },
+            border = BorderStroke(
+                1.dp,
+                when {
+                    isTranslucent -> Color.White.copy(alpha = 0.12f)
+                    state.shuffleEnabled -> MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)
+                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
+                },
+            ),
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
@@ -1819,8 +1709,13 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         }
         Surface(
             shape = RoundedCornerShape(if (isTranslucent) 14.dp else 18.dp),
-            color = if (isTranslucent) Color.White.copy(alpha = 0.09f) else MaterialTheme.colorScheme.surfaceContainerHigh,
-            contentColor = if (isTranslucent) Color.White else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (isTranslucent) Color.White.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = if (isTranslucent) Color.White else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f),
+            border = BorderStroke(
+                1.dp,
+                if (isTranslucent) Color.White.copy(alpha = 0.12f)
+                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f),
+            ),
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier.weight(1.3f).height(if (isTranslucent) 44.dp else 48.dp),
@@ -1833,7 +1728,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
                 Icon(
                     Icons.Filled.HighQuality,
                     null,
-                    tint = if (isTranslucent) Color.White.copy(alpha = 0.88f) else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (isTranslucent) Color.White.copy(alpha = 0.92f) else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f),
                     modifier = Modifier.size(17.dp),
                 )
                 Text(
@@ -1851,16 +1746,24 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             shape = RoundedCornerShape(if (isTranslucent) 14.dp else 18.dp),
             color = when {
                 isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.18f)
-                isTranslucent -> Color.White.copy(alpha = 0.09f)
+                isTranslucent -> Color.White.copy(alpha = 0.12f)
                 state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.primaryContainer
                 else -> MaterialTheme.colorScheme.surfaceContainerHigh
             },
             contentColor = when {
                 isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.98f)
-                isTranslucent -> Color.White.copy(alpha = 0.70f)
+                isTranslucent -> Color.White.copy(alpha = 0.82f)
                 state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.onPrimaryContainer
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f)
             },
+            border = BorderStroke(
+                1.dp,
+                when {
+                    isTranslucent -> Color.White.copy(alpha = 0.12f)
+                    state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.primary.copy(alpha = 0.34f)
+                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.30f)
+                },
+            ),
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
