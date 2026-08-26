@@ -44,9 +44,9 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * Premium Multi-Layer Waveform Seekbar.
- * Features 3 glowing translucent wave layers strictly confined to the active playing section,
- * tapering smoothly into the thumb, with a clean straight horizontal bar for unplayed audio.
+ * Ultra-smooth Multi-Layer Waveform Seekbar.
+ * Uses mathematical quintic smootherstep envelopes and 1px sub-pixel sampling
+ * for perfectly fluid, tangent-continuous organic liquid waves.
  */
 @Composable
 fun WavySeekBar(
@@ -76,13 +76,13 @@ fun WavySeekBar(
     }
 
     // Continuous real-time wave animation
-    val infiniteTransition = rememberInfiniteTransition(label = "WaveAnimation")
+    val infiniteTransition = rememberInfiniteTransition(label = "SilkWaveAnimation")
 
     val phase1 by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3200, easing = LinearEasing),
+            animation = tween(durationMillis = 3000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase1",
@@ -92,7 +92,7 @@ fun WavySeekBar(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing),
+            animation = tween(durationMillis = 2200, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase2",
@@ -102,7 +102,7 @@ fun WavySeekBar(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = LinearEasing),
+            animation = tween(durationMillis = 1600, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase3",
@@ -113,36 +113,36 @@ fun WavySeekBar(
     val currPhase2 = if (isPlaying) phase2 + 1.0f else 1.0f
     val currPhase3 = if (isPlaying) phase3 else 0f
 
-    // Slightly increased wave heights with smooth dampening on seek
+    // Softly dampened amplitudes
     val density = LocalDensity.current
-    val baseAmp1Px = with(density) { 11.0.dp.toPx() } // Tallest ambient layer
-    val baseAmp2Px = with(density) { 8.5.dp.toPx() }  // Mid-height wave
-    val baseAmp3Px = with(density) { 6.2.dp.toPx() }  // Foreground ribbon
-    val draggingAmpPx = with(density) { 1.2.dp.toPx() }
+    val baseAmp1Px = with(density) { 10.5.dp.toPx() } // Deep ambient swell
+    val baseAmp2Px = with(density) { 8.0.dp.toPx() }  // Mid-harmonic wave
+    val baseAmp3Px = with(density) { 5.8.dp.toPx() }  // Foreground ribbon
+    val draggingAmpPx = with(density) { 1.0.dp.toPx() }
 
     val amp1 by animateFloatAsState(
         targetValue = if (dragging) draggingAmpPx else baseAmp1Px,
-        animationSpec = tween(durationMillis = 180),
+        animationSpec = tween(durationMillis = 200),
         label = "Amp1",
     )
     val amp2 by animateFloatAsState(
         targetValue = if (dragging) draggingAmpPx else baseAmp2Px,
-        animationSpec = tween(durationMillis = 180),
+        animationSpec = tween(durationMillis = 200),
         label = "Amp2",
     )
     val amp3 by animateFloatAsState(
         targetValue = if (dragging) draggingAmpPx else baseAmp3Px,
-        animationSpec = tween(durationMillis = 180),
+        animationSpec = tween(durationMillis = 200),
         label = "Amp3",
     )
 
-    val waveLength1Px = with(density) { 110.dp.toPx() }
-    val waveLength2Px = with(density) { 88.dp.toPx() }
-    val waveLength3Px = with(density) { 70.dp.toPx() }
+    val waveLength1Px = with(density) { 125.dp.toPx() }
+    val waveLength2Px = with(density) { 98.dp.toPx() }
+    val waveLength3Px = with(density) { 76.dp.toPx() }
 
     val baseTrackThicknessPx = with(density) { 4.5.dp.toPx() }
     val thumbRadiusPx = with(density) { 7.5.dp.toPx() }
-    val transitionLengthPx = with(density) { 18.dp.toPx() }
+    val transitionLengthPx = with(density) { 26.dp.toPx() }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Canvas(
@@ -193,7 +193,7 @@ fun WavySeekBar(
             val bottomY = centerY + halfThickness
             val topBaselineY = centerY - halfThickness
 
-            // 1. Inactive background track: Clean straight horizontal line from thumbX to end
+            // 1. Inactive background track: Straight capsule bar from thumbX to end
             if (thumbX < width) {
                 drawLine(
                     color = inactiveColor,
@@ -204,7 +204,7 @@ fun WavySeekBar(
                 )
             }
 
-            // 2. Active waves: Strictly confined to [0, thumbX]
+            // 2. Active waves: Confined strictly to [0, thumbX] with smootherstep interpolation
             if (thumbX > 0f) {
                 val clipBounds = Path().apply {
                     addRoundRect(
@@ -224,8 +224,13 @@ fun WavySeekBar(
                 }
 
                 clipPath(clipBounds) {
-                    // Function to build active wave strictly from 0 to thumbX
-                    fun buildActiveWave(
+                    // Quintic smootherstep function for seamless C² continuity (zero jerk at boundaries)
+                    fun smootherstep(t: Float): Float {
+                        val c = t.coerceIn(0f, 1f)
+                        return c * c * c * (c * (c * 6f - 15f) + 10f)
+                    }
+
+                    fun buildSilkWavPath(
                         wavelength: Float,
                         amplitude: Float,
                         phase: Float,
@@ -236,13 +241,11 @@ fun WavySeekBar(
                         filledPath.lineTo(0f, topBaselineY)
                         contourPath.moveTo(0f, topBaselineY)
 
-                        val step = 1.8f
+                        val step = 1.0f // 1px sampling resolution for silky smooth curves
                         var x = 0f
                         while (x <= thumbX) {
-                            val tStart = (x / transitionLengthPx).coerceIn(0f, 1f)
-                            val tEnd = ((thumbX - x) / transitionLengthPx).coerceIn(0f, 1f)
-                            val startEnv = tStart * tStart * (3f - 2f * tStart)
-                            val endEnv = tEnd * tEnd * (3f - 2f * tEnd)
+                            val startEnv = smootherstep(x / transitionLengthPx)
+                            val endEnv = smootherstep((thumbX - x) / transitionLengthPx)
                             val envelope = startEnv * endEnv
 
                             val angle = ((x / wavelength) * 2 * PI).toFloat() - phase
@@ -259,11 +262,11 @@ fun WavySeekBar(
                         return Pair(filledPath, contourPath)
                     }
 
-                    val (filled1, contour1) = buildActiveWave(waveLength1Px, amp1, currPhase1)
-                    val (filled2, contour2) = buildActiveWave(waveLength2Px, amp2, currPhase2)
-                    val (filled3, contour3) = buildActiveWave(waveLength3Px, amp3, currPhase3)
+                    val (filled1, contour1) = buildSilkWavPath(waveLength1Px, amp1, currPhase1)
+                    val (filled2, contour2) = buildSilkWavPath(waveLength2Px, amp2, currPhase2)
+                    val (filled3, contour3) = buildSilkWavPath(waveLength3Px, amp3, currPhase3)
 
-                    // Layer 1: Deepest Background Wave
+                    // Layer 1: Ambient Background Layer
                     drawPath(
                         path = filled1,
                         brush = Brush.verticalGradient(
@@ -281,7 +284,7 @@ fun WavySeekBar(
                         style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 2: Middle Harmonic Wave
+                    // Layer 2: Middle Harmonic Layer
                     drawPath(
                         path = filled2,
                         brush = Brush.verticalGradient(
@@ -299,7 +302,7 @@ fun WavySeekBar(
                         style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 3: Foreground Vibrant Ribbon
+                    // Layer 3: Foreground Ribbon
                     drawPath(
                         path = filled3,
                         brush = Brush.verticalGradient(
@@ -319,15 +322,15 @@ fun WavySeekBar(
                 }
             }
 
-            // 3. Leading Thumb Circle
+            // 3. Leading Thumb Indicator
             if (state.durationMs > 0) {
-                // Soft glow halo
+                // Outer glow halo
                 drawCircle(
                     color = activeColor.copy(alpha = 0.28f),
                     radius = thumbRadiusPx + 3.dp.toPx(),
                     center = Offset(thumbX, centerY),
                 )
-                // Solid thumb circle
+                // Solid center circle
                 drawCircle(
                     color = activeColor,
                     radius = thumbRadiusPx,
