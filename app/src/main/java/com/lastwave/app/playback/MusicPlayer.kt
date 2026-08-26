@@ -397,17 +397,19 @@ class MusicPlayer @Inject constructor(
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
             ): androidx.media3.exoplayer.audio.AudioSink {
-                val platformSink = DefaultAudioSink.Builder(context)
+                val engine = runCatching { nativeAudioEngine.get() }.getOrNull()
+                val audioProcessors: Array<androidx.media3.common.audio.AudioProcessor> =
+                    if (engine?.isAvailable == true) {
+                        arrayOf(NativePcmAudioProcessor(engine))
+                    } else {
+                        emptyArray()
+                    }
+                return DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(true)
                     .setEnableAudioTrackPlaybackParams(false)
+                    .setAudioProcessors(audioProcessors)
                     .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
                     .build()
-                val engine = runCatching { nativeAudioEngine.get() }.getOrNull()
-                if (engine?.isAvailable != true) return platformSink
-                return NativeProcessingAudioSink(
-                    delegate = platformSink,
-                    processor = NativePcmAudioProcessor(engine),
-                )
             }
         }.apply {
             // FFmpeg-first decoding, the Poweramp/VLC model: every codec the
