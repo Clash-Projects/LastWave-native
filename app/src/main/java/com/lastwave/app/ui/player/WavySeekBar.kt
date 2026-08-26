@@ -44,10 +44,36 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * 3-Layer Translucent Glass Waveform Seekbar.
- * Features 3 fluid, fast, broad-swell filled glassmorphic wave layers with progressive translucency,
- * thin razor-sharp crest highlights, quintic smootherstep boundary convergence,
- * and a clean straight unplayed baseline.
+ * Shifts the Hue and boosts Saturation/Value of a Compose Color to produce
+ * a harmonious, vibrant neon companion hue.
+ */
+private fun Color.shiftNeonHue(hueOffset: Float, saturationScale: Float = 1.15f, valueScale: Float = 1.1f): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.RGBToHSV(
+        (red * 255).toInt().coerceIn(0, 255),
+        (green * 255).toInt().coerceIn(0, 255),
+        (blue * 255).toInt().coerceIn(0, 255),
+        hsv,
+    )
+    // If the color is nearly grayscale, give it an electric violet-blue base
+    if (hsv[1] < 0.1f) {
+        hsv[0] = 270f
+        hsv[1] = 0.85f
+    }
+    var h = (hsv[0] + hueOffset) % 360f
+    if (h < 0f) h += 360f
+    hsv[0] = h
+    hsv[1] = (hsv[1] * saturationScale).coerceIn(0.70f, 1.0f)
+    hsv[2] = (hsv[2] * valueScale).coerceIn(0.80f, 1.0f)
+    val rgb = android.graphics.Color.HSVToColor(hsv)
+    return Color(rgb)
+}
+
+/**
+ * 3-Layer Translucent Multi-Chromatic Neon Glass Waveform Seekbar.
+ * Features 3 fluid, distinct-hued neon wave layers derived from the theme and album art,
+ * filled down to the baseline with thin luminous crest highlights,
+ * quintic smootherstep boundary convergence, and a clean straight unplayed baseline.
  */
 @Composable
 fun WavySeekBar(
@@ -64,7 +90,19 @@ fun WavySeekBar(
     val shownFraction = if (dragging) dragFraction else currentFraction
     val shownMs = (shownFraction * durationMs).toLong()
 
-    val activeColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
+    val rawBaseColor = if (isTranslucent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary
+
+    // 3 Harmonious Neon Hues derived from theme / album art
+    val color1 = remember(rawBaseColor, isTranslucent) {
+        if (isTranslucent) Color(0xFF00E5FF) else rawBaseColor.shiftNeonHue(-35f) // Electric Cyan / Ocean Neon
+    }
+    val color2 = remember(rawBaseColor, isTranslucent) {
+        if (isTranslucent) Color(0xFFD500F9) else rawBaseColor.shiftNeonHue(+30f) // Electric Magenta / Violet Neon
+    }
+    val color3 = remember(rawBaseColor, isTranslucent) {
+        if (isTranslucent) Color(0xFF7C4DFF) else rawBaseColor.shiftNeonHue(0f)   // Primary Vibrant Neon
+    }
+
     val inactiveColor = if (isTranslucent) {
         Color.White.copy(alpha = 0.25f)
     } else {
@@ -77,7 +115,7 @@ fun WavySeekBar(
     }
 
     // Faster, highly fluid wave animations
-    val infiniteTransition = rememberInfiniteTransition(label = "FluidGlassWaveAnimation")
+    val infiniteTransition = rememberInfiniteTransition(label = "NeonGlassWaveAnimation")
 
     val phase1 by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -116,9 +154,9 @@ fun WavySeekBar(
 
     // 3-Tier Amplitudes with smooth dampening on seek
     val density = LocalDensity.current
-    val baseAmp1Px = with(density) { 13.5.dp.toPx() } // Deepest ambient glass layer
-    val baseAmp2Px = with(density) { 10.5.dp.toPx() } // Middle translucent glass layer
-    val baseAmp3Px = with(density) { 7.8.dp.toPx() }  // Foreground glowing glass layer
+    val baseAmp1Px = with(density) { 13.5.dp.toPx() } // Deepest ambient neon layer
+    val baseAmp2Px = with(density) { 10.5.dp.toPx() } // Middle translucent neon layer
+    val baseAmp3Px = with(density) { 7.8.dp.toPx() }  // Foreground glowing neon layer
     val draggingAmpPx = with(density) { 1.2.dp.toPx() }
 
     val amp1 by animateFloatAsState(
@@ -206,7 +244,7 @@ fun WavySeekBar(
                 )
             }
 
-            // 2. Active 3-Layer Translucent Glass Waves: Confined strictly to [0, thumbX]
+            // 2. Active 3-Layer Multi-Chromatic Neon Waves: Confined strictly to [0, thumbX]
             if (thumbX > 0f) {
                 val clipBounds = Path().apply {
                     addRoundRect(
@@ -269,51 +307,51 @@ fun WavySeekBar(
                     val (filled2, contour2) = buildFilledWave(waveLength2Px, amp2, currPhase2)
                     val (filled3, contour3) = buildFilledWave(waveLength3Px, amp3, currPhase3)
 
-                    // Layer 1: Deepest Ambient Glass Layer (~24% opacity)
+                    // Layer 1: Ambient Neon Glass Layer (Cyan/Indigo hue offset, ~28% opacity)
                     drawPath(
                         path = filled1,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                activeColor.copy(alpha = if (isTranslucent) 0.28f else 0.24f),
-                                activeColor.copy(alpha = if (isTranslucent) 0.12f else 0.08f),
+                                color1.copy(alpha = 0.32f),
+                                color1.copy(alpha = 0.10f),
                             ),
                             startY = centerY - 20.dp.toPx(),
                             endY = bottomY,
                         ),
                     )
-                    // Thin delicate crest highlight
+                    // Delicate crest highlight
                     drawPath(
                         path = contour1,
-                        color = activeColor.copy(alpha = if (isTranslucent) 0.38f else 0.32f),
+                        color = color1.copy(alpha = 0.45f),
                         style = Stroke(width = 0.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 2: Middle Translucent Glass Layer (~55% opacity)
+                    // Layer 2: Middle Neon Glass Layer (Magenta/Violet hue offset, ~60% opacity)
                     drawPath(
                         path = filled2,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                activeColor.copy(alpha = if (isTranslucent) 0.60f else 0.55f),
-                                activeColor.copy(alpha = if (isTranslucent) 0.28f else 0.22f),
+                                color2.copy(alpha = 0.65f),
+                                color2.copy(alpha = 0.28f),
                             ),
                             startY = centerY - 15.dp.toPx(),
                             endY = bottomY,
                         ),
                     )
-                    // Thin refined crest highlight
+                    // Refined crest highlight
                     drawPath(
                         path = contour2,
-                        color = activeColor.copy(alpha = if (isTranslucent) 0.72f else 0.68f),
+                        color = color2.copy(alpha = 0.78f),
                         style = Stroke(width = 1.1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 3: Foreground Glowing Glass Layer (~92% opacity)
+                    // Layer 3: Foreground Primary Neon Glass Layer (~95% opacity)
                     drawPath(
                         path = filled3,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                activeColor.copy(alpha = if (isTranslucent) 0.95f else 0.92f),
-                                activeColor.copy(alpha = if (isTranslucent) 0.62f else 0.58f),
+                                color3.copy(alpha = 0.96f),
+                                color3.copy(alpha = 0.62f),
                             ),
                             startY = centerY - 10.dp.toPx(),
                             endY = bottomY,
@@ -322,7 +360,7 @@ fun WavySeekBar(
                     // Crisp luminous crest highlight
                     drawPath(
                         path = contour3,
-                        color = activeColor,
+                        color = color3,
                         style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
                 }
@@ -332,13 +370,13 @@ fun WavySeekBar(
             if (state.durationMs > 0) {
                 // Soft glowing halo
                 drawCircle(
-                    color = activeColor.copy(alpha = 0.28f),
+                    color = color3.copy(alpha = 0.32f),
                     radius = thumbRadiusPx + 3.dp.toPx(),
                     center = Offset(thumbX, centerY),
                 )
                 // Solid center circle
                 drawCircle(
-                    color = activeColor,
+                    color = color3,
                     radius = thumbRadiusPx,
                     center = Offset(thumbX, centerY),
                 )
