@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -17,10 +19,10 @@ android {
         versionCode = 11
         versionName = "3.2.1"
 
-        val localProps = java.util.Properties().apply {
+        val localProps = Properties().apply {
             val localPropsFile = rootProject.file("local.properties")
             if (localPropsFile.exists()) {
-                load(localPropsFile.inputStream())
+                localPropsFile.inputStream().use { load(it) }
             }
             val envFile = rootProject.file(".env")
             if (envFile.exists()) {
