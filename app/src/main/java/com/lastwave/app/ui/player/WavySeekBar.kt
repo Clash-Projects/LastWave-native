@@ -45,7 +45,7 @@ import kotlin.math.sin
 
 /**
  * 3-Layer Translucent Glass Waveform Seekbar.
- * Features 3 distinct filled glassmorphic wave layers with progressive translucency,
+ * Features 3 fluid, fast, broad-swell filled glassmorphic wave layers with progressive translucency,
  * thin razor-sharp crest highlights, quintic smootherstep boundary convergence,
  * and a clean straight unplayed baseline.
  */
@@ -76,14 +76,14 @@ fun WavySeekBar(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    // 3 continuous real-time wave animations
-    val infiniteTransition = rememberInfiniteTransition(label = "3GlassWaveAnimation")
+    // Faster, highly fluid wave animations
+    val infiniteTransition = rememberInfiniteTransition(label = "FluidGlassWaveAnimation")
 
     val phase1 by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3400, easing = LinearEasing),
+            animation = tween(durationMillis = 2000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase1",
@@ -93,7 +93,7 @@ fun WavySeekBar(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2500, easing = LinearEasing),
+            animation = tween(durationMillis = 1500, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase2",
@@ -103,7 +103,7 @@ fun WavySeekBar(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1700, easing = LinearEasing),
+            animation = tween(durationMillis = 1100, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase3",
@@ -114,7 +114,7 @@ fun WavySeekBar(
     val currPhase2 = if (isPlaying) phase2 + 1.2f else 1.2f
     val currPhase3 = if (isPlaying) phase3 else 0f
 
-    // 3-Tier Amplitudes with slightly increased height and smooth dampening on seek
+    // 3-Tier Amplitudes with smooth dampening on seek
     val density = LocalDensity.current
     val baseAmp1Px = with(density) { 13.5.dp.toPx() } // Deepest ambient glass layer
     val baseAmp2Px = with(density) { 10.5.dp.toPx() } // Middle translucent glass layer
@@ -123,28 +123,28 @@ fun WavySeekBar(
 
     val amp1 by animateFloatAsState(
         targetValue = if (dragging) draggingAmpPx else baseAmp1Px,
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = 180),
         label = "Amp1",
     )
     val amp2 by animateFloatAsState(
         targetValue = if (dragging) draggingAmpPx else baseAmp2Px,
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = 180),
         label = "Amp2",
     )
     val amp3 by animateFloatAsState(
         targetValue = if (dragging) draggingAmpPx else baseAmp3Px,
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = 180),
         label = "Amp3",
     )
 
-    // 3 Distinct Wavelengths
-    val waveLength1Px = with(density) { 130.dp.toPx() }
-    val waveLength2Px = with(density) { 102.dp.toPx() }
-    val waveLength3Px = with(density) { 78.dp.toPx() }
+    // Broad wavelengths for fewer, more elegant crests across the width
+    val waveLength1Px = with(density) { 165.dp.toPx() }
+    val waveLength2Px = with(density) { 130.dp.toPx() }
+    val waveLength3Px = with(density) { 98.dp.toPx() }
 
     val baseTrackThicknessPx = with(density) { 4.5.dp.toPx() }
     val thumbRadiusPx = with(density) { 7.5.dp.toPx() }
-    val transitionLengthPx = with(density) { 26.dp.toPx() }
+    val transitionLengthPx = with(density) { 30.dp.toPx() }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Canvas(
@@ -269,7 +269,7 @@ fun WavySeekBar(
                     val (filled2, contour2) = buildFilledWave(waveLength2Px, amp2, currPhase2)
                     val (filled3, contour3) = buildFilledWave(waveLength3Px, amp3, currPhase3)
 
-                    // Layer 1: Deepest Ambient Glass Layer (~22% opacity)
+                    // Layer 1: Deepest Ambient Glass Layer (~24% opacity)
                     drawPath(
                         path = filled1,
                         brush = Brush.verticalGradient(
@@ -307,7 +307,7 @@ fun WavySeekBar(
                         style = Stroke(width = 1.1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 3: Foreground Glowing Glass Layer (~94% opacity)
+                    // Layer 3: Foreground Glowing Glass Layer (~92% opacity)
                     drawPath(
                         path = filled3,
                         brush = Brush.verticalGradient(
