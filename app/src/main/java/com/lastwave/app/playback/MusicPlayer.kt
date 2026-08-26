@@ -176,6 +176,10 @@ class MusicPlayer @Inject constructor(
     private val unavailableMediaIds = mutableSetOf<String>()
     private var sleepTimerDeadlineMs: Long? = null
     private var sleepTimerStep = 0
+    @Volatile
+    private var crossfadeEnabled = false
+    @Volatile
+    private var crossfadeDurationMs = 5_000L
     private val _state = MutableStateFlow(MusicPlayerState())
     val state: StateFlow<MusicPlayerState> = _state.asStateFlow()
     val chromeState: StateFlow<PlaybackChromeState> = state
@@ -247,6 +251,9 @@ class MusicPlayer @Inject constructor(
                         isBuffering = true,
                         error = null,
                     )
+                }
+                if (crossfadeEnabled && crossfadeDurationMs > 0L) {
+                    player.volume = 0f
                 }
                 enrichUpcomingQueue(currentIndex)
                 extendDiscoverQueueIfNeeded(currentIndex)
@@ -485,6 +492,12 @@ class MusicPlayer @Inject constructor(
                     val pos = if (dur > 0) rawPos.coerceIn(0L, dur) else rawPos
                     val buf = player.bufferedPosition.coerceAtLeast(0)
                     val sleepRemaining = remaining?.coerceAtLeast(0)
+
+                    val targetVolume = calculateCrossfadeVolume(pos, dur)
+                    if (kotlin.math.abs(player.volume - targetVolume) > 0.008f) {
+                        player.volume = targetVolume
+                    }
+
                     val previous = _state.value
                     val unchanged = !player.isPlaying &&
                         previous.positionMs == pos &&
@@ -514,6 +527,18 @@ class MusicPlayer @Inject constructor(
                 // Preserve lazy player startup when there is no restored or
                 // active queue. The short-circuit avoids touching ExoPlayer.
                 delay(if (_state.value.current != null && player.isPlaying) 60L else 500L)
+            }
+        }
+
+        applicationScope.launch {
+            settingsPreferences.settings.collect { settings ->
+                crossfadeEnabled = settings.crossfadeEnabled
+                crossfadeDurationMs = settings.crossfadeSeconds * 1000L
+                if (!settings.crossfadeEnabled) {
+                    onMain {
+                        if (player.volume < 0.99f) player.volume = 1.0f
+                    }
+                }
             }
         }
 
@@ -716,7 +741,28 @@ class MusicPlayer @Inject constructor(
     fun seekTo(positionMs: Long) = onMain {
         val target = positionMs.coerceAtLeast(0)
         player.seekTo(target)
+        val dur = player.duration.takeIf { it > 0 } ?: _state.value.durationMs
+        player.volume = calculateCrossfadeVolume(target, dur)
         _state.update { it.copy(positionMs = target) }
+    }
+
+    private fun calculateCrossfadeVolume(positionMs: Long, durationMs: Long): Float {
+        if (!crossfadeEnabled || crossfadeDurationMs <= 0L || durationMs <= 0L) return 1.0f
+        val effectiveCrossfade = minOf(crossfadeDurationMs, durationMs / 3).coerceAtLeast(500L)
+        if (durationMs < effectiveCrossfade * 2) return 1.0f
+
+        val remainingMs = durationMs - positionMs
+        return when {
+            positionMs < effectiveCrossfade -> {
+                val progress = (positionMs.toFloat() / effectiveCrossfade.toFloat()).coerceIn(0f, 1f)
+                kotlin.math.sin(progress * (Math.PI.toFloat() / 2f))
+            }
+            remainingMs < effectiveCrossfade -> {
+                val progress = (remainingMs.toFloat() / effectiveCrossfade.toFloat()).coerceIn(0f, 1f)
+                kotlin.math.sin(progress * (Math.PI.toFloat() / 2f))
+            }
+            else -> 1.0f
+        }.coerceIn(0f, 1f)
     }
     fun seekToQueueItem(index: Int) = onMain {
         if (index in 0 until player.mediaItemCount) {
