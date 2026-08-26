@@ -26,6 +26,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -1163,6 +1164,29 @@ private fun FullPlayer(
                                         val artworkSize = (minOf(maxWidth, maxHeight) - 6.dp)
                                             .coerceAtLeast(0.dp)
                                             .coerceAtMost(370.dp)
+
+                                        val glowAlpha by animateFloatAsState(
+                                            targetValue = if (state.isPlaying) 0.65f else 0.35f,
+                                            animationSpec = tween(600),
+                                            label = "artworkGlowAlpha",
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(artworkSize + 28.dp)
+                                                .graphicsLayer {
+                                                    translationX = shownArtworkX * 0.7f
+                                                    alpha = glowAlpha
+                                                }
+                                                .background(
+                                                    Brush.radialGradient(
+                                                        0.0f to ambientColor.copy(alpha = 0.50f),
+                                                        0.50f to ambientCompanion.copy(alpha = 0.22f),
+                                                        1.0f to Color.Transparent,
+                                                    ),
+                                                    shape = CircleShape,
+                                                ),
+                                        )
+
                                         Surface(
                                             shape = RoundedCornerShape(32.dp),
                                             color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f),
@@ -1170,14 +1194,14 @@ private fun FullPlayer(
                                                 1.dp,
                                                 Brush.linearGradient(
                                                     listOf(
-                                                        Color.White.copy(alpha = 0.28f),
-                                                        ambientColor.copy(alpha = 0.34f),
-                                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.16f),
+                                                        Color.White.copy(alpha = 0.30f),
+                                                        ambientColor.copy(alpha = 0.38f),
+                                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
                                                     ),
                                                 ),
                                             ),
                                             tonalElevation = 6.dp,
-                                            shadowElevation = 20.dp,
+                                            shadowElevation = 24.dp,
                                             modifier = Modifier
                                                 .size(artworkSize)
                                                 .graphicsLayer {
@@ -1364,11 +1388,11 @@ private fun FullPlayer(
                                                 track.title,
                                                 style = MaterialTheme.typography.headlineSmall.copy(
                                                     letterSpacing = (-0.35).sp,
+                                                    fontWeight = FontWeight.ExtraBold,
                                                 ),
-                                                fontWeight = FontWeight.ExtraBold,
                                                 color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis,
+                                                maxLines = 1,
+                                                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
                                             )
                                             Spacer(Modifier.height(4.dp))
                                             val splitArtists = remember(track.artist) {
@@ -1411,14 +1435,14 @@ private fun FullPlayer(
                                         Surface(
                                             onClick = { onTabChange(FullPlayerTab.LYRICS) },
                                             shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
                                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                             border = BorderStroke(
                                                 1.dp,
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                                             ),
-                                            tonalElevation = 1.dp,
-                                            shadowElevation = 4.dp,
+                                            tonalElevation = 2.dp,
+                                            shadowElevation = 6.dp,
                                             modifier = Modifier.size(50.dp),
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
@@ -1579,15 +1603,15 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::previous,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
             border = BorderStroke(
                 1.dp,
                 if (isTranslucent) Color.White.copy(alpha = 0.14f)
-                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
+                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
             ),
-            tonalElevation = if (isTranslucent) 0.dp else 1.dp,
-            shadowElevation = if (isTranslucent) 0.dp else 3.dp,
+            tonalElevation = if (isTranslucent) 0.dp else 2.dp,
+            shadowElevation = if (isTranslucent) 0.dp else 4.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1600,12 +1624,12 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary,
             contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
             border = BorderStroke(
-                1.dp,
-                if (isTranslucent) Color.White.copy(alpha = 0.52f)
-                else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f),
+                1.5.dp,
+                if (isTranslucent) Color.White.copy(alpha = 0.55f)
+                else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.28f),
             ),
-            tonalElevation = if (isTranslucent) 0.dp else 4.dp,
-            shadowElevation = if (isTranslucent) 10.dp else 12.dp,
+            tonalElevation = if (isTranslucent) 0.dp else 6.dp,
+            shadowElevation = if (isTranslucent) 10.dp else 14.dp,
             modifier = Modifier.size(if (isTranslucent) 72.dp else 76.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1623,15 +1647,15 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::next,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
             border = BorderStroke(
                 1.dp,
                 if (isTranslucent) Color.White.copy(alpha = 0.14f)
-                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
+                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
             ),
-            tonalElevation = if (isTranslucent) 0.dp else 1.dp,
-            shadowElevation = if (isTranslucent) 0.dp else 3.dp,
+            tonalElevation = if (isTranslucent) 0.dp else 2.dp,
+            shadowElevation = if (isTranslucent) 0.dp else 4.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1643,6 +1667,50 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
 
 @Composable
 private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, isTranslucent: Boolean = false) {
+    val shuffleActive = state.shuffleEnabled
+    val repeatActive = state.repeatMode != Player.REPEAT_MODE_OFF
+
+    val shuffleBg by animateColorAsState(
+        targetValue = when {
+            isTranslucent && shuffleActive -> Color.White.copy(alpha = 0.22f)
+            isTranslucent -> Color.White.copy(alpha = 0.12f)
+            shuffleActive -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f)
+        },
+        animationSpec = tween(ExpressiveMotion.Quick),
+        label = "shuffleBg",
+    )
+    val shuffleContent by animateColorAsState(
+        targetValue = when {
+            isTranslucent && shuffleActive -> Color.White
+            isTranslucent -> Color.White.copy(alpha = 0.85f)
+            shuffleActive -> MaterialTheme.colorScheme.onPrimaryContainer
+            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
+        },
+        animationSpec = tween(ExpressiveMotion.Quick),
+        label = "shuffleContent",
+    )
+    val repeatBg by animateColorAsState(
+        targetValue = when {
+            isTranslucent && repeatActive -> Color.White.copy(alpha = 0.22f)
+            isTranslucent -> Color.White.copy(alpha = 0.12f)
+            repeatActive -> MaterialTheme.colorScheme.primaryContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f)
+        },
+        animationSpec = tween(ExpressiveMotion.Quick),
+        label = "repeatBg",
+    )
+    val repeatContent by animateColorAsState(
+        targetValue = when {
+            isTranslucent && repeatActive -> Color.White
+            isTranslucent -> Color.White.copy(alpha = 0.85f)
+            repeatActive -> MaterialTheme.colorScheme.onPrimaryContainer
+            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
+        },
+        animationSpec = tween(ExpressiveMotion.Quick),
+        label = "repeatContent",
+    )
+
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(if (isTranslucent) 10.dp else 8.dp),
@@ -1651,27 +1719,17 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         Surface(
             onClick = player::toggleShuffle,
             shape = CircleShape,
-            color = when {
-                isTranslucent && state.shuffleEnabled -> Color.White.copy(alpha = 0.22f)
-                isTranslucent -> Color.White.copy(alpha = 0.12f)
-                state.shuffleEnabled -> MaterialTheme.colorScheme.primaryContainer
-                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f)
-            },
-            contentColor = when {
-                isTranslucent && state.shuffleEnabled -> Color.White
-                isTranslucent -> Color.White.copy(alpha = 0.85f)
-                state.shuffleEnabled -> MaterialTheme.colorScheme.onPrimaryContainer
-                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
-            },
+            color = shuffleBg,
+            contentColor = shuffleContent,
             border = BorderStroke(
                 1.dp,
                 when {
                     isTranslucent -> Color.White.copy(alpha = 0.16f)
-                    state.shuffleEnabled -> MaterialTheme.colorScheme.primary.copy(alpha = 0.40f)
+                    shuffleActive -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
                     else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
                 },
             ),
-            tonalElevation = 1.dp,
+            tonalElevation = if (shuffleActive) 2.dp else 1.dp,
             shadowElevation = 2.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
@@ -1683,8 +1741,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             shape = RoundedCornerShape(24.dp),
             color = when {
                 isTranslucent -> Color.White.copy(alpha = 0.12f)
-                state.isQobuz -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f)
-                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f)
+                state.isQobuz -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f)
             },
             contentColor = when {
                 isTranslucent -> Color.White
@@ -1695,7 +1753,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
                 1.dp,
                 when {
                     isTranslucent -> Color.White.copy(alpha = 0.16f)
-                    state.isQobuz -> MaterialTheme.colorScheme.primary.copy(alpha = 0.40f)
+                    state.isQobuz -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
                     else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
                 },
             ),
@@ -1727,27 +1785,17 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         Surface(
             onClick = player::cycleRepeatMode,
             shape = CircleShape,
-            color = when {
-                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White.copy(alpha = 0.22f)
-                isTranslucent -> Color.White.copy(alpha = 0.12f)
-                state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.primaryContainer
-                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f)
-            },
-            contentColor = when {
-                isTranslucent && state.repeatMode != Player.REPEAT_MODE_OFF -> Color.White
-                isTranslucent -> Color.White.copy(alpha = 0.85f)
-                state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.onPrimaryContainer
-                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
-            },
+            color = repeatBg,
+            contentColor = repeatContent,
             border = BorderStroke(
                 1.dp,
                 when {
                     isTranslucent -> Color.White.copy(alpha = 0.16f)
-                    state.repeatMode != Player.REPEAT_MODE_OFF -> MaterialTheme.colorScheme.primary.copy(alpha = 0.40f)
+                    repeatActive -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
                     else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
                 },
             ),
-            tonalElevation = 1.dp,
+            tonalElevation = if (repeatActive) 2.dp else 1.dp,
             shadowElevation = 2.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
