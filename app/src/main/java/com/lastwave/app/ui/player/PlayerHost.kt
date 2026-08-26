@@ -941,10 +941,10 @@ private fun FullPlayer(
                                     Color.Transparent,
                                 ),
                                 center = androidx.compose.ui.geometry.Offset(
-                                    size.width * 0.5f,
-                                    size.height * 0.42f,
+                                    constraints.maxWidth * 0.5f,
+                                    constraints.maxHeight * 0.42f,
                                 ),
-                                radius = maxOf(size.width, size.height) * 0.92f,
+                                radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.92f,
                             ),
                         ),
                 )
@@ -1342,7 +1342,7 @@ private fun FullPlayer(
                                         // Optional second line: album / source — only if it adds value, kept whisper-light
                                         val subline = remember(track.album, state.sourceLabel) {
                                             when {
-                                                track.album.isNotBlank() -> track.album
+                                                !track.album.isNullOrBlank() -> track.album
                                                 state.sourceLabel.isNotBlank() && state.sourceLabel != "LastWave" -> state.sourceLabel
                                                 else -> null
                                             }

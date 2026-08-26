@@ -463,52 +463,54 @@ class NativeProcessingAudioSink(
      * for. Returns false (and leaves the engine stopped) when no trustworthy
      * native configuration could be established.
      */
-    private fun configureNative(format: Format): Boolean = try {
-        // Reuse a healthy Oboe stream across tracks and seeks: only the ring
-        // content is dropped. A full reopen is reserved for a dead stream.
-        val reused = engine.isRunning &&
-            engine.outputSampleRate in MIN_OUTPUT_SAMPLE_RATE_HZ..MAX_OUTPUT_SAMPLE_RATE_HZ
-        if (reused) {
-            engine.flushOutput()
-        } else {
-            if (!engine.start(0)) return false
-        }
-        // Read-back verification: this is the single source of truth for what
-        // the device will clock out. A Samsung path reporting 48 kHz while we
-        // hinted something else lands here as 48 kHz — everything downstream
-        // (resampler override, speed processor, position math) keys off it.
-        val nativeRate = engine.outputSampleRate
-        if (nativeRate !in MIN_OUTPUT_SAMPLE_RATE_HZ..MAX_OUTPUT_SAMPLE_RATE_HZ) {
+    private fun configureNative(format: Format): Boolean {
+        return try {
+            // Reuse a healthy Oboe stream across tracks and seeks: only the ring
+            // content is dropped. A full reopen is reserved for a dead stream.
+            val reused = engine.isRunning &&
+                engine.outputSampleRate in MIN_OUTPUT_SAMPLE_RATE_HZ..MAX_OUTPUT_SAMPLE_RATE_HZ
+            if (reused) {
+                engine.flushOutput()
+            } else {
+                if (!engine.start(0)) return false
+            }
+            // Read-back verification: this is the single source of truth for what
+            // the device will clock out. A Samsung path reporting 48 kHz while we
+            // hinted something else lands here as 48 kHz — everything downstream
+            // (resampler override, speed processor, position math) keys off it.
+            val nativeRate = engine.outputSampleRate
+            if (nativeRate !in MIN_OUTPUT_SAMPLE_RATE_HZ..MAX_OUTPUT_SAMPLE_RATE_HZ) {
+                engine.stop()
+                return false
+            }
+            if (!reused || nativeRate != outputSampleRate) {
+                PlaybackDiagnostics.event(
+                    TAG,
+                    "Native output ${if (reused) "reused" else "open"}: actual=$nativeRate Hz" +
+                        " (requested=${engine.requestedSampleRate}, opens=${engine.streamOpenCount}," +
+                        " restarts=${engine.streamRestartCount}," +
+                        " adapted=${engine.rateAdaptationCount})",
+                )
+            }
+            outputSampleRate = nativeRate
+            processor.setOutputSampleRateOverride(nativeRate)
+            processor.setTrimFrameCount(format.encoderDelay, format.encoderPadding)
+            processorOutputFormat = processor.configure(AudioProcessor.AudioFormat(format))
+            processor.flush()
+            speedProcessor.configure(processorOutputFormat, playbackParameters)
+            engine.setOutputVolume(volume)
+            engine.setPlaying(playing)
+            true
+        } catch (error: Exception) {
+            Log.e(TAG, "Native Oboe configuration failed; using Android audio", error)
+            PlaybackDiagnostics.event(TAG, "Native configure failed: ${error.message}")
             engine.stop()
-            return false
+            false
+        } catch (error: LinkageError) {
+            Log.e(TAG, "Native Oboe symbols unavailable; using Android audio", error)
+            engine.stop()
+            false
         }
-        if (!reused || nativeRate != outputSampleRate) {
-            PlaybackDiagnostics.event(
-                TAG,
-                "Native output ${if (reused) "reused" else "open"}: actual=$nativeRate Hz" +
-                    " (requested=${engine.requestedSampleRate}, opens=${engine.streamOpenCount}," +
-                    " restarts=${engine.streamRestartCount}," +
-                    " adapted=${engine.rateAdaptationCount})",
-            )
-        }
-        outputSampleRate = nativeRate
-        processor.setOutputSampleRateOverride(nativeRate)
-        processor.setTrimFrameCount(format.encoderDelay, format.encoderPadding)
-        processorOutputFormat = processor.configure(AudioProcessor.AudioFormat(format))
-        processor.flush()
-        speedProcessor.configure(processorOutputFormat, playbackParameters)
-        engine.setOutputVolume(volume)
-        engine.setPlaying(playing)
-        true
-    } catch (error: Exception) {
-        Log.e(TAG, "Native Oboe configuration failed; using Android audio", error)
-        PlaybackDiagnostics.event(TAG, "Native configure failed: ${error.message}")
-        engine.stop()
-        false
-    } catch (error: LinkageError) {
-        Log.e(TAG, "Native Oboe symbols unavailable; using Android audio", error)
-        engine.stop()
-        false
     }
 
     private fun restartNativeOutput() {
