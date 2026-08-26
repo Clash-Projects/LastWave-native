@@ -191,6 +191,7 @@ class TrackDownloadManager @Inject constructor(
                     val best = runCatching { innerTube.findBestMatch(title, artist) }.getOrNull()
                     if (resolvedArtworkUrl == null) {
                         resolvedArtworkUrl = best?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                    }
                     if (resolvedAlbum == null) {
                         resolvedAlbum = best?.album?.takeIf { it.isNotBlank() }
                     }
