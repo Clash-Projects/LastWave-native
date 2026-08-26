@@ -1690,44 +1690,11 @@ private fun FullPlayer(
 
 @Composable
 private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit, isTranslucent: Boolean = false) {
-    var dragging by remember { mutableStateOf(false) }
-    var dragValue by remember { mutableFloatStateOf(0f) }
-    val end = state.durationMs.coerceAtLeast(1).toFloat()
-    val shown = if (dragging) dragValue else state.positionMs.coerceIn(0, state.durationMs.coerceAtLeast(0)).toFloat()
-    Column(Modifier.fillMaxWidth()) {
-        Slider(
-            value = shown.coerceIn(0f, end),
-            onValueChange = { dragging = true; dragValue = it },
-            onValueChangeFinished = { onSeek(dragValue.toLong()); dragging = false },
-            valueRange = 0f..end,
-            enabled = state.durationMs > 0,
-            modifier = Modifier.fillMaxWidth(),
-            colors = if (isTranslucent) {
-                SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.White.copy(alpha = 0.96f),
-                    inactiveTrackColor = Color.White.copy(alpha = 0.18f),
-                    activeTickColor = Color.Transparent,
-                    inactiveTickColor = Color.Transparent,
-                    disabledThumbColor = Color.White.copy(alpha = 0.52f),
-                    disabledActiveTrackColor = Color.White.copy(alpha = 0.40f),
-                    disabledInactiveTrackColor = Color.White.copy(alpha = 0.14f),
-                )
-            } else SliderDefaults.colors(),
-        )
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(
-                formatTime(shown.toLong()),
-                style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
-                color = if (isTranslucent) Color.White.copy(alpha = 0.64f) else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                "−${formatTime((state.durationMs - shown.toLong()).coerceAtLeast(0))}",
-                style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
-                color = if (isTranslucent) Color.White.copy(alpha = 0.64f) else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+    WavySeekBar(
+        state = state,
+        onSeek = onSeek,
+        isTranslucent = isTranslucent,
+    )
 }
 
 @Composable
