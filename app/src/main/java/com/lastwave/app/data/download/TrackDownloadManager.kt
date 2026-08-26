@@ -544,7 +544,7 @@ class TrackDownloadManager @Inject constructor(
                 val isCancel = error is java.io.InterruptedIOException ||
                     error.message?.contains("canceled", ignoreCase = true) == true ||
                     error.message?.contains("Socket closed", ignoreCase = true) == true ||
-                    !job.isActive
+                    !coroutineContext.isActive
                 if (isCancel) {
                     destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
                     destinationFile?.let { runCatching { if (it.exists()) it.delete() } }

@@ -346,6 +346,49 @@ private suspend fun snapshotFlowNearEnd(listState: LazyListState, onNearEnd: () 
 }
 
 @Composable
+private fun HeaderRow(
+    displayUsername: String,
+    isViewingFriend: Boolean,
+    onClick: () -> Unit,
+    viewModel: HomeViewModel,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Surface(
+            onClick = onClick,
+            shape = BadgePillShape,
+            color = if (isViewingFriend) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    displayUsername.ifBlank { "—" },
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isViewingFriend) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                )
+                if (isViewingFriend) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        Icons.Filled.People,
+                        contentDescription = "Switch profile",
+                        modifier = Modifier.size(15.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+        }
+
+        LiveListenTimer(viewModel)
+    }
+}
+
+@Composable
 private fun LiveListenTimer(viewModel: HomeViewModel) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val listenElapsedSeconds by viewModel.listenElapsedSeconds.collectAsStateWithLifecycle()

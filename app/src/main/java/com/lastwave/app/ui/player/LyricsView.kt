@@ -114,7 +114,7 @@ fun LyricsPanel(
     val liquidGlass = LocalLiquidGlass.current
 
     // High-frequency live progress stream
-    val progress by (progressState ?: player.progress).collectAsStateWithLifecycle(
+    val progress by (progressState ?: player.progressState).collectAsStateWithLifecycle(
         initialValue = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs),
     )
 
