@@ -44,9 +44,27 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * Material Design 3 Translucent Frosted Glass Waveform Seekbar.
- * Perfectly harmonized with Material 3 dynamic color scheme, with 3 frosted glass
- * translucent wave layers, delicate crest highlights, and smooth quintic convergence.
+ * Shifts the lightness/value of a Compose Color by a subtle amount
+ * to create refined, minimalistic tonal gradients within the same palette.
+ */
+private fun Color.shiftLightness(lightnessDelta: Float): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.RGBToHSV(
+        (red * 255).toInt().coerceIn(0, 255),
+        (green * 255).toInt().coerceIn(0, 255),
+        (blue * 255).toInt().coerceIn(0, 255),
+        hsv,
+    )
+    hsv[2] = (hsv[2] + lightnessDelta).coerceIn(0.1f, 1.0f)
+    val rgb = android.graphics.Color.HSVToColor(hsv)
+    return Color(rgb)
+}
+
+/**
+ * Material Design 3 Frosted Glass Waveform Seekbar.
+ * Features 3 frosted glass wave layers with a subtle horizontal gradient transition
+ * from a slightly lighter hue at the start to a slightly deeper/richer hue at the
+ * current playback position.
  */
 @Composable
 fun WavySeekBar(
@@ -209,7 +227,7 @@ fun WavySeekBar(
                 )
             }
 
-            // 2. Active 3-Layer Material Frosted Glass Waves: Confined strictly to [0, thumbX]
+            // 2. Active 3-Layer Material Frosted Glass Waves with Progress Hue Shift
             if (thumbX > 0f) {
                 val clipBounds = Path().apply {
                     addRoundRect(
@@ -272,63 +290,96 @@ fun WavySeekBar(
                     val (filled2, contour2) = buildFilledWave(waveLength2Px, amp2, currPhase2)
                     val (filled3, contour3) = buildFilledWave(waveLength3Px, amp3, currPhase3)
 
-                    // Layer 1: Deepest Ambient Frosted Glass Layer (~22% opacity)
+                    val activeWidth = thumbX.coerceAtLeast(1f)
+
+                    // Layer 1: Deepest Ambient Glass (Light tone at 0 -> slightly deeper at thumbX)
+                    val layer1Light = tertiaryColor.shiftLightness(+0.08f)
+                    val layer1Deep = tertiaryColor.shiftLightness(-0.06f)
                     drawPath(
                         path = filled1,
-                        brush = Brush.verticalGradient(
+                        brush = Brush.linearGradient(
                             colors = listOf(
-                                tertiaryColor.copy(alpha = if (isTranslucent) 0.25f else 0.22f),
-                                tertiaryColor.copy(alpha = if (isTranslucent) 0.08f else 0.05f),
+                                layer1Light.copy(alpha = if (isTranslucent) 0.26f else 0.24f),
+                                layer1Deep.copy(alpha = if (isTranslucent) 0.08f else 0.06f),
                             ),
-                            startY = centerY - 20.dp.toPx(),
-                            endY = bottomY,
+                            start = Offset(0f, centerY - 20.dp.toPx()),
+                            end = Offset(activeWidth, bottomY),
                         ),
                     )
                     drawPath(
                         path = contour1,
-                        color = tertiaryColor.copy(alpha = if (isTranslucent) 0.35f else 0.30f),
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                layer1Light.copy(alpha = if (isTranslucent) 0.38f else 0.34f),
+                                layer1Deep.copy(alpha = if (isTranslucent) 0.30f else 0.26f),
+                            ),
+                            startX = 0f,
+                            endX = activeWidth,
+                        ),
                         style = Stroke(width = 0.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 2: Middle Frosted Glass Layer (~48% opacity)
+                    // Layer 2: Middle Frosted Glass Layer
+                    val layer2Light = secondaryColor.shiftLightness(+0.07f)
+                    val layer2Deep = secondaryColor.shiftLightness(-0.06f)
                     drawPath(
                         path = filled2,
-                        brush = Brush.verticalGradient(
+                        brush = Brush.linearGradient(
                             colors = listOf(
-                                secondaryColor.copy(alpha = if (isTranslucent) 0.52f else 0.48f),
-                                secondaryColor.copy(alpha = if (isTranslucent) 0.20f else 0.15f),
+                                layer2Light.copy(alpha = if (isTranslucent) 0.54f else 0.50f),
+                                layer2Deep.copy(alpha = if (isTranslucent) 0.22f else 0.18f),
                             ),
-                            startY = centerY - 15.dp.toPx(),
-                            endY = bottomY,
+                            start = Offset(0f, centerY - 15.dp.toPx()),
+                            end = Offset(activeWidth, bottomY),
                         ),
                     )
                     drawPath(
                         path = contour2,
-                        color = secondaryColor.copy(alpha = if (isTranslucent) 0.65f else 0.58f),
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                layer2Light.copy(alpha = if (isTranslucent) 0.68f else 0.62f),
+                                layer2Deep.copy(alpha = if (isTranslucent) 0.58f else 0.52f),
+                            ),
+                            startX = 0f,
+                            endX = activeWidth,
+                        ),
                         style = Stroke(width = 1.1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 3: Foreground Luminous Glass Layer (~82% opacity)
+                    // Layer 3: Foreground Luminous Glass Ribbon
+                    val layer3Light = primaryColor.shiftLightness(+0.08f)
+                    val layer3Deep = primaryColor.shiftLightness(-0.06f)
                     drawPath(
                         path = filled3,
-                        brush = Brush.verticalGradient(
+                        brush = Brush.linearGradient(
                             colors = listOf(
-                                primaryColor.copy(alpha = if (isTranslucent) 0.88f else 0.82f),
-                                primaryColor.copy(alpha = if (isTranslucent) 0.45f else 0.38f),
+                                layer3Light.copy(alpha = if (isTranslucent) 0.92f else 0.88f),
+                                layer3Deep.copy(alpha = if (isTranslucent) 0.52f else 0.45f),
                             ),
-                            startY = centerY - 10.dp.toPx(),
-                            endY = bottomY,
+                            start = Offset(0f, centerY - 10.dp.toPx()),
+                            end = Offset(activeWidth, bottomY),
                         ),
                     )
                     drawPath(
                         path = contour3,
-                        color = primaryColor.copy(alpha = if (isTranslucent) 0.95f else 0.90f),
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                layer3Light.copy(alpha = if (isTranslucent) 0.98f else 0.95f),
+                                layer3Deep.copy(alpha = if (isTranslucent) 0.90f else 0.85f),
+                            ),
+                            startX = 0f,
+                            endX = activeWidth,
+                        ),
                         style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // 3. Crisp Baseline Bar
+                    // 3. Crisp Baseline Bar with subtle light-to-dark gradient towards current playback
                     drawLine(
-                        color = primaryColor,
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(layer3Light, layer3Deep),
+                            startX = 0f,
+                            endX = activeWidth,
+                        ),
                         start = Offset(0f, centerY),
                         end = Offset(thumbX, centerY),
                         strokeWidth = baseTrackThicknessPx,
@@ -337,17 +388,18 @@ fun WavySeekBar(
                 }
             }
 
-            // 4. Leading Thumb Indicator
+            // 4. Leading Thumb Indicator (At current playing position)
             if (state.durationMs > 0) {
+                val thumbColor = primaryColor.shiftLightness(-0.04f)
                 // Soft glow halo
                 drawCircle(
-                    color = primaryColor.copy(alpha = 0.25f),
+                    color = thumbColor.copy(alpha = 0.28f),
                     radius = thumbRadiusPx + 3.dp.toPx(),
                     center = Offset(thumbX, centerY),
                 )
-                // Solid center circle matching Material theme
+                // Solid center circle
                 drawCircle(
-                    color = primaryColor,
+                    color = thumbColor,
                     radius = thumbRadiusPx,
                     center = Offset(thumbX, centerY),
                 )
