@@ -399,7 +399,7 @@ class MusicPlayer @Inject constructor(
             ): androidx.media3.exoplayer.audio.AudioSink {
                 val platformSink = DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(true)
-                    .setEnableAudioTrackPlaybackParams(true)
+                    .setEnableAudioTrackPlaybackParams(false)
                     .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
                     .build()
                 val engine = runCatching { nativeAudioEngine.get() }.getOrNull()
@@ -418,27 +418,8 @@ class MusicPlayer @Inject constructor(
             // platform decoder for anything FFmpeg rejects.
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
             setEnableDecoderFallback(true)
-            setMediaCodecSelector(flacSafeMediaCodecSelector)
-            setEnableAudioTrackPlaybackParams(true)
-            setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
-                val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(
-                    mimeType,
-                    requiresSecureDecoder,
-                    requiresTunnelingDecoder,
-                )
-                if (mimeType.equals(MimeTypes.AUDIO_FLAC, ignoreCase = true) || mimeType.equals("audio/flac", ignoreCase = true)) {
-                    // Samsung's proprietary FLAC decoders (c2.sec.flac.decoder / OMX.SEC.FLAC.Decoder / OMX.Exynos.FLAC.Decoder)
-                    // have a known bug on One UI where 24-bit / Hi-Res audio output PCM encoding is corrupted or
-                    // misreported, leading to 1.5x fast playback and heavy digital distortion.
-                    // Deprioritize vendor decoders so standard reference AOSP decoders (c2.android.flac.decoder) are used first.
-                    decoders.sortedBy { decoder ->
-                        val name = decoder.name.lowercase()
-                        if (name.contains("sec.") || name.contains("exynos")) 1 else 0
-                    }
-                } else {
-                    decoders
-                }
-            }
+            setEnableAudioTrackPlaybackParams(false)
+            setMediaCodecSelector(accurateAudioMediaCodecSelector)
         }
 
         ExoPlayer.Builder(appContext, renderersFactory)
@@ -1404,24 +1385,23 @@ private fun PlayableTrack.queueKey(): String = "$title|$artist".lowercase()
  * Every other mime type keeps Android's default codec order untouched.
  */
 @OptIn(UnstableApi::class)
-private val flacSafeMediaCodecSelector =
+private val accurateAudioMediaCodecSelector =
     MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
         val decoderInfos = MediaCodecSelector.DEFAULT.getDecoderInfos(
             mimeType,
             requiresSecureDecoder,
             requiresTunnelingDecoder,
         )
-        if (mimeType.equals(MimeTypes.AUDIO_FLAC, ignoreCase = true)) {
-            decoderInfos.sortedBy { info -> flacDecoderPriority(info.name) }
-        } else {
-            decoderInfos
-        }
+        // Vendor decoders on certain OEM chips (Samsung SEC/Exynos, Qualcomm QTI) have known
+        // clock rate misalignments when feeding 44.1kHz audio into a 48kHz audio HAL.
+        // Prioritize standard reference AOSP software decoders (c2.android.*, OMX.google.*) over vendor ones.
+        decoderInfos.sortedBy { info -> audioDecoderPriority(info.name) }
     }
 
-/** 0 = trusted order kept, 1 = known-broken Samsung vendor FLAC decoder (sent last). */
-private fun flacDecoderPriority(name: String): Int {
+/** 0 = trusted reference decoder, 1 = proprietary vendor decoder (demoted to avoid clock skew). */
+private fun audioDecoderPriority(name: String): Int {
     val lower = name.lowercase()
-    return if (lower.contains("sec.") || lower.contains("exynos")) 1 else 0
+    return if (lower.contains("sec.") || lower.contains("exynos") || lower.contains(".qti.")) 1 else 0
 }
 
 private fun PlayableTrack.searchQueueTitleKey(): String = title

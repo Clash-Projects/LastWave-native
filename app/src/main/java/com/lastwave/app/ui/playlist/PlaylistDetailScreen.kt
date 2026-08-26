@@ -541,6 +541,7 @@ fun PlaylistDetailScreen(
 
                     Spacer(Modifier.height(6.dp))
                 }
+            }
 
             // Track items
             if (displayTracks.isEmpty()) {
@@ -596,8 +597,6 @@ fun PlaylistDetailScreen(
                     }
                 }
             }
-            }
-
         }
 
         // 2. Floating Top Bar with Frosted Glass styling & Smooth Scrolled Header
