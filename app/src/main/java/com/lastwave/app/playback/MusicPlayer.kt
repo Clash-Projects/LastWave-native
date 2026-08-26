@@ -482,9 +482,10 @@ class MusicPlayer @Inject constructor(
                         sleepTimerStep = 0
                         player.pause()
                     }
-                    val pos = player.currentPosition.coerceAtLeast(0)
-                    val buf = player.bufferedPosition.coerceAtLeast(0)
                     val dur = player.duration.takeIf { value -> value > 0 } ?: _state.value.durationMs
+                    val rawPos = player.currentPosition.coerceAtLeast(0)
+                    val pos = if (dur > 0) rawPos.coerceIn(0L, dur) else rawPos
+                    val buf = player.bufferedPosition.coerceAtLeast(0)
                     val sleepRemaining = remaining?.coerceAtLeast(0)
                     val previous = _state.value
                     val unchanged = !player.isPlaying &&
@@ -1241,6 +1242,9 @@ class MusicPlayer @Inject constructor(
             (current?.videoId != null && current.videoId == previous.current?.videoId)
         val isBuffering = player.playbackState == Player.STATE_BUFFERING ||
             (player.playWhenReady && player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0)
+        val dur = player.duration.takeIf { it > 0 } ?: 0L
+        val rawPos = player.currentPosition.coerceAtLeast(0)
+        val pos = if (dur > 0) rawPos.coerceIn(0L, dur) else rawPos
         _state.value = MusicPlayerState(
             current = current,
             queue = queue,
@@ -1249,9 +1253,9 @@ class MusicPlayer @Inject constructor(
             isEndlessQueue = previous.isEndlessQueue && discoverQueueActive,
             isPlaying = player.isPlaying,
             isBuffering = isBuffering,
-            positionMs = player.currentPosition.coerceAtLeast(0),
+            positionMs = pos,
             bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0),
-            durationMs = player.duration.takeIf { it > 0 } ?: 0,
+            durationMs = dur,
             shuffleEnabled = player.shuffleModeEnabled,
             repeatMode = player.repeatMode,
             speed = player.playbackParameters.speed,

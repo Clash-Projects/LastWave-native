@@ -8,24 +8,27 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
@@ -36,7 +39,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.lastwave.app.playback.MusicPlayerState
@@ -76,13 +78,27 @@ fun WavySeekBar(
     modifier: Modifier = Modifier,
     isTranslucent: Boolean = false,
 ) {
-    var dragging by remember { mutableStateOf(false) }
-    var dragFraction by remember { mutableFloatStateOf(0f) }
+    val trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" }
+    val interactionSource = remember(trackKey) { MutableInteractionSource() }
+    val dragging by interactionSource.collectIsDraggedAsState()
+    var dragPositionMs by remember(trackKey) { mutableFloatStateOf(0f) }
 
-    val durationMs = state.durationMs.coerceAtLeast(1)
-    val currentFraction = (state.positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-    val shownFraction = if (dragging) dragFraction else currentFraction
-    val shownMs = (shownFraction * durationMs).toLong()
+    val durationMs = state.durationMs.coerceAtLeast(0L)
+    val boundedPositionMs = if (durationMs > 0L) {
+        state.positionMs.coerceIn(0L, durationMs)
+    } else {
+        0L
+    }
+    val shownMs = if (dragging) {
+        dragPositionMs.toLong().coerceIn(0L, durationMs)
+    } else {
+        boundedPositionMs
+    }
+    val shownFraction = if (durationMs > 0L) {
+        (shownMs.toDouble() / durationMs.toDouble()).toFloat().coerceIn(0f, 1f)
+    } else {
+        0f
+    }
 
     // 100% Material Design 3 Harmonized Theme Colors
     val primaryColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
@@ -171,46 +187,12 @@ fun WavySeekBar(
     val transitionLengthPx = with(density) { 28.dp.toPx() }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Canvas(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(50.dp)
-                .pointerInput(state.durationMs) {
-                    if (state.durationMs <= 0) return@pointerInput
-                    detectTapGestures(
-                        onPress = { offset ->
-                            val fraction = (offset.x / size.width).coerceIn(0f, 1f)
-                            dragging = true
-                            dragFraction = fraction
-                            val released = tryAwaitRelease()
-                            if (released) {
-                                onSeek((dragFraction * durationMs).toLong())
-                            }
-                            dragging = false
-                        },
-                    )
-                }
-                .pointerInput(state.durationMs) {
-                    if (state.durationMs <= 0) return@pointerInput
-                    detectHorizontalDragGestures(
-                        onDragStart = { offset ->
-                            dragging = true
-                            dragFraction = (offset.x / size.width).coerceIn(0f, 1f)
-                        },
-                        onDragEnd = {
-                            onSeek((dragFraction * durationMs).toLong())
-                            dragging = false
-                        },
-                        onDragCancel = {
-                            dragging = false
-                        },
-                        onHorizontalDrag = { change, _ ->
-                            change.consume()
-                            dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
-                        },
-                    )
-                },
+                .height(50.dp),
         ) {
+            Canvas(modifier = Modifier.matchParentSize()) {
             val width = size.width
             val height = size.height
             val centerY = height / 2f + 7.dp.toPx()
@@ -407,6 +389,25 @@ fun WavySeekBar(
                     center = Offset(thumbX, centerY),
                 )
             }
+            }
+
+            // Let Material's battle-tested slider own touch arbitration,
+            // cancellation and accessibility while the Canvas supplies the
+            // custom wave visuals. The previous competing gesture
+            // recognizers could leave dragging=true forever after cancellation.
+            Slider(
+                value = shownMs.toFloat(),
+                onValueChange = { dragPositionMs = it },
+                onValueChangeFinished = {
+                    onSeek(dragPositionMs.toLong().coerceIn(0L, durationMs))
+                },
+                valueRange = 0f..durationMs.coerceAtLeast(1L).toFloat(),
+                enabled = durationMs > 0L,
+                interactionSource = interactionSource,
+                modifier = Modifier
+                    .matchParentSize()
+                    .alpha(0f),
+            )
         }
 
         Spacer(Modifier.height(2.dp))
@@ -424,7 +425,7 @@ fun WavySeekBar(
                 color = textColor,
             )
             Text(
-                text = "−${formatTime((state.durationMs - shownMs).coerceAtLeast(0))}",
+                text = "−${formatTime((durationMs - shownMs).coerceAtLeast(0))}",
                 style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
                 color = textColor,
             )

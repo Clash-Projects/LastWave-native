@@ -67,8 +67,6 @@ class NativeProcessingAudioSink(
     private var volume = 1f
     private var playbackParameters = PlaybackParameters.DEFAULT
     private var skipSilenceEnabled = false
-    private var outputStreamOffsetUs = 0L
-
     private var pendingInput: ByteBuffer? = null
     private var pendingInputLimit = 0
     private var pendingOutput: ByteBuffer = AudioProcessor.EMPTY_BUFFER
@@ -86,7 +84,11 @@ class NativeProcessingAudioSink(
      *  must be re-driven from the [isEnded] poll instead of being lost. */
     @Volatile
     private var endOfStreamDeferred = false
+    @Volatile
+    private var outputStreamOffsetUs = 0L
+    @Volatile
     private var positionAnchorMediaUs = C.TIME_UNSET
+    @Volatile
     private var positionAnchorRenderedFrames = 0L
     private var positionAdvancingNotified = false
 
@@ -171,7 +173,7 @@ class NativeProcessingAudioSink(
         val renderedDeltaFrames = (renderedFrames - positionAnchorRenderedFrames).coerceAtLeast(0L)
         val outputDurationUs = renderedDeltaFrames * MICROS_PER_SECOND / outputSampleRate
         val mediaDurationUs = (outputDurationUs * playbackParameters.speed).toLong()
-        return positionAnchorMediaUs + mediaDurationUs + outputStreamOffsetUs
+        return outputStreamOffsetUs + positionAnchorMediaUs + mediaDurationUs
     }
 
     override fun configure(format: Format, specifiedBufferSize: Int, outputChannels: IntArray?) {
@@ -340,8 +342,10 @@ class NativeProcessingAudioSink(
             }
             if (!buffer.hasRemaining()) return true
 
-            if (positionAnchorMediaUs == C.TIME_UNSET) {
-                positionAnchorMediaUs = presentationTimeUs
+            if (positionAnchorMediaUs == C.TIME_UNSET && presentationTimeUs != C.TIME_UNSET) {
+                // Match DefaultAudioSink: handleBuffer's presentation time is
+                // already in the renderer clock's coordinate system.
+                positionAnchorMediaUs = presentationTimeUs.coerceAtLeast(0L)
                 positionAnchorRenderedFrames = engine.renderedFrames
             }
             if (pendingInput == null) {
@@ -494,7 +498,7 @@ class NativeProcessingAudioSink(
         synchronized(configurationLock) {
             if (nativeActive && positionAnchorMediaUs != C.TIME_UNSET) {
                 val currentPositionUs = getCurrentPositionUs(false)
-                positionAnchorMediaUs = currentPositionUs - outputStreamOffsetUs
+                positionAnchorMediaUs = (currentPositionUs - outputStreamOffsetUs).coerceAtLeast(0L)
                 positionAnchorRenderedFrames = engine.renderedFrames
             }
             this.playbackParameters = playbackParameters
@@ -560,6 +564,7 @@ class NativeProcessingAudioSink(
             clearPosition()
             if (nativeActive) {
                 restartNativeOutput()
+                listener?.onPositionDiscontinuity()
             } else {
                 if (platformDspActive) processor.flush()
                 delegate.flush()
@@ -572,6 +577,7 @@ class NativeProcessingAudioSink(
             clearPending()
             clearEndOfStream()
             clearPosition()
+            outputStreamOffsetUs = 0L
             nativeActive = false
             platformDspActive = false
             playing = false
@@ -828,7 +834,7 @@ class NativeProcessingAudioSink(
         speedProcessor.reset()
         if (!configureNative(format)) return false
         if (capturedUs != C.TIME_UNSET) {
-            positionAnchorMediaUs = capturedUs - outputStreamOffsetUs
+            positionAnchorMediaUs = (capturedUs - outputStreamOffsetUs).coerceAtLeast(0L)
             positionAnchorRenderedFrames = engine.renderedFrames
         }
         listener?.onPositionDiscontinuity()
@@ -890,7 +896,7 @@ class NativeProcessingAudioSink(
                 speedProcessor.reset()
                 if (configureNative(format)) {
                     if (capturedUs != C.TIME_UNSET) {
-                        positionAnchorMediaUs = capturedUs - outputStreamOffsetUs
+                        positionAnchorMediaUs = (capturedUs - outputStreamOffsetUs).coerceAtLeast(0L)
                         positionAnchorRenderedFrames = engine.renderedFrames
                     }
                     PlaybackDiagnostics.event(
@@ -946,6 +952,7 @@ class NativeProcessingAudioSink(
         positionAnchorRenderedFrames = 0L
         positionAdvancingNotified = false
         lastPresentationTimeUs = 0L
+        listener?.onPositionDiscontinuity()
     }
 
     /** Float32 -> TPDF-dithered -> Media3 Sonic (Int16) -> Float32, active only away from 1x. */

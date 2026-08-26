@@ -879,36 +879,44 @@ private fun FullPlayer(
     // once per track through the shared Coil loader (normally a cache hit)
     // with Palette; any failure leaves the standard surface gradient.
     val context = LocalContext.current
-    var ambientArtColor by remember(track.videoId, track.artworkUrl) { mutableStateOf<Color?>(null) }
-    LaunchedEffect(track.videoId, track.artworkUrl) {
+    var ambientPrimary by remember(track.videoId, track.artworkUrl, track.title, track.artist) { mutableStateOf<Color?>(null) }
+    var ambientSecondary by remember(track.videoId, track.artworkUrl, track.title, track.artist) { mutableStateOf<Color?>(null) }
+    var ambientTertiary by remember(track.videoId, track.artworkUrl, track.title, track.artist) { mutableStateOf<Color?>(null) }
+    LaunchedEffect(track.videoId, track.artworkUrl, track.title, track.artist) {
         val url = track.artworkUrl?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
-        ambientArtColor = withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO) {
             runCatching {
                 val request = ImageRequest.Builder(context)
                     .data(url)
                     .allowHardware(false)
-                    .size(96)
+                    .size(128)
                     .build()
                 val bitmap = ((context.imageLoader.execute(request) as? SuccessResult)?.drawable as? BitmapDrawable)?.bitmap
-                    ?: return@runCatching null
+                    ?: return@runCatching
                 val palette = Palette.from(bitmap).clearFilters().generate()
-                val swatch = palette.vibrantSwatch
-                    ?: palette.dominantSwatch
-                    ?: palette.mutedSwatch
-                    ?: return@runCatching null
-                Color(swatch.rgb)
-            }.getOrNull()
+                val p = palette.vibrantSwatch ?: palette.dominantSwatch ?: palette.mutedSwatch
+                val s = palette.lightVibrantSwatch ?: palette.darkVibrantSwatch ?: palette.mutedSwatch ?: palette.dominantSwatch
+                val t = palette.darkVibrantSwatch ?: palette.darkMutedSwatch ?: palette.dominantSwatch
+                if (p != null) ambientPrimary = Color(p.rgb)
+                if (s != null) ambientSecondary = Color(s.rgb)
+                if (t != null) ambientTertiary = Color(t.rgb)
+            }
         }
     }
     val ambientColor by animateColorAsState(
-        targetValue = ambientArtColor ?: MaterialTheme.colorScheme.primary,
+        targetValue = ambientPrimary ?: MaterialTheme.colorScheme.primary,
         animationSpec = tween(700),
         label = "playerAmbientColor",
     )
-    val ambientCompanion = androidx.compose.ui.graphics.lerp(
-        MaterialTheme.colorScheme.tertiary,
-        ambientColor,
-        0.42f,
+    val ambientCompanion by animateColorAsState(
+        targetValue = ambientSecondary ?: androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.tertiary, ambientColor, 0.42f),
+        animationSpec = tween(700),
+        label = "playerAmbientCompanion",
+    )
+    val ambientDeep by animateColorAsState(
+        targetValue = ambientTertiary ?: androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.secondary, ambientColor, 0.25f),
+        animationSpec = tween(700),
+        label = "playerAmbientDeep",
     )
 
     fun Modifier.playerVerticalSwipe(enabled: Boolean): Modifier = if (!enabled) this else pointerInput(track.videoId, track.title, currentTab) {
@@ -950,35 +958,35 @@ private fun FullPlayer(
             .playerVerticalSwipe(enabled = currentTab == FullPlayerTab.NOW_PLAYING),
     ) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
+            // Apple Music: Full-bleed scaled & deeply blurred artwork
             PlayerArtwork(
                 track = track,
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        alpha = 0.18f
-                        scaleX = 1.32f
-                        scaleY = 1.32f
+                        scaleX = 1.48f
+                        scaleY = 1.48f
+                        alpha = 0.76f
                     }
-                    .blur(88.dp),
+                    .blur(72.dp),
                 corner = 0.dp,
-                decodeSizePx = 160,
+                decodeSizePx = 360,
             )
-            // Artwork-led ambient light: a broad upper wash plus a quieter
-            // counter-color near the controls. Both stay behind the contrast
-            // veil so metadata and controls remain readable on vivid covers.
+
+            // Apple Music: Vibrant chromatic ambient mesh blobs
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         Brush.radialGradient(
-                            0f to ambientColor.copy(alpha = 0.34f),
-                            0.46f to ambientColor.copy(alpha = 0.11f),
+                            0f to ambientColor.copy(alpha = 0.58f),
+                            0.45f to ambientColor.copy(alpha = 0.22f),
                             1f to Color.Transparent,
                             center = androidx.compose.ui.geometry.Offset(
-                                constraints.maxWidth * 0.30f,
+                                constraints.maxWidth * 0.25f,
                                 constraints.maxHeight * 0.20f,
                             ),
-                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.82f,
+                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.85f,
                         ),
                     ),
             )
@@ -987,46 +995,61 @@ private fun FullPlayer(
                     .fillMaxSize()
                     .background(
                         Brush.radialGradient(
-                            0f to ambientCompanion.copy(alpha = 0.18f),
-                            0.58f to ambientCompanion.copy(alpha = 0.05f),
+                            0f to ambientCompanion.copy(alpha = 0.52f),
+                            0.50f to ambientCompanion.copy(alpha = 0.20f),
                             1f to Color.Transparent,
                             center = androidx.compose.ui.geometry.Offset(
-                                constraints.maxWidth * 0.92f,
-                                constraints.maxHeight * 0.66f,
+                                constraints.maxWidth * 0.88f,
+                                constraints.maxHeight * 0.65f,
                             ),
-                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.68f,
+                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.78f,
                         ),
                     ),
             )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.radialGradient(
+                            0f to ambientDeep.copy(alpha = 0.42f),
+                            0.55f to ambientDeep.copy(alpha = 0.14f),
+                            1f to Color.Transparent,
+                            center = androidx.compose.ui.geometry.Offset(
+                                constraints.maxWidth * 0.15f,
+                                constraints.maxHeight * 0.82f,
+                            ),
+                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.70f,
+                        ),
+                    ),
+            )
+
+            // Apple Music: Contrast scrim gradient (ensures text & controls are clear while preserving vibrant colors)
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            0.00f to androidx.compose.ui.graphics.lerp(
-                                MaterialTheme.colorScheme.surface,
-                                ambientColor,
-                                0.26f,
-                            ).copy(alpha = 0.74f),
-                            0.34f to MaterialTheme.colorScheme.surface.copy(alpha = 0.54f),
-                            0.68f to MaterialTheme.colorScheme.surface.copy(alpha = 0.88f),
-                            1.00f to MaterialTheme.colorScheme.surface,
+                            0.00f to Color.Black.copy(alpha = 0.35f),
+                            0.28f to Color.Black.copy(alpha = 0.15f),
+                            0.65f to Color.Black.copy(alpha = 0.40f),
+                            1.00f to Color.Black.copy(alpha = 0.72f),
                         ),
                     ),
             )
+            // Subtle edge vignette
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         Brush.radialGradient(
                             0f to Color.Transparent,
-                            0.70f to Color.Transparent,
-                            1f to MaterialTheme.colorScheme.surface.copy(alpha = 0.32f),
+                            0.65f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.30f),
                             center = androidx.compose.ui.geometry.Offset(
                                 constraints.maxWidth * 0.50f,
-                                constraints.maxHeight * 0.36f,
+                                constraints.maxHeight * 0.40f,
                             ),
-                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.78f,
+                            radius = maxOf(constraints.maxWidth, constraints.maxHeight) * 0.80f,
                         ),
                     ),
             )
@@ -1721,14 +1744,6 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             shape = CircleShape,
             color = shuffleBg,
             contentColor = shuffleContent,
-            border = BorderStroke(
-                1.dp,
-                when {
-                    isTranslucent -> Color.White.copy(alpha = 0.16f)
-                    shuffleActive -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
-                },
-            ),
             tonalElevation = if (shuffleActive) 2.dp else 1.dp,
             shadowElevation = 2.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
@@ -1749,14 +1764,6 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
                 state.isQobuz -> MaterialTheme.colorScheme.primary
                 else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
             },
-            border = BorderStroke(
-                1.dp,
-                when {
-                    isTranslucent -> Color.White.copy(alpha = 0.16f)
-                    state.isQobuz -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
-                },
-            ),
             tonalElevation = 1.dp,
             shadowElevation = 2.dp,
             modifier = Modifier.weight(1.3f).height(if (isTranslucent) 44.dp else 48.dp),
@@ -1787,14 +1794,6 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             shape = CircleShape,
             color = repeatBg,
             contentColor = repeatContent,
-            border = BorderStroke(
-                1.dp,
-                when {
-                    isTranslucent -> Color.White.copy(alpha = 0.16f)
-                    repeatActive -> MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
-                    else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f)
-                },
-            ),
             tonalElevation = if (repeatActive) 2.dp else 1.dp,
             shadowElevation = 2.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
