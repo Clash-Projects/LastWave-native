@@ -63,27 +63,33 @@ jobs:
       - name: Prepare Final APKs
         run: |
           mkdir -p final_apk
+          VERSION=$(grep 'versionName = ' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ -z "$VERSION" ]; then
+            VERSION="3.3.0"
+          fi
+          echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Building APKs for LastWave v$VERSION"
           # Compressed release (R8 + ProGuard + shrinkResources)
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
-            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v3.2.0-release.apk
+            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v${VERSION}-release.apk
           else
-            cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v3.2.0-release.apk
+            cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v${VERSION}-release.apk
           fi
           # Raw release (no minify, no shrink, no ProGuard)
           if [ -f "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" ]; then
-            cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/LastWave-v3.2.0-raw.apk
+            cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/LastWave-v${VERSION}-raw.apk
           else
-            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/LastWave-v3.2.0-raw.apk
+            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/LastWave-v${VERSION}-raw.apk
           fi
           ls -lh final_apk/
           echo "--- release (compressed) ---"
-          ls -lh final_apk/LastWave-v3.2.0-release.apk
+          ls -lh final_apk/LastWave-v${VERSION}-release.apk
           echo "--- raw (uncompressed) ---"
-          ls -lh final_apk/LastWave-v3.2.0-raw.apk
+          ls -lh final_apk/LastWave-v${VERSION}-raw.apk
 
       - name: Upload Release APKs
         uses: actions/upload-artifact@v4
         with:
-          name: LastWave-v3.2.0-APKs
+          name: LastWave-v${{ env.APP_VERSION }}-APKs
           path: final_apk/*.apk
           if-no-files-found: error
