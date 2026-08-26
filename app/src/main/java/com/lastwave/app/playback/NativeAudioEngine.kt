@@ -3,6 +3,7 @@ package com.lastwave.app.playback
 import android.util.Log
 import com.lastwave.app.data.local.SettingsPreferences
 import com.lastwave.app.data.local.EqualizerPreferences
+import com.lastwave.app.data.local.EQ_MAX_GAIN_DB
 import java.io.Closeable
 import java.nio.ByteBuffer
 import javax.inject.Inject
@@ -111,7 +112,11 @@ class NativeAudioEngine @Inject constructor(
     /** Updates the native 15-band EQ; its gains are smoothed in C++. */
     fun setEqualizer(enabled: Boolean, gainsDb: FloatArray) {
         require(gainsDb.size == EQUALIZER_BAND_COUNT) { "Expected 15 equalizer bands" }
-        withHandle(Unit) { nativeSetEqualizer(it, enabled, gainsDb) }
+        val safeGains = FloatArray(gainsDb.size) { index ->
+            val gain = gainsDb[index]
+            if (gain.isFinite()) gain.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f
+        }
+        withHandle(Unit) { nativeSetEqualizer(it, enabled, safeGains) }
     }
 
     internal fun configureMediaProcessor(

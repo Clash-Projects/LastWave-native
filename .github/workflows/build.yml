@@ -11,6 +11,8 @@ jobs:
   build:
     name: Build Release APKs
     runs-on: ubuntu-latest
+    env:
+      SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
 
     steps:
       - name: Checkout code
@@ -33,7 +35,7 @@ jobs:
         run: ./gradlew assembleRelease assembleRawRelease --stacktrace
 
       - name: Sign Release APK with Custom Key (Optional)
-        if: ${{ env.SIGNING_KEY != '' }}
+        if: env.SIGNING_KEY != ''
         uses: r0adkll/sign-android-release@v1
         id: sign_app
         with:
@@ -43,11 +45,10 @@ jobs:
           keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
           keyPassword: ${{ secrets.KEY_PASSWORD }}
         env:
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           BUILD_TOOLS_VERSION: "34.0.0"
 
       - name: Sign Raw APK with Custom Key (Optional)
-        if: ${{ env.SIGNING_KEY != '' }}
+        if: env.SIGNING_KEY != ''
         uses: r0adkll/sign-android-release@v1
         id: sign_app_raw
         with:
@@ -57,16 +58,17 @@ jobs:
           keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
           keyPassword: ${{ secrets.KEY_PASSWORD }}
         env:
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           BUILD_TOOLS_VERSION: "34.0.0"
 
       - name: Prepare Final APKs
+        id: prep_apk
         run: |
           mkdir -p final_apk
           VERSION=$(grep 'versionName = ' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
           if [ -z "$VERSION" ]; then
             VERSION="3.3.0"
           fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
           echo "Building APKs for LastWave v$VERSION"
           # Compressed release (R8 + ProGuard + shrinkResources)
@@ -90,6 +92,6 @@ jobs:
       - name: Upload Release APKs
         uses: actions/upload-artifact@v4
         with:
-          name: LastWave-v${{ env.APP_VERSION }}-APKs
+          name: LastWave-v${{ steps.prep_apk.outputs.version }}-APKs
           path: final_apk/*.apk
           if-no-files-found: error

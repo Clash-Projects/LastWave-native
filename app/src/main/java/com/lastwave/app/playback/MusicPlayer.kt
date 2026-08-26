@@ -154,6 +154,7 @@ class MusicPlayer @Inject constructor(
     private val settingsPreferences: SettingsPreferences,
     private val discoverRepository: DiscoverRepository,
     private val nativeAudioEngine: dagger.Lazy<NativeAudioEngine>,
+    private val audioEffectsEngine: AudioEffectsEngine,
     private val applicationScope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
@@ -233,6 +234,9 @@ class MusicPlayer @Inject constructor(
                 errorRetryCount = 0
                 retryMediaId = player.currentMediaItem?.mediaId
             }
+        }
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            audioEffectsEngine.attach(audioSessionId)
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (mediaItem != null) {
@@ -397,19 +401,38 @@ class MusicPlayer @Inject constructor(
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean,
             ): androidx.media3.exoplayer.audio.AudioSink {
-                val engine = runCatching { nativeAudioEngine.get() }.getOrNull()
-                val audioProcessors: Array<androidx.media3.common.audio.AudioProcessor> =
-                    if (engine?.isAvailable == true) {
-                        arrayOf(NativePcmAudioProcessor(engine))
-                    } else {
-                        emptyArray()
-                    }
-                return DefaultAudioSink.Builder(context)
+                val fallbackSink = DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(false)
                     .setEnableAudioTrackPlaybackParams(false)
-                    .setAudioProcessors(audioProcessors)
                     .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
                     .build()
+                val engine = runCatching { nativeAudioEngine.get() }.getOrNull()
+                if (engine?.isAvailable != true) {
+                    audioEffectsEngine.setFallbackRequired(true)
+                    return fallbackSink
+                }
+                val enhancedSink = try {
+                    DefaultAudioSink.Builder(context)
+                        .setEnableFloatOutput(true)
+                        .setEnableAudioTrackPlaybackParams(false)
+                        .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
+                        .build()
+                } catch (error: Exception) {
+                    android.util.Log.w("MusicPlayer", "Enhanced audio sink unavailable; using PCM16", error)
+                    audioEffectsEngine.setFallbackRequired(true)
+                    return fallbackSink
+                } catch (error: LinkageError) {
+                    android.util.Log.w("MusicPlayer", "Enhanced audio sink linkage failed; using PCM16", error)
+                    audioEffectsEngine.setFallbackRequired(true)
+                    return fallbackSink
+                }
+                audioEffectsEngine.setFallbackRequired(false)
+                return NativeProcessingAudioSink(
+                    enhancedDelegate = enhancedSink,
+                    fallbackDelegate = fallbackSink,
+                    processor = NativePcmAudioProcessor(engine),
+                    onPlatformEffectsRequired = audioEffectsEngine::setFallbackRequired,
+                )
             }
         }.apply {
             // FFmpeg-first decoding, the Poweramp/VLC model: every codec the
@@ -454,6 +477,7 @@ class MusicPlayer @Inject constructor(
         if (restored) {
             runCatching {
                 refresh(player)
+                audioEffectsEngine.attach(player.audioSessionId)
             }.onFailure {
                 android.util.Log.e("MusicPlayer", "Restored player setup failed", it)
                 _state.value = MusicPlayerState()
@@ -1398,14 +1422,11 @@ private val accurateAudioMediaCodecSelector =
         }.getOrDefault(emptyList())
         if (decoderInfos.isEmpty()) {
             emptyList()
-        } else if (mimeType.equals(MimeTypes.AUDIO_FLAC, ignoreCase = true) || mimeType.equals("audio/flac", ignoreCase = true)) {
-            // Samsung's proprietary FLAC decoders (c2.sec.flac.decoder / OMX.SEC.FLAC.Decoder / OMX.Exynos.FLAC.Decoder)
-            // have a known bug on One UI where 24-bit / Hi-Res audio output PCM encoding is corrupted or
-            // misreported, leading to 1.5x fast playback and heavy digital distortion.
-            // Deprioritize vendor decoders so standard reference AOSP decoders (c2.android.flac.decoder) are used first.
-            decoderInfos.sortedBy { info -> audioDecoderPriority(info.name) }
         } else {
-            decoderInfos
+            // Deprioritize buggy vendor decoders (Samsung One UI / Exynos hardware decoders)
+            // across audio MIME types to avoid misreported sample rates, 1.5x fast pitch shifts,
+            // or digital boundary distortion. Standard AOSP/Google reference decoders take priority.
+            decoderInfos.sortedBy { info -> audioDecoderPriority(info.name) }
         }
     }
 

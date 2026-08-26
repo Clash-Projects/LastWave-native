@@ -138,6 +138,7 @@ import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.R
 import com.lastwave.app.data.local.AccentMode
 import com.lastwave.app.data.local.EQ_BAND_FREQS_HZ
+import com.lastwave.app.data.local.EQ_MAX_GAIN_DB
 import com.lastwave.app.data.local.EqualizerPresets
 import com.lastwave.app.data.local.EqualizerSettings
 import com.lastwave.app.data.local.eqBandLabel
@@ -598,9 +599,9 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 title = "Volume Boost",
                                 subtitle = if (misc.volumeBoostEnabled) {
-                                    "Native clean gain • ${misc.volumeBoostPercent}% • -1 dBFS protected"
+                                    "Clean gain • ${misc.volumeBoostPercent}% • peak protected"
                                 } else {
-                                    "Optional native adaptive gain up to 150%"
+                                    "Optional adaptive protected gain up to 150%"
                                 },
                                 onClick = { showVolumeBoostSheet = true },
                                 position = position,
@@ -1944,7 +1945,7 @@ private fun ColorWheelSheet(onDismiss: () -> Unit, onApply: (Color) -> Unit) {
 
 // -- Experimental 15-band equalizer (Settings → Experimental → Equalizer) --
 
-private val EQ_MAX_DB = 12f
+private const val EQ_MAX_DB = EQ_MAX_GAIN_DB
 
 private fun eqBandCategory(hz: Int): String = when {
     hz <= 40 -> "SUB"

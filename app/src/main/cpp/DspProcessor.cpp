@@ -47,10 +47,11 @@ void DspProcessor::configure(double sampleRate) noexcept {
     // presence and finish with a broad air shelf. It is intentionally stronger
     // than the old -0.8/+1.2 dB two-band curve, which was effectively inaudible.
     subBassHighPass_ = Biquad::highPass(sampleRate_, 22.0, 0.7071067811865476);
-    bassFoundation_ = Biquad::peaking(sampleRate_, 88.0, 0.80, 0.7);
-    lowMidSeparation_ = Biquad::peaking(sampleRate_, 285.0, 0.85, -1.6);
-    presenceDetail_ = Biquad::peaking(sampleRate_, 3200.0, 0.78, 1.4);
-    airDetail_ = Biquad::highShelf(sampleRate_, 9800.0, 0.80, 2.2);
+    bassFoundation_ = Biquad::peaking(sampleRate_, 84.0, 0.78, 0.9);
+    lowMidSeparation_ = Biquad::peaking(sampleRate_, 285.0, 0.85, -1.7);
+    boxinessControl_ = Biquad::peaking(sampleRate_, 680.0, 0.72, -0.7);
+    presenceDetail_ = Biquad::peaking(sampleRate_, 3400.0, 0.76, 1.6);
+    airDetail_ = Biquad::highShelf(sampleRate_, 10000.0, 0.78, 2.4);
     crossfeed_.configure(sampleRate_, 700.0, 4.5);
     rampPerFrame_ = static_cast<float>(1.0 / (sampleRate_ * 0.050));
     outputGainSmoothing_ = static_cast<float>(
@@ -68,7 +69,8 @@ void DspProcessor::configure(double sampleRate) noexcept {
     const bool equalizerEnabled = targetEqualizerEnabled_.load(std::memory_order_acquire);
     activeEqualizerBands_ = 0;
     for (std::size_t band = 0; band < kEqualizerBandCount; ++band) {
-        currentEqGainsDb_[band] = equalizerEnabled
+        const bool bandFitsOutputRate = kEqFrequenciesHz[band] < sampleRate_ * 0.45;
+        currentEqGainsDb_[band] = equalizerEnabled && bandFitsOutputRate
             ? targetEqGainsDb_[band].load(std::memory_order_acquire)
             : 0.0F;
         if (std::abs(currentEqGainsDb_[band]) >= 0.0005F) {
@@ -114,6 +116,7 @@ void DspProcessor::reset() noexcept {
     subBassHighPass_.clear();
     bassFoundation_.clear();
     lowMidSeparation_.clear();
+    boxinessControl_.clear();
     presenceDetail_.clear();
     airDetail_.clear();
     crossfeed_.clear();
@@ -145,8 +148,9 @@ void DspProcessor::setEqualizer(
     std::size_t gainCount) noexcept {
     if (gainsDb != nullptr && gainCount == kEqualizerBandCount) {
         for (std::size_t band = 0; band < kEqualizerBandCount; ++band) {
+            const float safeGain = std::isfinite(gainsDb[band]) ? gainsDb[band] : 0.0F;
             targetEqGainsDb_[band].store(
-                std::clamp(gainsDb[band], -8.0F, 8.0F),
+                std::clamp(safeGain, -8.0F, 8.0F),
                 std::memory_order_release);
         }
     }
@@ -172,17 +176,28 @@ void DspProcessor::process(
 
     bool targetEqualizerHasGain = false;
     if (targetEqualizerEnabled_.load(std::memory_order_acquire)) {
-        for (const auto& gain : targetEqGainsDb_) {
-            if (std::abs(gain.load(std::memory_order_acquire)) >= 0.0005F) {
+        for (std::size_t band = 0; band < kEqualizerBandCount; ++band) {
+            if (kEqFrequenciesHz[band] < sampleRate_ * 0.45 &&
+                std::abs(targetEqGainsDb_[band].load(std::memory_order_acquire)) >= 0.0005F) {
                 targetEqualizerHasGain = true;
                 break;
             }
         }
     }
-    const bool controlsBypassed = target == 0.0F &&
-        !targetEqualizerHasGain &&
-        !peakProtectionEnabled &&
-        std::abs(targetOutputGain - 1.0F) < 0.00001F;
+    const bool enhancementTargeted = target > 0.0F ||
+        targetEqualizerHasGain ||
+        std::abs(targetOutputGain - 1.0F) >= 0.00001F;
+    const bool enhancementStateActive = currentWet_ > 0.0F ||
+        activeEqualizerBands_ != 0U ||
+        std::abs(currentPreampGain_ - 1.0F) >= 0.00001F ||
+        std::abs(currentOutputGain_ - 1.0F) >= 0.00001F ||
+        std::abs(limiterGain_ - 1.0F) >= 0.00001F;
+    // Peak protection is needed while an enhancement is active or releasing,
+    // not on untouched program material. This restores a sample-transparent
+    // bypass instead of permanently lowering ordinary 0 dBFS masters to -1 dB.
+    const bool protectionRequired = peakProtectionEnabled &&
+        (enhancementTargeted || enhancementStateActive);
+    const bool controlsBypassed = !enhancementTargeted && !protectionRequired;
     const bool stateBypassed = currentWet_ == 0.0F &&
         activeEqualizerBands_ == 0U &&
         std::abs(currentPreampGain_ - 1.0F) < 0.00001F &&
@@ -205,7 +220,8 @@ void DspProcessor::process(
             std::uint16_t nextActiveBands = 0;
             if (eqEnabled || activeEqualizerBands_ != 0U) {
                 for (std::size_t band = 0; band < kEqualizerBandCount; ++band) {
-                    const float targetGain = eqEnabled
+                    const bool bandFitsOutputRate = kEqFrequenciesHz[band] < sampleRate_ * 0.45;
+                    const float targetGain = eqEnabled && bandFitsOutputRate
                         ? targetEqGainsDb_[band].load(std::memory_order_acquire)
                         : 0.0F;
                     const float previousGain = currentEqGainsDb_[band];
@@ -326,6 +342,10 @@ void DspProcessor::process(
             wetRight = channelCount == 2
                 ? lowMidSeparation_.tick(wetRight, 1)
                 : wetLeft;
+            wetLeft = boxinessControl_.tick(wetLeft, 0);
+            wetRight = channelCount == 2
+                ? boxinessControl_.tick(wetRight, 1)
+                : wetLeft;
             wetLeft = presenceDetail_.tick(wetLeft, 0);
             wetRight = channelCount == 2
                 ? presenceDetail_.tick(wetRight, 1)
@@ -356,7 +376,7 @@ void DspProcessor::process(
         }
         const float peak = std::max(std::abs(outputLeft), std::abs(outputRight)) *
             currentOutputGain_;
-        const float requiredLimiterGain = peak > kOutputCeiling
+        const float requiredLimiterGain = protectionRequired && peak > kOutputCeiling
             ? kOutputCeiling / peak
             : 1.0F;
         if (requiredLimiterGain < limiterGain_) {
@@ -394,6 +414,7 @@ void DspProcessor::process(
         subBassHighPass_.clear();
         bassFoundation_.clear();
         lowMidSeparation_.clear();
+        boxinessControl_.clear();
         presenceDetail_.clear();
         airDetail_.clear();
         crossfeed_.clear();

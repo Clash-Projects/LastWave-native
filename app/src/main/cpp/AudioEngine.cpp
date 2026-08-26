@@ -1,4 +1,4 @@
-﻿#include "AudioEngine.h"
+#include "AudioEngine.h"
 
 #include <soxr.h>
 
@@ -478,25 +478,38 @@ bool AudioEngine::processMediaPcm(
                 mediaScratch_.data())) {
             return false;
         }
-        std::size_t inputDone = 0;
-        std::size_t outputDone = 0;
-        const std::size_t remainingOutput = outputCapacityFrames - outputFrameCount;
-        if (remainingOutput == 0) return false;
-        const soxr_error_t error = soxr_process(
-            asSoxr(mediaResampler_),
-            mediaScratch_.data(),
-            chunkFrames,
-            &inputDone,
-            output + outputFrameCount * channels,
-            remainingOutput,
-            &outputDone);
-        if (error != nullptr || inputDone != chunkFrames) return false;
-        mediaDsp_.process(
-            output + outputFrameCount * channels,
-            static_cast<std::int32_t>(outputDone),
-            mediaChannelCount_);
-        consumedFrames += inputDone;
-        outputFrameCount += outputDone;
+        std::size_t chunkConsumed = 0;
+        while (chunkConsumed < chunkFrames) {
+            std::size_t inputDone = 0;
+            std::size_t outputDone = 0;
+            const std::size_t remainingOutput = outputCapacityFrames - outputFrameCount;
+            if (remainingOutput == 0) break;
+            const soxr_error_t error = soxr_process(
+                asSoxr(mediaResampler_),
+                mediaScratch_.data() + chunkConsumed * channels,
+                chunkFrames - chunkConsumed,
+                &inputDone,
+                output + outputFrameCount * channels,
+                remainingOutput,
+                &outputDone);
+            if (error != nullptr) return false;
+            if (outputDone > 0) {
+                mediaDsp_.process(
+                    output + outputFrameCount * channels,
+                    static_cast<std::int32_t>(outputDone),
+                    mediaChannelCount_);
+                outputFrameCount += outputDone;
+            }
+            if (inputDone == 0 && outputDone == 0) {
+                // Soxr completed buffering for this pass
+                break;
+            }
+            chunkConsumed += inputDone;
+            consumedFrames += inputDone;
+        }
+        if (chunkConsumed < chunkFrames && outputCapacityFrames == outputFrameCount) {
+            break;
+        }
     }
     return true;
 }

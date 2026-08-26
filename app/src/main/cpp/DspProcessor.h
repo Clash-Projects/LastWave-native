@@ -112,6 +112,7 @@ private:
     Biquad subBassHighPass_{};
     Biquad bassFoundation_{};
     Biquad lowMidSeparation_{};
+    Biquad boxinessControl_{};
     Biquad presenceDetail_{};
     Biquad airDetail_{};
     Crossfeed crossfeed_{};

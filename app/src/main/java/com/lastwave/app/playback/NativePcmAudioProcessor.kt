@@ -199,21 +199,11 @@ class NativePcmAudioProcessor(
             channelCount = inputAudioFormat.channelCount,
         )
         if (processedFrames < 0) {
-            // A native failure must not take down Media3's playback thread.
-            // Preserve the stream clock with silence; the next configure will
-            // select the platform sink if native processing was disabled.
-            output.clear()
-            val silenceFrames = if (inputAudioFormat.sampleRate == nativeOutputSampleRate) {
-                frameCount
-            } else {
-                ((frameCount.toLong() * nativeOutputSampleRate + inputAudioFormat.sampleRate - 1L) /
-                    inputAudioFormat.sampleRate).toInt()
-            }
-            repeat(silenceFrames * inputAudioFormat.channelCount) {
-                output.putFloat(0f)
-            }
-            output.flip()
-            return
+            throw IllegalStateException("Native PCM processing failed")
+        }
+        val outputCapacityFrames = output.capacity() / outputAudioFormat.bytesPerFrame
+        check(processedFrames <= outputCapacityFrames) {
+            "Native PCM output exceeded its buffer: $processedFrames > $outputCapacityFrames frames"
         }
         output.position(processedFrames * outputAudioFormat.bytesPerFrame)
         output.flip()
@@ -227,7 +217,12 @@ class NativePcmAudioProcessor(
             RESAMPLER_FLUSH_CAPACITY_FRAMES * outputAudioFormat.bytesPerFrame,
         ).order(ByteOrder.nativeOrder())
         val outputFrames = engine.flushMediaProcessor(output, outputAudioFormat.channelCount)
-        output.position(outputFrames.coerceAtLeast(0) * outputAudioFormat.bytesPerFrame)
+        check(outputFrames >= 0) { "Native PCM flush failed" }
+        val outputCapacityFrames = output.capacity() / outputAudioFormat.bytesPerFrame
+        check(outputFrames <= outputCapacityFrames) {
+            "Native PCM flush exceeded its buffer: $outputFrames > $outputCapacityFrames frames"
+        }
+        output.position(outputFrames * outputAudioFormat.bytesPerFrame)
         output.flip()
     }
 
