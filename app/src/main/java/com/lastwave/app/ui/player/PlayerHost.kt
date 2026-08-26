@@ -27,7 +27,6 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -83,7 +82,6 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -108,6 +106,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
@@ -1080,11 +1079,6 @@ private fun FullPlayer(
                             .clip(CircleShape)
                             .background(
                                 MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f),
-                            )
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
-                                CircleShape,
                             ),
                     ) {
                         Icon(
@@ -1129,11 +1123,6 @@ private fun FullPlayer(
                             .clip(CircleShape)
                             .background(
                                 MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f),
-                            )
-                            .border(
-                                1.dp,
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
-                                CircleShape,
                             ),
                     ) {
                         Icon(
@@ -1182,7 +1171,7 @@ private fun FullPlayer(
                                 ) {
                                     BoxWithConstraints(
                                         modifier = Modifier.fillMaxWidth().weight(1f),
-                                        contentAlignment = Alignment(0f, -0.40f),
+                                        contentAlignment = BiasAlignment(0f, -0.40f),
                                     ) {
                                         val artworkSize = (minOf(maxWidth, maxHeight) - 6.dp)
                                             .coerceAtLeast(0.dp)
@@ -1213,16 +1202,6 @@ private fun FullPlayer(
                                         Surface(
                                             shape = RoundedCornerShape(32.dp),
                                             color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f),
-                                            border = BorderStroke(
-                                                1.dp,
-                                                Brush.linearGradient(
-                                                    listOf(
-                                                        Color.White.copy(alpha = 0.30f),
-                                                        ambientColor.copy(alpha = 0.38f),
-                                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
-                                                    ),
-                                                ),
-                                            ),
                                             tonalElevation = 6.dp,
                                             shadowElevation = 24.dp,
                                             modifier = Modifier
@@ -1624,11 +1603,6 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             shape = CircleShape,
             color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
-            border = BorderStroke(
-                1.dp,
-                if (isTranslucent) Color.White.copy(alpha = 0.14f)
-                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-            ),
             tonalElevation = if (isTranslucent) 0.dp else 2.dp,
             shadowElevation = if (isTranslucent) 0.dp else 4.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
@@ -1642,11 +1616,6 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             shape = CircleShape,
             color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary,
             contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
-            border = BorderStroke(
-                1.5.dp,
-                if (isTranslucent) Color.White.copy(alpha = 0.55f)
-                else MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.28f),
-            ),
             tonalElevation = if (isTranslucent) 0.dp else 6.dp,
             shadowElevation = if (isTranslucent) 10.dp else 14.dp,
             modifier = Modifier.size(if (isTranslucent) 72.dp else 76.dp),
@@ -1668,11 +1637,6 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
             shape = CircleShape,
             color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
-            border = BorderStroke(
-                1.dp,
-                if (isTranslucent) Color.White.copy(alpha = 0.14f)
-                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-            ),
             tonalElevation = if (isTranslucent) 0.dp else 2.dp,
             shadowElevation = if (isTranslucent) 0.dp else 4.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
