@@ -44,9 +44,10 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * 4-Layer Filled Translucent Waveform Seekbar.
- * Features 4 smooth, undulating waves of progressive translucency filled down to the baseline,
- * with luminous top contour highlights and quintic smootherstep boundary convergence.
+ * 3-Layer Translucent Glass Waveform Seekbar.
+ * Features 3 distinct filled glassmorphic wave layers with progressive translucency,
+ * thin razor-sharp crest highlights, quintic smootherstep boundary convergence,
+ * and a clean straight unplayed baseline.
  */
 @Composable
 fun WavySeekBar(
@@ -75,14 +76,14 @@ fun WavySeekBar(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    // 4 continuous real-time wave animations
-    val infiniteTransition = rememberInfiniteTransition(label = "4WaveAnimation")
+    // 3 continuous real-time wave animations
+    val infiniteTransition = rememberInfiniteTransition(label = "3GlassWaveAnimation")
 
     val phase1 by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3600, easing = LinearEasing),
+            animation = tween(durationMillis = 3400, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase1",
@@ -92,7 +93,7 @@ fun WavySeekBar(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2700, easing = LinearEasing),
+            animation = tween(durationMillis = 2500, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase2",
@@ -102,35 +103,23 @@ fun WavySeekBar(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2000, easing = LinearEasing),
+            animation = tween(durationMillis = 1700, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
         label = "Phase3",
     )
 
-    val phase4 by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2 * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "Phase4",
-    )
-
     val isPlaying = state.isPlaying && !dragging
-    val currPhase1 = if (isPlaying) phase1 + 2.4f else 2.4f
-    val currPhase2 = if (isPlaying) phase2 + 1.6f else 1.6f
-    val currPhase3 = if (isPlaying) phase3 + 0.8f else 0.8f
-    val currPhase4 = if (isPlaying) phase4 else 0f
+    val currPhase1 = if (isPlaying) phase1 + 2.2f else 2.2f
+    val currPhase2 = if (isPlaying) phase2 + 1.2f else 1.2f
+    val currPhase3 = if (isPlaying) phase3 else 0f
 
-    // 4-Tier Amplitudes with soft dampening on seek
+    // 3-Tier Amplitudes with slightly increased height and smooth dampening on seek
     val density = LocalDensity.current
-    val baseAmp1Px = with(density) { 12.0.dp.toPx() } // Deepest ambient wave
-    val baseAmp2Px = with(density) { 9.5.dp.toPx() }  // Upper-mid wave
-    val baseAmp3Px = with(density) { 7.2.dp.toPx() }  // Lower-mid wave
-    val baseAmp4Px = with(density) { 5.2.dp.toPx() }  // Foreground wave
-    val draggingAmpPx = with(density) { 1.0.dp.toPx() }
+    val baseAmp1Px = with(density) { 13.5.dp.toPx() } // Deepest ambient glass layer
+    val baseAmp2Px = with(density) { 10.5.dp.toPx() } // Middle translucent glass layer
+    val baseAmp3Px = with(density) { 7.8.dp.toPx() }  // Foreground glowing glass layer
+    val draggingAmpPx = with(density) { 1.2.dp.toPx() }
 
     val amp1 by animateFloatAsState(
         targetValue = if (dragging) draggingAmpPx else baseAmp1Px,
@@ -147,17 +136,11 @@ fun WavySeekBar(
         animationSpec = tween(durationMillis = 200),
         label = "Amp3",
     )
-    val amp4 by animateFloatAsState(
-        targetValue = if (dragging) draggingAmpPx else baseAmp4Px,
-        animationSpec = tween(durationMillis = 200),
-        label = "Amp4",
-    )
 
-    // 4 Distinct Wavelengths
-    val waveLength1Px = with(density) { 135.dp.toPx() }
-    val waveLength2Px = with(density) { 108.dp.toPx() }
-    val waveLength3Px = with(density) { 85.dp.toPx() }
-    val waveLength4Px = with(density) { 66.dp.toPx() }
+    // 3 Distinct Wavelengths
+    val waveLength1Px = with(density) { 130.dp.toPx() }
+    val waveLength2Px = with(density) { 102.dp.toPx() }
+    val waveLength3Px = with(density) { 78.dp.toPx() }
 
     val baseTrackThicknessPx = with(density) { 4.5.dp.toPx() }
     val thumbRadiusPx = with(density) { 7.5.dp.toPx() }
@@ -167,7 +150,7 @@ fun WavySeekBar(
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
+                .height(50.dp)
                 .pointerInput(state.durationMs) {
                     if (state.durationMs <= 0) return@pointerInput
                     detectTapGestures(
@@ -206,7 +189,7 @@ fun WavySeekBar(
         ) {
             val width = size.width
             val height = size.height
-            val centerY = height / 2f + 6.dp.toPx()
+            val centerY = height / 2f + 7.dp.toPx()
             val thumbX = (shownFraction * width).coerceIn(0f, width)
             val halfThickness = baseTrackThicknessPx / 2f
             val bottomY = centerY + halfThickness
@@ -223,7 +206,7 @@ fun WavySeekBar(
                 )
             }
 
-            // 2. Active 4-Layer Filled Waves: Confined strictly to [0, thumbX]
+            // 2. Active 3-Layer Translucent Glass Waves: Confined strictly to [0, thumbX]
             if (thumbX > 0f) {
                 val clipBounds = Path().apply {
                     addRoundRect(
@@ -243,13 +226,13 @@ fun WavySeekBar(
                 }
 
                 clipPath(clipBounds) {
-                    // Quintic smootherstep function for seamless C² continuity (zero jerk at boundaries)
+                    // Quintic smootherstep function for seamless C² continuity
                     fun smootherstep(t: Float): Float {
                         val c = t.coerceIn(0f, 1f)
                         return c * c * c * (c * (c * 6f - 15f) + 10f)
                     }
 
-                    // Builds a fully filled wave body down to the bottom baseline
+                    // Builds a smooth filled wave body down to the bottom baseline
                     fun buildFilledWave(
                         wavelength: Float,
                         amplitude: Float,
@@ -261,7 +244,7 @@ fun WavySeekBar(
                         filledPath.lineTo(0f, topBaselineY)
                         contourPath.moveTo(0f, topBaselineY)
 
-                        val step = 1.0f // 1px sampling resolution for perfectly smooth curves
+                        val step = 0.9f // Fine sub-pixel sampling resolution for ultra-smooth rendering
                         var x = 0f
                         while (x <= thumbX) {
                             val startEnv = smootherstep(x / transitionLengthPx)
@@ -285,78 +268,62 @@ fun WavySeekBar(
                     val (filled1, contour1) = buildFilledWave(waveLength1Px, amp1, currPhase1)
                     val (filled2, contour2) = buildFilledWave(waveLength2Px, amp2, currPhase2)
                     val (filled3, contour3) = buildFilledWave(waveLength3Px, amp3, currPhase3)
-                    val (filled4, contour4) = buildFilledWave(waveLength4Px, amp4, currPhase4)
 
-                    // Layer 1: Deepest Ambient Layer (Translucency ~20%)
+                    // Layer 1: Deepest Ambient Glass Layer (~22% opacity)
                     drawPath(
                         path = filled1,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                activeColor.copy(alpha = if (isTranslucent) 0.25f else 0.22f),
-                                activeColor.copy(alpha = if (isTranslucent) 0.12f else 0.10f),
+                                activeColor.copy(alpha = if (isTranslucent) 0.28f else 0.24f),
+                                activeColor.copy(alpha = if (isTranslucent) 0.12f else 0.08f),
                             ),
-                            startY = centerY - 18.dp.toPx(),
+                            startY = centerY - 20.dp.toPx(),
                             endY = bottomY,
                         ),
                     )
+                    // Thin delicate crest highlight
                     drawPath(
                         path = contour1,
-                        color = activeColor.copy(alpha = if (isTranslucent) 0.35f else 0.30f),
-                        style = Stroke(width = 1.0.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        color = activeColor.copy(alpha = if (isTranslucent) 0.38f else 0.32f),
+                        style = Stroke(width = 0.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 2: Upper-Mid Harmonic Layer (Translucency ~45%)
+                    // Layer 2: Middle Translucent Glass Layer (~55% opacity)
                     drawPath(
                         path = filled2,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                activeColor.copy(alpha = if (isTranslucent) 0.50f else 0.45f),
-                                activeColor.copy(alpha = if (isTranslucent) 0.25f else 0.20f),
+                                activeColor.copy(alpha = if (isTranslucent) 0.60f else 0.55f),
+                                activeColor.copy(alpha = if (isTranslucent) 0.28f else 0.22f),
                             ),
-                            startY = centerY - 14.dp.toPx(),
+                            startY = centerY - 15.dp.toPx(),
                             endY = bottomY,
                         ),
                     )
+                    // Thin refined crest highlight
                     drawPath(
                         path = contour2,
-                        color = activeColor.copy(alpha = if (isTranslucent) 0.60f else 0.55f),
-                        style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        color = activeColor.copy(alpha = if (isTranslucent) 0.72f else 0.68f),
+                        style = Stroke(width = 1.1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 3: Lower-Mid Harmonic Layer (Translucency ~70%)
+                    // Layer 3: Foreground Glowing Glass Layer (~94% opacity)
                     drawPath(
                         path = filled3,
                         brush = Brush.verticalGradient(
                             colors = listOf(
-                                activeColor.copy(alpha = if (isTranslucent) 0.75f else 0.70f),
-                                activeColor.copy(alpha = if (isTranslucent) 0.40f else 0.35f),
+                                activeColor.copy(alpha = if (isTranslucent) 0.95f else 0.92f),
+                                activeColor.copy(alpha = if (isTranslucent) 0.62f else 0.58f),
                             ),
                             startY = centerY - 10.dp.toPx(),
                             endY = bottomY,
                         ),
                     )
+                    // Crisp luminous crest highlight
                     drawPath(
                         path = contour3,
-                        color = activeColor.copy(alpha = if (isTranslucent) 0.82f else 0.78f),
-                        style = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-                    )
-
-                    // Layer 4: Foreground Primary Ribbon (Translucency ~95%)
-                    drawPath(
-                        path = filled4,
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                activeColor.copy(alpha = if (isTranslucent) 0.96f else 0.94f),
-                                activeColor.copy(alpha = if (isTranslucent) 0.65f else 0.60f),
-                            ),
-                            startY = centerY - 7.dp.toPx(),
-                            endY = bottomY,
-                        ),
-                    )
-                    drawPath(
-                        path = contour4,
                         color = activeColor,
-                        style = Stroke(width = 2.0.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
                 }
             }
