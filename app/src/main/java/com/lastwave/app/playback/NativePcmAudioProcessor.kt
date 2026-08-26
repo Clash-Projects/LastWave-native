@@ -60,39 +60,37 @@ class NativePcmAudioProcessor(
             ?: inputSampleRate.coerceIn(MIN_OUTPUT_SAMPLE_RATE_HZ, maxOutputSampleRateHz)
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
-        if (inputAudioFormat.channelCount !in 1..2) {
-            throw AudioProcessor.UnhandledAudioFormatException(
-                "Native DSP supports mono/stereo only",
-                inputAudioFormat,
-            )
+        if (!engine.isAvailable || inputAudioFormat.channelCount !in 1..2) {
+            return AudioProcessor.AudioFormat.NOT_SET
         }
         nativeEncoding = when (inputAudioFormat.encoding) {
             C.ENCODING_PCM_16BIT -> NativePcmEncoding.PCM_I16
             C.ENCODING_PCM_24BIT -> NativePcmEncoding.PCM_I24_PACKED
             C.ENCODING_PCM_32BIT -> NativePcmEncoding.PCM_I32
             C.ENCODING_PCM_FLOAT -> NativePcmEncoding.PCM_FLOAT
-            else -> throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
+            else -> return AudioProcessor.AudioFormat.NOT_SET
         }
         nativeOutputSampleRate = outputSampleRateFor(inputAudioFormat.sampleRate)
-        val endTrimBytes = Math.multiplyExact(
-            configuredEndTrimFrames,
-            inputAudioFormat.bytesPerFrame,
-        )
+        val endTrimBytes = runCatching {
+            Math.multiplyExact(configuredEndTrimFrames, inputAudioFormat.bytesPerFrame)
+        }.getOrDefault(0)
         retainedEndBuffer = if (endTrimBytes > 0) {
-            ByteBuffer.allocateDirect(endTrimBytes).order(ByteOrder.LITTLE_ENDIAN)
+            runCatching {
+                ByteBuffer.allocateDirect(endTrimBytes).order(ByteOrder.LITTLE_ENDIAN)
+            }.getOrDefault(AudioProcessor.EMPTY_BUFFER)
         } else {
             AudioProcessor.EMPTY_BUFFER
         }
-        if (!engine.configureMediaProcessor(
+        val configured = runCatching {
+            engine.configureMediaProcessor(
                 inputSampleRate = inputAudioFormat.sampleRate,
                 outputSampleRate = nativeOutputSampleRate,
                 channelCount = inputAudioFormat.channelCount,
             )
-        ) {
-            throw AudioProcessor.UnhandledAudioFormatException(
-                "Native DSP/resampler configuration failed",
-                inputAudioFormat,
-            )
+        }.getOrDefault(false)
+
+        if (!configured) {
+            return AudioProcessor.AudioFormat.NOT_SET
         }
         return AudioProcessor.AudioFormat(
             nativeOutputSampleRate,

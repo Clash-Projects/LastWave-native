@@ -405,7 +405,7 @@ class MusicPlayer @Inject constructor(
                         emptyArray()
                     }
                 return DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(true)
+                    .setEnableFloatOutput(false)
                     .setEnableAudioTrackPlaybackParams(false)
                     .setAudioProcessors(audioProcessors)
                     .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
@@ -1389,21 +1389,30 @@ private fun PlayableTrack.queueKey(): String = "$title|$artist".lowercase()
 @OptIn(UnstableApi::class)
 private val accurateAudioMediaCodecSelector =
     MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
-        val decoderInfos = MediaCodecSelector.DEFAULT.getDecoderInfos(
-            mimeType,
-            requiresSecureDecoder,
-            requiresTunnelingDecoder,
-        )
-        // Vendor decoders on certain OEM chips (Samsung SEC/Exynos, Qualcomm QTI) have known
-        // clock rate misalignments when feeding 44.1kHz audio into a 48kHz audio HAL.
-        // Prioritize standard reference AOSP software decoders (c2.android.*, OMX.google.*) over vendor ones.
-        decoderInfos.sortedBy { info -> audioDecoderPriority(info.name) }
+        val decoderInfos = runCatching {
+            MediaCodecSelector.DEFAULT.getDecoderInfos(
+                mimeType,
+                requiresSecureDecoder,
+                requiresTunnelingDecoder,
+            )
+        }.getOrDefault(emptyList())
+        if (decoderInfos.isEmpty()) {
+            emptyList()
+        } else if (mimeType.equals(MimeTypes.AUDIO_FLAC, ignoreCase = true) || mimeType.equals("audio/flac", ignoreCase = true)) {
+            // Samsung's proprietary FLAC decoders (c2.sec.flac.decoder / OMX.SEC.FLAC.Decoder / OMX.Exynos.FLAC.Decoder)
+            // have a known bug on One UI where 24-bit / Hi-Res audio output PCM encoding is corrupted or
+            // misreported, leading to 1.5x fast playback and heavy digital distortion.
+            // Deprioritize vendor decoders so standard reference AOSP decoders (c2.android.flac.decoder) are used first.
+            decoderInfos.sortedBy { info -> audioDecoderPriority(info.name) }
+        } else {
+            decoderInfos
+        }
     }
 
 /** 0 = trusted reference decoder, 1 = proprietary vendor decoder (demoted to avoid clock skew). */
 private fun audioDecoderPriority(name: String): Int {
     val lower = name.lowercase()
-    return if (lower.contains("sec.") || lower.contains("exynos") || lower.contains(".qti.")) 1 else 0
+    return if (lower.contains("sec.") || lower.contains("exynos")) 1 else 0
 }
 
 private fun PlayableTrack.searchQueueTitleKey(): String = title
