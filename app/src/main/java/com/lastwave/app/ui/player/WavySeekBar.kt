@@ -26,12 +26,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -40,9 +42,7 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * Expressive Wavy Seekbar inspired by Android 13/14/15 system media controls.
- * Features a real-time traveling sine wave along the active track, smooth amplitude
- * dampening on scrub, and a refined touch interaction target.
+ * Samsung One UI styled multi-layered filled wave seekbar with differential opacity waves.
  */
 @Composable
 fun WavySeekBar(
@@ -59,11 +59,13 @@ fun WavySeekBar(
     val shownFraction = if (dragging) dragFraction else currentFraction
     val shownMs = (shownFraction * durationMs).toLong()
 
-    val activeColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
+    val activeBaseColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
+    val primaryWaveColor = activeBaseColor.copy(alpha = if (isTranslucent) 0.95f else 0.90f)
+    val secondaryWaveColor = activeBaseColor.copy(alpha = if (isTranslucent) 0.38f else 0.40f)
     val inactiveColor = if (isTranslucent) {
-        Color.White.copy(alpha = 0.28f)
+        Color.White.copy(alpha = 0.25f)
     } else {
-        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.16f)
     }
     val textColor = if (isTranslucent) {
         Color.White.copy(alpha = 0.85f)
@@ -71,42 +73,62 @@ fun WavySeekBar(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    // Continuously animate wave phase when playing
-    val infiniteTransition = rememberInfiniteTransition(label = "WavyProgressTransition")
-    val animatedPhase by infiniteTransition.animateFloat(
+    // Continuously animate dual wave phases for organic depth
+    val infiniteTransition = rememberInfiniteTransition(label = "SamsungWavyTransitions")
+    val primaryPhase by infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = (2 * PI).toFloat(),
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = LinearEasing),
+            animation = tween(durationMillis = 2000, easing = LinearEasing),
             repeatMode = RepeatMode.Restart,
         ),
-        label = "WavePhase",
+        label = "PrimaryPhase",
     )
 
-    val currentPhase = if (state.isPlaying && !dragging) animatedPhase else 0f
+    val secondaryPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2700, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "SecondaryPhase",
+    )
 
-    // Smoothly dampen amplitude to a flatter gentle wave when scrubbing
+    val isPlaying = state.isPlaying && !dragging
+    val currPrimaryPhase = if (isPlaying) primaryPhase else 0f
+    val currSecondaryPhase = if (isPlaying) secondaryPhase + 1.2f else 1.2f
+
+    // Smoothly dampen amplitude when dragging
     val density = LocalDensity.current
-    val baseAmplitudePx = with(density) { 4.5.dp.toPx() }
-    val draggingAmplitudePx = with(density) { 1.5.dp.toPx() }
-    val targetAmplitude = if (dragging) draggingAmplitudePx else baseAmplitudePx
+    val basePrimaryAmpPx = with(density) { 5.5.dp.toPx() }
+    val draggingAmpPx = with(density) { 1.5.dp.toPx() }
+    val targetPrimaryAmp = if (dragging) draggingAmpPx else basePrimaryAmpPx
 
-    val animatedAmplitude by animateFloatAsState(
-        targetValue = targetAmplitude,
+    val primaryAmp by animateFloatAsState(
+        targetValue = targetPrimaryAmp,
         animationSpec = tween(durationMillis = 200),
-        label = "WaveAmplitude",
+        label = "PrimaryAmp",
     )
 
-    val waveLengthPx = with(density) { 34.dp.toPx() }
-    val strokeWidthPx = with(density) { 4.dp.toPx() }
-    val thumbRadiusPx = with(density) { 7.dp.toPx() }
-    val transitionLengthPx = with(density) { 20.dp.toPx() }
+    val secondaryAmpPx = with(density) { 7.0.dp.toPx() }
+    val secondaryAmp by animateFloatAsState(
+        targetValue = if (dragging) draggingAmpPx else secondaryAmpPx,
+        animationSpec = tween(durationMillis = 200),
+        label = "SecondaryAmp",
+    )
+
+    val primaryWaveLengthPx = with(density) { 32.dp.toPx() }
+    val secondaryWaveLengthPx = with(density) { 40.dp.toPx() }
+    val baseTrackThicknessPx = with(density) { 5.5.dp.toPx() }
+    val thumbRadiusPx = with(density) { 7.5.dp.toPx() }
+    val transitionLengthPx = with(density) { 18.dp.toPx() }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(38.dp)
+                .height(40.dp)
                 .pointerInput(state.durationMs) {
                     if (state.durationMs <= 0) return@pointerInput
                     detectTapGestures(
@@ -146,53 +168,89 @@ fun WavySeekBar(
             val width = size.width
             val centerY = size.height / 2f
             val thumbX = (shownFraction * width).coerceIn(0f, width)
+            val halfThickness = baseTrackThicknessPx / 2f
+            val bottomY = centerY + halfThickness
 
-            // 1. Inactive background track (straight line from thumb to end)
+            // 1. Inactive background track (capsule line from thumbX to end)
             if (thumbX < width) {
                 drawLine(
                     color = inactiveColor,
                     start = Offset(thumbX, centerY),
                     end = Offset(width, centerY),
-                    strokeWidth = strokeWidthPx,
+                    strokeWidth = baseTrackThicknessPx,
                     cap = StrokeCap.Round,
                 )
             }
 
-            // 2. Active track (wavy traveling sine wave from 0 to thumb)
             if (thumbX > 0f) {
-                val wavePath = Path()
-                wavePath.moveTo(0f, centerY)
-
-                val step = 3f // Sample every 3 pixels for smooth rendering performance
-                var x = 0f
-                while (x <= thumbX) {
-                    // Smoothly envelope amplitude at start and before thumb to avoid sharp breaks
-                    val startEnvelope = (x / transitionLengthPx).coerceIn(0f, 1f)
-                    val endEnvelope = ((thumbX - x) / transitionLengthPx).coerceIn(0f, 1f)
-                    val envelope = startEnvelope * endEnvelope
-
-                    val angle = ((x / waveLengthPx) * 2 * PI).toFloat() - currentPhase
-                    val y = centerY + sin(angle) * animatedAmplitude * envelope
-                    wavePath.lineTo(x, y)
-                    x += step
+                // Rounded container clip for clean start cap
+                val clipBounds = Path().apply {
+                    addRoundRect(
+                        RoundRect(
+                            rect = androidx.compose.ui.geometry.Rect(
+                                left = 0f,
+                                top = 0f,
+                                right = thumbX + thumbRadiusPx,
+                                bottom = size.height,
+                            ),
+                            topLeft = CornerRadius(halfThickness, halfThickness),
+                            bottomLeft = CornerRadius(halfThickness, halfThickness),
+                            topRight = CornerRadius(0f, 0f),
+                            bottomRight = CornerRadius(0f, 0f),
+                        )
+                    )
                 }
-                wavePath.lineTo(thumbX, centerY)
 
-                drawPath(
-                    path = wavePath,
-                    color = activeColor,
-                    style = Stroke(
-                        width = strokeWidthPx,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round,
-                    ),
-                )
+                clipPath(clipBounds) {
+                    // 2. Layer 1: Secondary / Background Wave (lower opacity, taller wave)
+                    val secondaryPath = Path()
+                    secondaryPath.moveTo(0f, bottomY)
+                    secondaryPath.lineTo(0f, centerY - halfThickness)
+
+                    var x = 0f
+                    val step = 3f
+                    while (x <= thumbX) {
+                        val startEnvelope = (x / transitionLengthPx).coerceIn(0f, 1f)
+                        val endEnvelope = ((thumbX - x) / transitionLengthPx).coerceIn(0f, 1f)
+                        val envelope = startEnvelope * endEnvelope
+
+                        val angle = ((x / secondaryWaveLengthPx) * 2 * PI).toFloat() - currSecondaryPhase
+                        val waveY = centerY - halfThickness - (sin(angle) * secondaryAmp * envelope)
+                        secondaryPath.lineTo(x, waveY)
+                        x += step
+                    }
+                    secondaryPath.lineTo(thumbX, bottomY)
+                    secondaryPath.close()
+
+                    drawPath(path = secondaryPath, color = secondaryWaveColor)
+
+                    // 3. Layer 2: Primary / Foreground Wave (higher opacity filled wave)
+                    val primaryPath = Path()
+                    primaryPath.moveTo(0f, bottomY)
+                    primaryPath.lineTo(0f, centerY - halfThickness)
+
+                    x = 0f
+                    while (x <= thumbX) {
+                        val startEnvelope = (x / transitionLengthPx).coerceIn(0f, 1f)
+                        val endEnvelope = ((thumbX - x) / transitionLengthPx).coerceIn(0f, 1f)
+                        val envelope = startEnvelope * endEnvelope
+
+                        val angle = ((x / primaryWaveLengthPx) * 2 * PI).toFloat() - currPrimaryPhase
+                        val waveY = centerY - halfThickness - (sin(angle) * primaryAmp * envelope)
+                        primaryPath.lineTo(x, waveY)
+                        x += step
+                    }
+                    primaryPath.lineTo(thumbX, bottomY)
+                    primaryPath.close()
+
+                    drawPath(path = primaryPath, color = primaryWaveColor)
+                }
             }
 
-            // 3. Thumb indicator (pill/circle at current progress)
+            // 4. Leading Thumb Circle
             if (state.durationMs > 0) {
                 drawCircle(
-                    color = activeColor,
+                    color = activeBaseColor,
                     radius = thumbRadiusPx,
                     center = Offset(thumbX, centerY),
                 )
@@ -201,7 +259,7 @@ fun WavySeekBar(
 
         Spacer(Modifier.height(2.dp))
 
-        // Time labels below the seekbar
+        // Time labels
         Row(
             modifier = Modifier
                 .fillMaxWidth()
