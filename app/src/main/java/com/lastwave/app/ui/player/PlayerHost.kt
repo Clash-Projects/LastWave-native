@@ -195,8 +195,11 @@ class PlayerViewModel @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val lyricsRepository: LyricsRepository,
     private val settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
-    private val navigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator,
+    val navigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator,
+    val genreExplorer: com.lastwave.app.ui.genres.GenreExplorer,
+    val mixLauncher: com.lastwave.app.ui.generate.MixLauncher,
 ) : ViewModel() {
+    val navEvents = navigator.events
     val state = player.state
     val chromeState = player.chromeState
     val progressState = player.progressState
@@ -328,6 +331,26 @@ fun PlayerHost(
     LaunchedEffect(expanded) {
         if (!expanded) {
             currentTab = FullPlayerTab.NOW_PLAYING
+        }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.navEvents.collect {
+            expanded = false
+            currentTab = FullPlayerTab.NOW_PLAYING
+        }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.mixLauncher.requests.collect {
+            expanded = false
+            currentTab = FullPlayerTab.NOW_PLAYING
+        }
+    }
+    LaunchedEffect(Unit) {
+        viewModel.genreExplorer.pendingGenre.collect { genre ->
+            if (genre != null) {
+                expanded = false
+                currentTab = FullPlayerTab.NOW_PLAYING
+            }
         }
     }
     BackHandler(enabled = expanded) {
