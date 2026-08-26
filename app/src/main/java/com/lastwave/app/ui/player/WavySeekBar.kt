@@ -44,10 +44,10 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 /**
- * Shifts the lightness/value of a Compose Color by a subtle amount
- * to create refined, minimalistic tonal gradients within the same palette.
+ * Shifts the lightness and saturation of a Compose Color to produce
+ * rich, dynamic tonal variations within the theme palette.
  */
-private fun Color.shiftLightness(lightnessDelta: Float): Color {
+private fun Color.shiftTonal(lightnessDelta: Float, saturationScale: Float = 1.0f): Color {
     val hsv = FloatArray(3)
     android.graphics.Color.RGBToHSV(
         (red * 255).toInt().coerceIn(0, 255),
@@ -55,16 +55,19 @@ private fun Color.shiftLightness(lightnessDelta: Float): Color {
         (blue * 255).toInt().coerceIn(0, 255),
         hsv,
     )
-    hsv[2] = (hsv[2] + lightnessDelta).coerceIn(0.1f, 1.0f)
+    hsv[1] = (hsv[1] * saturationScale).coerceIn(0.15f, 1.0f)
+    hsv[2] = (hsv[2] + lightnessDelta).coerceIn(0.15f, 1.0f)
     val rgb = android.graphics.Color.HSVToColor(hsv)
     return Color(rgb)
 }
 
 /**
- * Material Design 3 Frosted Glass Waveform Seekbar.
- * Features 3 frosted glass wave layers with a subtle horizontal gradient transition
- * from a slightly lighter hue at the start to a slightly deeper/richer hue at the
- * current playback position.
+ * Material Design 3 Dynamic Counter-Gradient Frosted Glass Waveform Seekbar.
+ * Features 3 frosted glass waves that dynamically transition across playback progress:
+ * - Layer 1: Light -> Dark
+ * - Layer 2: Dark -> Light (Vice-versa)
+ * - Layer 3: Light -> Deep Vibrant Accent
+ * creating a rich, iridescent multi-depth liquid optical effect.
  */
 @Composable
 fun WavySeekBar(
@@ -227,7 +230,7 @@ fun WavySeekBar(
                 )
             }
 
-            // 2. Active 3-Layer Material Frosted Glass Waves with Progress Hue Shift
+            // 2. Active 3-Layer Material Frosted Glass Waves with Dynamic Counter-Gradients
             if (thumbX > 0f) {
                 val clipBounds = Path().apply {
                     addRoundRect(
@@ -292,15 +295,15 @@ fun WavySeekBar(
 
                     val activeWidth = thumbX.coerceAtLeast(1f)
 
-                    // Layer 1: Deepest Ambient Glass (Light tone at 0 -> slightly deeper at thumbX)
-                    val layer1Light = tertiaryColor.shiftLightness(+0.08f)
-                    val layer1Deep = tertiaryColor.shiftLightness(-0.06f)
+                    // Layer 1: Light -> Dark (Light soft tone at 0 -> Richer/Deeper tone at thumbX)
+                    val layer1Light = tertiaryColor.shiftTonal(lightnessDelta = +0.18f, saturationScale = 0.85f)
+                    val layer1Dark = tertiaryColor.shiftTonal(lightnessDelta = -0.15f, saturationScale = 1.30f)
                     drawPath(
                         path = filled1,
                         brush = Brush.linearGradient(
                             colors = listOf(
-                                layer1Light.copy(alpha = if (isTranslucent) 0.26f else 0.24f),
-                                layer1Deep.copy(alpha = if (isTranslucent) 0.08f else 0.06f),
+                                layer1Light.copy(alpha = if (isTranslucent) 0.28f else 0.26f),
+                                layer1Dark.copy(alpha = if (isTranslucent) 0.10f else 0.08f),
                             ),
                             start = Offset(0f, centerY - 20.dp.toPx()),
                             end = Offset(activeWidth, bottomY),
@@ -310,8 +313,8 @@ fun WavySeekBar(
                         path = contour1,
                         brush = Brush.horizontalGradient(
                             colors = listOf(
-                                layer1Light.copy(alpha = if (isTranslucent) 0.38f else 0.34f),
-                                layer1Deep.copy(alpha = if (isTranslucent) 0.30f else 0.26f),
+                                layer1Light.copy(alpha = if (isTranslucent) 0.42f else 0.38f),
+                                layer1Dark.copy(alpha = if (isTranslucent) 0.32f else 0.28f),
                             ),
                             startX = 0f,
                             endX = activeWidth,
@@ -319,15 +322,15 @@ fun WavySeekBar(
                         style = Stroke(width = 0.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 2: Middle Frosted Glass Layer
-                    val layer2Light = secondaryColor.shiftLightness(+0.07f)
-                    val layer2Deep = secondaryColor.shiftLightness(-0.06f)
+                    // Layer 2: Dark -> Light (Vice-Versa! Deeper rich tone at 0 -> Illuminated light tone at thumbX)
+                    val layer2Dark = secondaryColor.shiftTonal(lightnessDelta = -0.16f, saturationScale = 1.30f)
+                    val layer2Light = secondaryColor.shiftTonal(lightnessDelta = +0.18f, saturationScale = 0.85f)
                     drawPath(
                         path = filled2,
                         brush = Brush.linearGradient(
                             colors = listOf(
-                                layer2Light.copy(alpha = if (isTranslucent) 0.54f else 0.50f),
-                                layer2Deep.copy(alpha = if (isTranslucent) 0.22f else 0.18f),
+                                layer2Dark.copy(alpha = if (isTranslucent) 0.58f else 0.54f),
+                                layer2Light.copy(alpha = if (isTranslucent) 0.24f else 0.20f),
                             ),
                             start = Offset(0f, centerY - 15.dp.toPx()),
                             end = Offset(activeWidth, bottomY),
@@ -337,8 +340,8 @@ fun WavySeekBar(
                         path = contour2,
                         brush = Brush.horizontalGradient(
                             colors = listOf(
-                                layer2Light.copy(alpha = if (isTranslucent) 0.68f else 0.62f),
-                                layer2Deep.copy(alpha = if (isTranslucent) 0.58f else 0.52f),
+                                layer2Dark.copy(alpha = if (isTranslucent) 0.72f else 0.66f),
+                                layer2Light.copy(alpha = if (isTranslucent) 0.62f else 0.56f),
                             ),
                             startX = 0f,
                             endX = activeWidth,
@@ -346,15 +349,15 @@ fun WavySeekBar(
                         style = Stroke(width = 1.1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // Layer 3: Foreground Luminous Glass Ribbon
-                    val layer3Light = primaryColor.shiftLightness(+0.08f)
-                    val layer3Deep = primaryColor.shiftLightness(-0.06f)
+                    // Layer 3: Light -> Deep Vibrant Primary (Illuminated tint at 0 -> Deep saturated primary at thumbX)
+                    val layer3Light = primaryColor.shiftTonal(lightnessDelta = +0.20f, saturationScale = 0.90f)
+                    val layer3Dark = primaryColor.shiftTonal(lightnessDelta = -0.14f, saturationScale = 1.35f)
                     drawPath(
                         path = filled3,
                         brush = Brush.linearGradient(
                             colors = listOf(
-                                layer3Light.copy(alpha = if (isTranslucent) 0.92f else 0.88f),
-                                layer3Deep.copy(alpha = if (isTranslucent) 0.52f else 0.45f),
+                                layer3Light.copy(alpha = if (isTranslucent) 0.94f else 0.90f),
+                                layer3Dark.copy(alpha = if (isTranslucent) 0.58f else 0.50f),
                             ),
                             start = Offset(0f, centerY - 10.dp.toPx()),
                             end = Offset(activeWidth, bottomY),
@@ -365,7 +368,7 @@ fun WavySeekBar(
                         brush = Brush.horizontalGradient(
                             colors = listOf(
                                 layer3Light.copy(alpha = if (isTranslucent) 0.98f else 0.95f),
-                                layer3Deep.copy(alpha = if (isTranslucent) 0.90f else 0.85f),
+                                layer3Dark.copy(alpha = if (isTranslucent) 0.92f else 0.88f),
                             ),
                             startX = 0f,
                             endX = activeWidth,
@@ -373,10 +376,10 @@ fun WavySeekBar(
                         style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     )
 
-                    // 3. Crisp Baseline Bar with subtle light-to-dark gradient towards current playback
+                    // 3. Crisp Baseline Bar with Light -> Dark dynamic gradient
                     drawLine(
                         brush = Brush.horizontalGradient(
-                            colors = listOf(layer3Light, layer3Deep),
+                            colors = listOf(layer3Light, layer3Dark),
                             startX = 0f,
                             endX = activeWidth,
                         ),
@@ -390,7 +393,7 @@ fun WavySeekBar(
 
             // 4. Leading Thumb Indicator (At current playing position)
             if (state.durationMs > 0) {
-                val thumbColor = primaryColor.shiftLightness(-0.04f)
+                val thumbColor = primaryColor.shiftTonal(lightnessDelta = -0.10f, saturationScale = 1.25f)
                 // Soft glow halo
                 drawCircle(
                     color = thumbColor.copy(alpha = 0.28f),
