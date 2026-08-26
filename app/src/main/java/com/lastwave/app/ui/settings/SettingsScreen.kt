@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Waves
 import com.lastwave.app.data.local.LyricsAnimation
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Logout
@@ -529,7 +530,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Experimental")
-                    SettingsGroup(rowCount = 5) { index, position ->
+                    SettingsGroup(rowCount = 6) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.BubbleChart,
@@ -564,6 +565,20 @@ fun SettingsScreen(
                                 position = position,
                             )
                             3 -> SettingsToggleCard(
+                                icon = Icons.Filled.Waves,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Wavy Seekbar",
+                                subtitle = if (misc.wavySeekbarEnabled) {
+                                    "Multi-layer fluid wavy progress slider"
+                                } else {
+                                    "Classic standard progress slider"
+                                },
+                                checked = misc.wavySeekbarEnabled,
+                                onCheckedChange = viewModel::setWavySeekbarEnabled,
+                                position = position,
+                            )
+                            4 -> SettingsToggleCard(
                                 icon = Icons.Filled.AutoAwesome,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -577,7 +592,7 @@ fun SettingsScreen(
                                 onCheckedChange = viewModel::setStudioMasterClarity,
                                 position = position,
                             )
-                            4 -> SettingsActionCard(
+                            5 -> SettingsActionCard(
                                 icon = Icons.Filled.VolumeUp,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,

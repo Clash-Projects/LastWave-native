@@ -29,6 +29,7 @@ jobs:
       - name: Build Release APKs (compressed + raw)
         env:
           QOBUZ_API_KEY: ${{ secrets.QOBUZ_API_KEY }}
+          LYRICS_API_KEY: ${{ secrets.LYRICS_API_KEY }}
         run: ./gradlew assembleRelease assembleRawRelease --stacktrace
 
       - name: Sign Release APK with Custom Key (Optional)

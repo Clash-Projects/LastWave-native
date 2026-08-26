@@ -62,6 +62,9 @@ data class MiscSettings(
     val crossfadeEnabled: Boolean = false,
     /** Crossfade length in seconds; kept within the native settings slider range. */
     val crossfadeSeconds: Int = 5,
+    /** When true (default), uses the multi-layer dynamic wavy seekbar.
+     *  When false, uses the classic standard progress slider in the player tab. */
+    val wavySeekbarEnabled: Boolean = true,
 )
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
@@ -82,6 +85,7 @@ class SettingsPreferences @Inject constructor(
         val VOLUME_BOOST_PERCENT = androidx.datastore.preferences.core.intPreferencesKey("lw_volume_boost_percent")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
         val CROSSFADE_SECONDS = androidx.datastore.preferences.core.intPreferencesKey("lw_crossfade_seconds")
+        val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data
@@ -99,6 +103,7 @@ class SettingsPreferences @Inject constructor(
                 volumeBoostPercent = (p.readSafely(Keys.VOLUME_BOOST_PERCENT) ?: 100).coerceIn(100, 150),
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 10),
+                wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
             )
         }
 
@@ -140,6 +145,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setCrossfadeSeconds(seconds: Int) {
         dataStore.edit { it[Keys.CROSSFADE_SECONDS] = seconds.coerceIn(1, 10) }
+    }
+
+    suspend fun setWavySeekbarEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.WAVY_SEEKBAR_ENABLED] = enabled }
     }
 
     suspend fun toggleFriendPinned(username: String) {

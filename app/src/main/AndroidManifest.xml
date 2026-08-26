@@ -23,6 +23,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.LastWave.Splash"
         android:usesCleartextTraffic="false"
+        android:hardwareAccelerated="true"
+        android:largeHeap="true"
         android:enableOnBackInvokedCallback="true">
 
         <activity

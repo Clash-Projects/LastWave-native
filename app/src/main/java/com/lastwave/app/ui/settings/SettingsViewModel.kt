@@ -257,6 +257,9 @@ class SettingsViewModel @Inject constructor(
     fun setCrossfadeSeconds(seconds: Int) = launchSettingsAction("update crossfade duration") {
         settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 10))
     }
+    fun setWavySeekbarEnabled(enabled: Boolean) = launchSettingsAction("update seekbar style") {
+        settingsPreferences.setWavySeekbarEnabled(enabled)
+    }
 
     // ── Experimental: 15-band equalizer ──
 

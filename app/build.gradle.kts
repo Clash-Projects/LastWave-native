@@ -17,9 +17,40 @@ android {
         versionCode = 11
         versionName = "3.2.1"
 
-        val rawApiKey = System.getenv("QOBUZ_API_KEY") ?: (project.findProperty("QOBUZ_API_KEY") as? String) ?: ""
-        val qobuzApiKey = rawApiKey.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+        val localProps = java.util.Properties().apply {
+            val localPropsFile = rootProject.file("local.properties")
+            if (localPropsFile.exists()) {
+                load(localPropsFile.inputStream())
+            }
+            val envFile = rootProject.file(".env")
+            if (envFile.exists()) {
+                envFile.readLines().forEach { line ->
+                    val trimmed = line.trim()
+                    if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+                        val parts = trimmed.split("=", limit = 2)
+                        setProperty(parts[0].trim(), parts[1].trim())
+                    }
+                }
+            }
+        }
+
+        fun resolveSecret(vararg keys: String): String {
+            for (key in keys) {
+                val fromEnv = System.getenv(key)
+                if (!fromEnv.isNullOrBlank()) return fromEnv.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+                val fromGradle = project.findProperty(key) as? String
+                if (!fromGradle.isNullOrBlank()) return fromGradle.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+                val fromLocal = localProps.getProperty(key)
+                if (!fromLocal.isNullOrBlank()) return fromLocal.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+            }
+            return ""
+        }
+
+        val qobuzApiKey = resolveSecret("QOBUZ_API_KEY", "QOBUZ_AUTH_KEY", "API_AUTH_KEY")
         buildConfigField("String", "QOBUZ_API_KEY", "\"$qobuzApiKey\"")
+
+        val lyricsApiKey = resolveSecret("LYRICS_API_KEY", "API_KEY", "LYRICS_AUTH_TOKEN")
+        buildConfigField("String", "LYRICS_API_KEY", "\"$lyricsApiKey\"")
 
         externalNativeBuild {
             cmake {

@@ -1,5 +1,6 @@
 package com.lastwave.app.ui.player
 
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.AnimationSpec
@@ -18,6 +19,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -55,6 +58,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,19 +67,23 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.local.LyricsAnimation
 import com.lastwave.app.data.lyrics.LyricLine
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
+import com.lastwave.app.playback.PlaybackProgressState
 import com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator
 import com.lastwave.app.ui.common.ExpressiveMotion
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.liquidGlassChrome
-import kotlin.math.abs
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 
 sealed interface LyricsUiState {
     data object Idle : LyricsUiState
@@ -83,8 +91,10 @@ sealed interface LyricsUiState {
     data class Success(
         val lines: List<LyricLine>,
         val isSynced: Boolean,
+        val isWordSynced: Boolean = false,
         val plainLyrics: String? = null,
         val isInstrumental: Boolean = false,
+        val source: String? = null,
     ) : LyricsUiState
     data object Empty : LyricsUiState
     data class Error(val message: String) : LyricsUiState
@@ -95,6 +105,7 @@ fun LyricsPanel(
     state: MusicPlayerState,
     player: MusicPlayer,
     lyricsState: LyricsUiState,
+    progressState: StateFlow<PlaybackProgressState>? = null,
     lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
@@ -102,8 +113,34 @@ fun LyricsPanel(
     val track = state.current ?: return
     val liquidGlass = LocalLiquidGlass.current
 
-    // A restrained lyric-stage glow sits over the shared artwork background.
-    // It is static, so scrolling and per-line animations do not invalidate it.
+    // High-frequency live progress stream
+    val progress by (progressState ?: player.progress).collectAsStateWithLifecycle(
+        initialValue = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs),
+    )
+
+    // High-precision frame-level monotonic position clock for 60/120fps bit-perfect vocal sync
+    var smoothedPositionMs by remember(track.videoId) { mutableLongStateOf(progress.positionMs) }
+    var basePositionMs by remember(track.videoId) { mutableLongStateOf(progress.positionMs) }
+    var lastSyncTime by remember(track.videoId) { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+
+    LaunchedEffect(progress.positionMs, state.isPlaying) {
+        basePositionMs = progress.positionMs
+        lastSyncTime = SystemClock.elapsedRealtime()
+        smoothedPositionMs = progress.positionMs
+    }
+
+    LaunchedEffect(state.isPlaying) {
+        if (!state.isPlaying) return@LaunchedEffect
+        while (isActive) {
+            withFrameMillis {
+                val elapsed = SystemClock.elapsedRealtime() - lastSyncTime
+                val dur = progress.durationMs.takeIf { it > 0 } ?: state.durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE
+                smoothedPositionMs = (basePositionMs + elapsed).coerceIn(0L, dur)
+            }
+        }
+    }
+
+    // Restrained lyric-stage glow over the shared artwork background
     val primary = MaterialTheme.colorScheme.primary
     val tertiary = MaterialTheme.colorScheme.tertiary
     val ambientModifier = Modifier.drawBehind {
@@ -200,7 +237,7 @@ fun LyricsPanel(
                         } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
                             SyncedLyricsList(
                                 lines = targetState.lines,
-                                currentPositionMs = state.positionMs,
+                                currentPositionMs = smoothedPositionMs,
                                 isPlaying = state.isPlaying,
                                 onSeek = player::seekTo,
                                 animationStyle = lyricsAnimation,
@@ -262,6 +299,8 @@ fun LyricsPanel(
         // Bottom compact playback bar in lyrics view
         LyricsBottomControls(
             state = state,
+            currentPositionMs = smoothedPositionMs,
+            totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
             player = player,
             liquidGlass = liquidGlass,
             modifier = Modifier
@@ -285,11 +324,11 @@ private fun SyncedLyricsList(
     val listState = rememberLazyListState()
     var userScrolledTime by remember { mutableLongStateOf(0L) }
 
-    // Sync lead compensation (600ms): compensates for AudioTrack buffer latency,
-    // decoder output buffer, and animation interpolation so the active line highlights on the exact vocal onset.
-    val activeIndex = remember(lines, currentPositionMs) {
-        val adjustedPositionMs = currentPositionMs + 600L
-        lines.indexOfLast { it.timeMs <= adjustedPositionMs }
+    // Active line detection: Exact millisecond vocal onset matching
+    val activeIndex by remember(lines, currentPositionMs) {
+        androidx.compose.runtime.derivedStateOf {
+            lines.indexOfLast { it.timeMs <= currentPositionMs }
+        }
     }
 
     if (listState.isScrollInProgress) {
@@ -298,7 +337,7 @@ private fun SyncedLyricsList(
 
     LaunchedEffect(activeIndex, isPlaying) {
         val timeSinceUserScroll = System.currentTimeMillis() - userScrolledTime
-        if (timeSinceUserScroll > 2500L && activeIndex in lines.indices) {
+        if (timeSinceUserScroll > 2200L && activeIndex in lines.indices) {
             val scrollOffset = when (animationStyle) {
                 LyricsAnimation.APPLE_ZOOM -> -210
                 LyricsAnimation.CINEMATIC_BLUR -> -190
@@ -331,10 +370,9 @@ private fun SyncedLyricsList(
         itemsIndexed(lines, key = { index, line -> "$index:${line.timeMs}" }) { index, line ->
             val isActive = index == activeIndex
             val isPast = activeIndex >= 0 && index < activeIndex
-            val distance = if (activeIndex >= 0) abs(index - activeIndex) else 10
+            val distance = kotlin.math.abs(index - activeIndex)
 
-            // ── Motion Physics Dispatcher (8 Distinct Movement Styles) ──
-
+            // Motion Physics
             val scaleTarget = when (animationStyle) {
                 LyricsAnimation.APPLE_FLUID -> if (isActive) 1.06f else 1f
                 LyricsAnimation.KARAOKE_PULSE -> if (isActive) 1.09f else 1f
@@ -376,7 +414,7 @@ private fun SyncedLyricsList(
                 label = "lyricScale_$index",
             )
 
-            // Horizontal Slide (Kinetic Slide style)
+            // Horizontal Slide
             val translationXTarget = when (animationStyle) {
                 LyricsAnimation.KINETIC_SLIDE -> if (isActive) 0f else -14f
                 else -> 0f
@@ -387,7 +425,7 @@ private fun SyncedLyricsList(
                 label = "lyricTransX_$index",
             )
 
-            // Vertical Drift (Cinematic Focus style)
+            // Vertical Drift
             val translationYTarget = when (animationStyle) {
                 LyricsAnimation.CINEMATIC_BLUR -> when {
                     isActive -> 0f
@@ -434,7 +472,7 @@ private fun SyncedLyricsList(
                 label = "lyricColor_$index",
             )
 
-            // Container Background & Border (Liquid Glass and Card Pop integration)
+            // Container Background & Border
             val pillShape = RoundedCornerShape(18.dp)
             val cardBg = when {
                 liquidGlass && animationStyle == LyricsAnimation.CARD_POP -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.90f)
@@ -523,7 +561,6 @@ private fun SyncedLyricsList(
                         vertical = if (isActive) 10.dp else 8.dp,
                     ),
             ) {
-                // Text typography & styling
                 val fontStyle = if (isActive) {
                     MaterialTheme.typography.headlineSmall.copy(
                         fontWeight = if (animationStyle == LyricsAnimation.APPLE_ZOOM) FontWeight.Black else FontWeight.ExtraBold,
@@ -537,13 +574,122 @@ private fun SyncedLyricsList(
                     )
                 }
 
-                Text(
-                    text = line.text.ifBlank { "♪" },
-                    style = fontStyle,
-                    color = textColor,
-                    textAlign = TextAlign.Start,
+                WordByWordLyricLine(
+                    line = line,
+                    currentPositionMs = currentPositionMs,
+                    isActive = isActive,
+                    activeColor = textColor,
+                    inactiveColor = MaterialTheme.colorScheme.onSurface,
+                    liquidGlass = liquidGlass,
+                    fontStyle = fontStyle,
                 )
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun WordByWordLyricLine(
+    line: LyricLine,
+    currentPositionMs: Long,
+    isActive: Boolean,
+    activeColor: Color,
+    inactiveColor: Color,
+    liquidGlass: Boolean,
+    fontStyle: TextStyle,
+    modifier: Modifier = Modifier,
+) {
+    if (!line.hasSyllables || !isActive) {
+        Column(modifier = modifier) {
+            Text(
+                text = line.text.ifBlank { "♪" },
+                style = fontStyle,
+                color = if (isActive) activeColor else inactiveColor,
+                textAlign = TextAlign.Start,
+            )
+            if (!line.transliteration.isNullOrBlank() && isActive) {
+                Text(
+                    text = line.transliteration,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.2.sp,
+                    ),
+                    color = activeColor.copy(alpha = 0.72f),
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+        }
+        return
+    }
+
+    Column(modifier = modifier) {
+        FlowRow(
+            horizontalArrangement = Arrangement.Start,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            line.syllables.forEachIndexed { sIndex, syllable ->
+                val sylStart = syllable.timeMs
+                val sylEnd = syllable.timeMs + syllable.durationMs
+                val isSyllableActive = currentPositionMs in sylStart until sylEnd
+                val isSyllablePast = currentPositionMs >= sylEnd
+
+                val sylScaleTarget = if (isSyllableActive) 1.06f else 1f
+                val sylScale by animateFloatAsState(
+                    targetValue = sylScaleTarget,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessLow,
+                    ),
+                    label = "sylScale_${sIndex}",
+                )
+
+                val sylAlphaTarget = when {
+                    isSyllableActive -> 1f
+                    isSyllablePast -> 0.96f
+                    else -> 0.40f
+                }
+                val sylAlpha by animateFloatAsState(
+                    targetValue = sylAlphaTarget,
+                    animationSpec = tween(60),
+                    label = "sylAlpha_${sIndex}",
+                )
+
+                val sylColor by animateColorAsState(
+                    targetValue = when {
+                        isSyllableActive -> if (liquidGlass) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary
+                        isSyllablePast -> activeColor
+                        else -> inactiveColor.copy(alpha = 0.40f)
+                    },
+                    animationSpec = tween(80),
+                    label = "sylColor_${sIndex}",
+                )
+
+                Text(
+                    text = syllable.text,
+                    style = fontStyle,
+                    color = sylColor,
+                    modifier = Modifier
+                        .graphicsLayer {
+                            scaleX = sylScale
+                            scaleY = sylScale
+                            alpha = sylAlpha
+                        },
+                )
+            }
+        }
+
+        if (!line.transliteration.isNullOrBlank()) {
+            Text(
+                text = line.transliteration,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Medium,
+                    letterSpacing = 0.2.sp,
+                ),
+                color = activeColor.copy(alpha = 0.76f),
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
     }
 }
@@ -681,7 +827,7 @@ private fun EmptyLyricsView(
                 text = if (isInstrumental) {
                     "This track has no vocal lyrics."
                 } else {
-                    "Couldn't find lyrics for this song on LRCLIB."
+                    "No synced lyrics found for this track."
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -706,6 +852,8 @@ private fun EmptyLyricsView(
 @Composable
 private fun LyricsBottomControls(
     state: MusicPlayerState,
+    currentPositionMs: Long,
+    totalDurationMs: Long,
     player: MusicPlayer,
     liquidGlass: Boolean,
     modifier: Modifier = Modifier,
@@ -742,15 +890,15 @@ private fun LyricsBottomControls(
         ) {
             var dragging by remember { mutableStateOf(false) }
             var dragValue by remember { mutableFloatStateOf(0f) }
-            val end = state.durationMs.coerceAtLeast(1).toFloat()
-            val shown = if (dragging) dragValue else state.positionMs.coerceIn(0, state.durationMs.coerceAtLeast(0)).toFloat()
+            val end = totalDurationMs.coerceAtLeast(1).toFloat()
+            val shown = if (dragging) dragValue else currentPositionMs.coerceIn(0, totalDurationMs.coerceAtLeast(0)).toFloat()
 
             PlayerProgressSlider(
                 value = shown.coerceIn(0f, end),
                 onValueChange = { dragging = true; dragValue = it },
                 onValueChangeFinished = { player.seekTo(dragValue.toLong()); dragging = false },
                 valueRange = 0f..end,
-                enabled = state.durationMs > 0,
+                enabled = totalDurationMs > 0,
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -823,7 +971,7 @@ private fun LyricsBottomControls(
                 }
 
                 Text(
-                    "−${formatTime((state.durationMs - shown.toLong()).coerceAtLeast(0))}",
+                    "−${formatTime((totalDurationMs - shown.toLong()).coerceAtLeast(0))}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
                 )

@@ -72,29 +72,31 @@ private fun Color.shiftTonal(lightnessDelta: Float, saturationScale: Float = 1.0
  */
 @Composable
 fun WavySeekBar(
-    state: MusicPlayerState,
+    positionMs: Long,
+    durationMs: Long,
+    isPlaying: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
     isTranslucent: Boolean = false,
+    trackKey: String? = null,
 ) {
-    val trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" }
     val interactionSource = remember(trackKey) { MutableInteractionSource() }
     val dragging by interactionSource.collectIsDraggedAsState()
     var dragPositionMs by remember(trackKey) { mutableFloatStateOf(0f) }
 
-    val durationMs = state.durationMs.coerceAtLeast(0L)
-    val boundedPositionMs = if (durationMs > 0L) {
-        state.positionMs.coerceIn(0L, durationMs)
+    val boundedDurationMs = durationMs.coerceAtLeast(0L)
+    val boundedPositionMs = if (boundedDurationMs > 0L) {
+        positionMs.coerceIn(0L, boundedDurationMs)
     } else {
         0L
     }
     val shownMs = if (dragging) {
-        dragPositionMs.toLong().coerceIn(0L, durationMs)
+        dragPositionMs.toLong().coerceIn(0L, boundedDurationMs)
     } else {
         boundedPositionMs
     }
-    val shownFraction = if (durationMs > 0L) {
-        (shownMs.toDouble() / durationMs.toDouble()).toFloat().coerceIn(0f, 1f)
+    val shownFraction = if (boundedDurationMs > 0L) {
+        (shownMs.toDouble() / boundedDurationMs.toDouble()).toFloat().coerceIn(0f, 1f)
     } else {
         0f
     }
@@ -115,7 +117,16 @@ fun WavySeekBar(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    // Faster, fluid wave animations
+    // Pre-calculated tonal palette (zero allocation in draw loop)
+    val layer1Light = remember(tertiaryColor, isTranslucent) { tertiaryColor.shiftTonal(lightnessDelta = +0.18f, saturationScale = 0.85f) }
+    val layer1Dark = remember(tertiaryColor, isTranslucent) { tertiaryColor.shiftTonal(lightnessDelta = -0.15f, saturationScale = 1.30f) }
+    val layer2Dark = remember(secondaryColor, isTranslucent) { secondaryColor.shiftTonal(lightnessDelta = -0.16f, saturationScale = 1.30f) }
+    val layer2Light = remember(secondaryColor, isTranslucent) { secondaryColor.shiftTonal(lightnessDelta = +0.18f, saturationScale = 0.85f) }
+    val layer3Light = remember(primaryColor, isTranslucent) { primaryColor.shiftTonal(lightnessDelta = +0.20f, saturationScale = 0.90f) }
+    val layer3Dark = remember(primaryColor, isTranslucent) { primaryColor.shiftTonal(lightnessDelta = -0.14f, saturationScale = 1.35f) }
+    val thumbColor = remember(primaryColor) { primaryColor.shiftTonal(lightnessDelta = -0.10f, saturationScale = 1.25f) }
+
+    // Fluid wave animations
     val infiniteTransition = rememberInfiniteTransition(label = "MaterialGlassWaveAnimation")
 
     val phase1 by infiniteTransition.animateFloat(
@@ -148,10 +159,10 @@ fun WavySeekBar(
         label = "Phase3",
     )
 
-    val isPlaying = state.isPlaying && !dragging
-    val currPhase1 = if (isPlaying) phase1 + 2.2f else 2.2f
-    val currPhase2 = if (isPlaying) phase2 + 1.2f else 1.2f
-    val currPhase3 = if (isPlaying) phase3 else 0f
+    val wavesActive = isPlaying && !dragging
+    val currPhase1 = if (wavesActive) phase1 + 2.2f else 2.2f
+    val currPhase2 = if (wavesActive) phase2 + 1.2f else 1.2f
+    val currPhase3 = if (wavesActive) phase3 else 0f
 
     // 3-Tier Amplitudes with smooth dampening on seek
     val density = LocalDensity.current
@@ -184,6 +195,16 @@ fun WavySeekBar(
     val baseTrackThicknessPx = with(density) { 4.5.dp.toPx() }
     val thumbRadiusPx = with(density) { 7.5.dp.toPx() }
     val transitionLengthPx = with(density) { 28.dp.toPx() }
+    val waveSampleStepPx = with(density) { 3.5.dp.toPx() }
+
+    // Reusable Path caches to eliminate garbage collector allocations during frame drawing
+    val pathFilled1 = remember { Path() }
+    val pathContour1 = remember { Path() }
+    val pathFilled2 = remember { Path() }
+    val pathContour2 = remember { Path() }
+    val pathFilled3 = remember { Path() }
+    val pathContour3 = remember { Path() }
+    val clipPathBounds = remember { Path() }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Box(
@@ -192,29 +213,29 @@ fun WavySeekBar(
                 .height(50.dp),
         ) {
             Canvas(modifier = Modifier.matchParentSize()) {
-            val width = size.width
-            val height = size.height
-            val centerY = height / 2f + 7.dp.toPx()
-            val thumbX = (shownFraction * width).coerceIn(0f, width)
-            val halfThickness = baseTrackThicknessPx / 2f
-            val bottomY = centerY + halfThickness
-            val topBaselineY = centerY - halfThickness
+                val width = size.width
+                val height = size.height
+                val centerY = height / 2f + 7.dp.toPx()
+                val thumbX = (shownFraction * width).coerceIn(0f, width)
+                val halfThickness = baseTrackThicknessPx / 2f
+                val bottomY = centerY + halfThickness
+                val topBaselineY = centerY - halfThickness
 
-            // 1. Inactive background track: Straight horizontal capsule bar from thumbX to end
-            if (thumbX < width) {
-                drawLine(
-                    color = inactiveColor,
-                    start = Offset(thumbX, centerY),
-                    end = Offset(width, centerY),
-                    strokeWidth = baseTrackThicknessPx,
-                    cap = StrokeCap.Round,
-                )
-            }
+                // 1. Inactive background track: Straight horizontal capsule bar from thumbX to end
+                if (thumbX < width) {
+                    drawLine(
+                        color = inactiveColor,
+                        start = Offset(thumbX, centerY),
+                        end = Offset(width, centerY),
+                        strokeWidth = baseTrackThicknessPx,
+                        cap = StrokeCap.Round,
+                    )
+                }
 
-            // 2. Active 3-Layer Material Frosted Glass Waves with Dynamic Counter-Gradients
-            if (thumbX > 0f) {
-                val clipBounds = Path().apply {
-                    addRoundRect(
+                // 2. Active 3-Layer Material Frosted Glass Waves with Dynamic Counter-Gradients
+                if (thumbX > 0f) {
+                    clipPathBounds.reset()
+                    clipPathBounds.addRoundRect(
                         RoundRect(
                             rect = androidx.compose.ui.geometry.Rect(
                                 left = 0f,
@@ -228,180 +249,172 @@ fun WavySeekBar(
                             bottomRight = CornerRadius(0f, 0f),
                         )
                     )
-                }
 
-                clipPath(clipBounds) {
-                    // Quintic smootherstep function for seamless C² continuity
-                    fun smootherstep(t: Float): Float {
-                        val c = t.coerceIn(0f, 1f)
-                        return c * c * c * (c * (c * 6f - 15f) + 10f)
-                    }
-
-                    // Builds a smooth filled wave body down to the bottom baseline
-                    fun buildFilledWave(
-                        wavelength: Float,
-                        amplitude: Float,
-                        phase: Float,
-                    ): Pair<Path, Path> {
-                        val filledPath = Path()
-                        val contourPath = Path()
-                        filledPath.moveTo(0f, bottomY)
-                        filledPath.lineTo(0f, topBaselineY)
-                        contourPath.moveTo(0f, topBaselineY)
-
-                        val step = 0.9f // Sub-pixel sampling resolution
-                        var x = 0f
-                        while (x <= thumbX) {
-                            val startEnv = smootherstep(x / transitionLengthPx)
-                            val endEnv = smootherstep((thumbX - x) / transitionLengthPx)
-                            val envelope = startEnv * endEnv
-
-                            val angle = ((x / wavelength) * 2 * PI).toFloat() - phase
-                            val waveHeight = (0.5f + 0.5f * sin(angle)) * amplitude * envelope
-                            val y = topBaselineY - waveHeight
-
-                            filledPath.lineTo(x, y)
-                            contourPath.lineTo(x, y)
-                            x += step
+                    clipPath(clipPathBounds) {
+                        fun smootherstep(t: Float): Float {
+                            val c = t.coerceIn(0f, 1f)
+                            return c * c * c * (c * (c * 6f - 15f) + 10f)
                         }
-                        filledPath.lineTo(thumbX, bottomY)
-                        filledPath.close()
 
-                        return Pair(filledPath, contourPath)
+                        fun populateWave(
+                            filled: Path,
+                            contour: Path,
+                            wavelength: Float,
+                            amplitude: Float,
+                            phase: Float,
+                        ) {
+                            filled.reset()
+                            contour.reset()
+                            filled.moveTo(0f, bottomY)
+                            filled.lineTo(0f, topBaselineY)
+                            contour.moveTo(0f, topBaselineY)
+
+                            var x = 0f
+                            val invTransition = 1f / transitionLengthPx
+                            val invWavelength2Pi = (2 * PI / wavelength).toFloat()
+                            while (x < thumbX) {
+                                val startEnv = smootherstep(x * invTransition)
+                                val endEnv = smootherstep((thumbX - x) * invTransition)
+                                val envelope = startEnv * endEnv
+
+                                val angle = x * invWavelength2Pi - phase
+                                val waveHeight = (0.5f + 0.5f * sin(angle)) * amplitude * envelope
+                                val y = topBaselineY - waveHeight
+
+                                filled.lineTo(x, y)
+                                contour.lineTo(x, y)
+                                x += waveSampleStepPx
+                            }
+                            // Exact end point at thumbX
+                            val endY = topBaselineY
+                            filled.lineTo(thumbX, endY)
+                            contour.lineTo(thumbX, endY)
+
+                            filled.lineTo(thumbX, bottomY)
+                            filled.close()
+                        }
+
+                        populateWave(pathFilled1, pathContour1, waveLength1Px, amp1, currPhase1)
+                        populateWave(pathFilled2, pathContour2, waveLength2Px, amp2, currPhase2)
+                        populateWave(pathFilled3, pathContour3, waveLength3Px, amp3, currPhase3)
+
+                        val activeWidth = thumbX.coerceAtLeast(1f)
+
+                        // Layer 1: Light -> Dark
+                        drawPath(
+                            path = pathFilled1,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    layer1Light.copy(alpha = if (isTranslucent) 0.28f else 0.26f),
+                                    layer1Dark.copy(alpha = if (isTranslucent) 0.10f else 0.08f),
+                                ),
+                                start = Offset(0f, centerY - 20.dp.toPx()),
+                                end = Offset(activeWidth, bottomY),
+                            ),
+                        )
+                        drawPath(
+                            path = pathContour1,
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(
+                                    layer1Light.copy(alpha = if (isTranslucent) 0.42f else 0.38f),
+                                    layer1Dark.copy(alpha = if (isTranslucent) 0.32f else 0.28f),
+                                ),
+                                startX = 0f,
+                                endX = activeWidth,
+                            ),
+                            style = Stroke(width = 0.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        )
+
+                        // Layer 2: Dark -> Light
+                        drawPath(
+                            path = pathFilled2,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    layer2Dark.copy(alpha = if (isTranslucent) 0.58f else 0.54f),
+                                    layer2Light.copy(alpha = if (isTranslucent) 0.24f else 0.20f),
+                                ),
+                                start = Offset(0f, centerY - 15.dp.toPx()),
+                                end = Offset(activeWidth, bottomY),
+                            ),
+                        )
+                        drawPath(
+                            path = pathContour2,
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(
+                                    layer2Dark.copy(alpha = if (isTranslucent) 0.72f else 0.66f),
+                                    layer2Light.copy(alpha = if (isTranslucent) 0.62f else 0.56f),
+                                ),
+                                startX = 0f,
+                                endX = activeWidth,
+                            ),
+                            style = Stroke(width = 1.1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        )
+
+                        // Layer 3: Light -> Deep Vibrant Primary
+                        drawPath(
+                            path = pathFilled3,
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    layer3Light.copy(alpha = if (isTranslucent) 0.94f else 0.90f),
+                                    layer3Dark.copy(alpha = if (isTranslucent) 0.58f else 0.50f),
+                                ),
+                                start = Offset(0f, centerY - 10.dp.toPx()),
+                                end = Offset(activeWidth, bottomY),
+                            ),
+                        )
+                        drawPath(
+                            path = pathContour3,
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(
+                                    layer3Light.copy(alpha = if (isTranslucent) 0.98f else 0.95f),
+                                    layer3Dark.copy(alpha = if (isTranslucent) 0.92f else 0.88f),
+                                ),
+                                startX = 0f,
+                                endX = activeWidth,
+                            ),
+                            style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        )
+
+                        // 3. Crisp Baseline Bar with Light -> Dark dynamic gradient
+                        drawLine(
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(layer3Light, layer3Dark),
+                                startX = 0f,
+                                endX = activeWidth,
+                            ),
+                            start = Offset(0f, centerY),
+                            end = Offset(thumbX, centerY),
+                            strokeWidth = baseTrackThicknessPx,
+                            cap = StrokeCap.Round,
+                        )
                     }
+                }
 
-                    val (filled1, contour1) = buildFilledWave(waveLength1Px, amp1, currPhase1)
-                    val (filled2, contour2) = buildFilledWave(waveLength2Px, amp2, currPhase2)
-                    val (filled3, contour3) = buildFilledWave(waveLength3Px, amp3, currPhase3)
-
-                    val activeWidth = thumbX.coerceAtLeast(1f)
-
-                    // Layer 1: Light -> Dark (Light soft tone at 0 -> Richer/Deeper tone at thumbX)
-                    val layer1Light = tertiaryColor.shiftTonal(lightnessDelta = +0.18f, saturationScale = 0.85f)
-                    val layer1Dark = tertiaryColor.shiftTonal(lightnessDelta = -0.15f, saturationScale = 1.30f)
-                    drawPath(
-                        path = filled1,
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                layer1Light.copy(alpha = if (isTranslucent) 0.28f else 0.26f),
-                                layer1Dark.copy(alpha = if (isTranslucent) 0.10f else 0.08f),
-                            ),
-                            start = Offset(0f, centerY - 20.dp.toPx()),
-                            end = Offset(activeWidth, bottomY),
-                        ),
+                // 4. Leading Thumb Indicator (At current playing position)
+                if (boundedDurationMs > 0) {
+                    // Soft glow halo
+                    drawCircle(
+                        color = thumbColor.copy(alpha = 0.28f),
+                        radius = thumbRadiusPx + 3.dp.toPx(),
+                        center = Offset(thumbX, centerY),
                     )
-                    drawPath(
-                        path = contour1,
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(
-                                layer1Light.copy(alpha = if (isTranslucent) 0.42f else 0.38f),
-                                layer1Dark.copy(alpha = if (isTranslucent) 0.32f else 0.28f),
-                            ),
-                            startX = 0f,
-                            endX = activeWidth,
-                        ),
-                        style = Stroke(width = 0.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-                    )
-
-                    // Layer 2: Dark -> Light (Vice-Versa! Deeper rich tone at 0 -> Illuminated light tone at thumbX)
-                    val layer2Dark = secondaryColor.shiftTonal(lightnessDelta = -0.16f, saturationScale = 1.30f)
-                    val layer2Light = secondaryColor.shiftTonal(lightnessDelta = +0.18f, saturationScale = 0.85f)
-                    drawPath(
-                        path = filled2,
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                layer2Dark.copy(alpha = if (isTranslucent) 0.58f else 0.54f),
-                                layer2Light.copy(alpha = if (isTranslucent) 0.24f else 0.20f),
-                            ),
-                            start = Offset(0f, centerY - 15.dp.toPx()),
-                            end = Offset(activeWidth, bottomY),
-                        ),
-                    )
-                    drawPath(
-                        path = contour2,
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(
-                                layer2Dark.copy(alpha = if (isTranslucent) 0.72f else 0.66f),
-                                layer2Light.copy(alpha = if (isTranslucent) 0.62f else 0.56f),
-                            ),
-                            startX = 0f,
-                            endX = activeWidth,
-                        ),
-                        style = Stroke(width = 1.1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-                    )
-
-                    // Layer 3: Light -> Deep Vibrant Primary (Illuminated tint at 0 -> Deep saturated primary at thumbX)
-                    val layer3Light = primaryColor.shiftTonal(lightnessDelta = +0.20f, saturationScale = 0.90f)
-                    val layer3Dark = primaryColor.shiftTonal(lightnessDelta = -0.14f, saturationScale = 1.35f)
-                    drawPath(
-                        path = filled3,
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                layer3Light.copy(alpha = if (isTranslucent) 0.94f else 0.90f),
-                                layer3Dark.copy(alpha = if (isTranslucent) 0.58f else 0.50f),
-                            ),
-                            start = Offset(0f, centerY - 10.dp.toPx()),
-                            end = Offset(activeWidth, bottomY),
-                        ),
-                    )
-                    drawPath(
-                        path = contour3,
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(
-                                layer3Light.copy(alpha = if (isTranslucent) 0.98f else 0.95f),
-                                layer3Dark.copy(alpha = if (isTranslucent) 0.92f else 0.88f),
-                            ),
-                            startX = 0f,
-                            endX = activeWidth,
-                        ),
-                        style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-                    )
-
-                    // 3. Crisp Baseline Bar with Light -> Dark dynamic gradient
-                    drawLine(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(layer3Light, layer3Dark),
-                            startX = 0f,
-                            endX = activeWidth,
-                        ),
-                        start = Offset(0f, centerY),
-                        end = Offset(thumbX, centerY),
-                        strokeWidth = baseTrackThicknessPx,
-                        cap = StrokeCap.Round,
+                    // Solid center circle
+                    drawCircle(
+                        color = thumbColor,
+                        radius = thumbRadiusPx,
+                        center = Offset(thumbX, centerY),
                     )
                 }
             }
 
-            // 4. Leading Thumb Indicator (At current playing position)
-            if (state.durationMs > 0) {
-                val thumbColor = primaryColor.shiftTonal(lightnessDelta = -0.10f, saturationScale = 1.25f)
-                // Soft glow halo
-                drawCircle(
-                    color = thumbColor.copy(alpha = 0.28f),
-                    radius = thumbRadiusPx + 3.dp.toPx(),
-                    center = Offset(thumbX, centerY),
-                )
-                // Solid center circle
-                drawCircle(
-                    color = thumbColor,
-                    radius = thumbRadiusPx,
-                    center = Offset(thumbX, centerY),
-                )
-            }
-            }
-
-            // Let Material's battle-tested slider own touch arbitration,
-            // cancellation and accessibility while the Canvas supplies the
-            // custom wave visuals. The previous competing gesture
-            // recognizers could leave dragging=true forever after cancellation.
             Slider(
                 value = shownMs.toFloat(),
                 onValueChange = { dragPositionMs = it },
                 onValueChangeFinished = {
-                    onSeek(dragPositionMs.toLong().coerceIn(0L, durationMs))
+                    onSeek(dragPositionMs.toLong().coerceIn(0L, boundedDurationMs))
                 },
-                valueRange = 0f..durationMs.coerceAtLeast(1L).toFloat(),
-                enabled = durationMs > 0L,
+                valueRange = 0f..boundedDurationMs.coerceAtLeast(1L).toFloat(),
+                enabled = boundedDurationMs > 0L,
                 interactionSource = interactionSource,
                 modifier = Modifier
                     .matchParentSize()
@@ -424,10 +437,28 @@ fun WavySeekBar(
                 color = textColor,
             )
             Text(
-                text = "−${formatTime((durationMs - shownMs).coerceAtLeast(0))}",
+                text = "−${formatTime((boundedDurationMs - shownMs).coerceAtLeast(0))}",
                 style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
                 color = textColor,
             )
         }
     }
+}
+
+@Composable
+fun WavySeekBar(
+    state: MusicPlayerState,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    isTranslucent: Boolean = false,
+) {
+    WavySeekBar(
+        positionMs = state.positionMs,
+        durationMs = state.durationMs,
+        isPlaying = state.isPlaying,
+        onSeek = onSeek,
+        modifier = modifier,
+        isTranslucent = isTranslucent,
+        trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" },
+    )
 }

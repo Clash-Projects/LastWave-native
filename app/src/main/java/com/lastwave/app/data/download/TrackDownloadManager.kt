@@ -33,8 +33,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.Call
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
@@ -102,6 +104,7 @@ class TrackDownloadManager @Inject constructor(
             context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         }.getOrNull()
     }
+    private val activeCalls = ConcurrentHashMap<String, Call>()
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val activeUris = ConcurrentHashMap<String, Uri>()
     private val activeFiles = ConcurrentHashMap<String, File>()
@@ -141,10 +144,14 @@ class TrackDownloadManager @Inject constructor(
     }
 
     fun cancelDownload(key: String) {
+        // 1. Immediately abort active network socket / HTTP call in 0ms
+        activeCalls.remove(key)?.cancel()
+
+        // 2. Cancel coroutine job
         val job = activeJobs.remove(key)
         job?.cancel()
 
-        // Clean up partial media entry/file
+        // 3. Clean up partial media entry/file
         activeUris.remove(key)?.let { uri ->
             runCatching { context.contentResolver.delete(uri, null, null) }
         }
@@ -184,7 +191,6 @@ class TrackDownloadManager @Inject constructor(
                     val best = runCatching { innerTube.findBestMatch(title, artist) }.getOrNull()
                     if (resolvedArtworkUrl == null) {
                         resolvedArtworkUrl = best?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
-                    }
                     if (resolvedAlbum == null) {
                         resolvedAlbum = best?.album?.takeIf { it.isNotBlank() }
                     }
@@ -276,11 +282,19 @@ class TrackDownloadManager @Inject constructor(
                     var downloadSuccess = false
 
                     while (downloadAttempt <= MAX_DOWNLOAD_RETRIES && !downloadSuccess) {
+                        if (!coroutineContext.isActive) throw CancellationException("Download cancelled by user")
                         val requestBuilder = Request.Builder().url(resolvedUrl!!)
-                        requestBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
+                        requestBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/133.0.0.0 Safari/537.36")
                         requestBuilder.header("Accept", "*/*")
                         val request = requestBuilder.build()
-                        val response = downloadClient.newCall(request).execute()
+                        val call = downloadClient.newCall(request)
+                        activeCalls[key] = call
+
+                        val response = try {
+                            call.execute()
+                        } finally {
+                            activeCalls.remove(key)
+                        }
 
                         if (!response.isSuccessful) throw IOException("HTTP ${response.code} downloading track")
 
@@ -322,6 +336,10 @@ class TrackDownloadManager @Inject constructor(
 
                         FileOutputStream(tempDownloadFile).use { fos ->
                             while (source.read(buffer).also { bytesRead = it } != -1) {
+                                if (!coroutineContext.isActive) {
+                                    source.close()
+                                    throw CancellationException("Download cancelled by user")
+                                }
                                 fos.write(buffer, 0, bytesRead)
                                 bytesReadTotal += bytesRead
 
@@ -370,7 +388,6 @@ class TrackDownloadManager @Inject constructor(
                     val safeFilename = sanitizeFilename("$artist - $title") + ".$extension"
 
                     // 3. Fetch lyrics BEFORE tagging so they can be embedded
-                    // INTO the audio file (a sidecar alone lands in a folder
                     // most players never associate with the track).
                     var hasLyrics = false
                     var syncedLyrics: String? = null
@@ -442,7 +459,6 @@ class TrackDownloadManager @Inject constructor(
 
                     val finalPath = file?.absolutePath ?: uri?.toString() ?: safeFilename
 
-
                 // 7. Also write the sidecar .lrc companion file for players that read them
                 val lyricsText = syncedLyrics ?: plainLyrics
                 if (!lyricsText.isNullOrBlank()) {
@@ -450,7 +466,7 @@ class TrackDownloadManager @Inject constructor(
                     lrcPath = writePublicCompanionFile(lrcFilename, lyricsText, "text/plain")
                 }
 
-                // 6. Persist to Room database
+                // 8. Persist to Room database
                 val entity = DownloadedTrackEntity(
                     title = title,
                     artist = artist,
@@ -491,24 +507,35 @@ class TrackDownloadManager @Inject constructor(
                 notificationManager?.cancel(notifId)
                 _downloads.update { it - key }
             } catch (error: Exception) {
-                destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
-                destinationFile?.let { runCatching { if (it.exists()) it.delete() } }
-                updateProgress(
-                    DownloadProgress(
-                        key = key,
-                        title = title,
-                        artist = artist,
-                        error = error.localizedMessage ?: error.message ?: "Download failed",
-                    ),
-                )
-                showErrorNotification(notifId, title, artist, error.localizedMessage ?: "Failed")
+                val isCancel = error is java.io.InterruptedIOException ||
+                    error.message?.contains("canceled", ignoreCase = true) == true ||
+                    error.message?.contains("Socket closed", ignoreCase = true) == true ||
+                    !job.isActive
+                if (isCancel) {
+                    destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+                    destinationFile?.let { runCatching { if (it.exists()) it.delete() } }
+                    notificationManager?.cancel(notifId)
+                    _downloads.update { it - key }
+                } else {
+                    destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+                    destinationFile?.let { runCatching { if (it.exists()) it.delete() } }
+                    updateProgress(
+                        DownloadProgress(
+                            key = key,
+                            title = title,
+                            artist = artist,
+                            error = error.localizedMessage ?: error.message ?: "Download failed",
+                        ),
+                    )
+                    showErrorNotification(notifId, title, artist, error.localizedMessage ?: "Failed")
+                }
             } finally {
+                activeCalls.remove(key)
                 activeJobs.remove(key)
                 activeUris.remove(key)
                 activeFiles.remove(key)
                 tempDownloadFile?.let { runCatching { if (it.exists()) it.delete() } }
             }
-
         }
         activeJobs[key] = job
     }

@@ -81,9 +81,6 @@ import com.lastwave.app.ui.theme.ExpressivePillShape
 @Composable
 private fun shimmerBrush(): Brush {
     val base = MaterialTheme.colorScheme.surfaceContainerHighest
-    // A touch of the live accent color mixed into the highlight band
-    // instead of plain grey-on-grey — reads as a tinted premium sweep
-    // rather than a generic loading placeholder.
     val highlight = androidx.compose.ui.graphics.lerp(base, MaterialTheme.colorScheme.primary, 0.22f)
     val shimmerColors = listOf(
         base.copy(alpha = 0.35f),
@@ -95,13 +92,6 @@ private fun shimmerBrush(): Brush {
         initialValue = -400f,
         targetValue = 1200f,
         animationSpec = infiniteRepeatable(
-            // Was tween(1400, FastOutSlowIn) with no gap between sweeps —
-            // FastOutSlowIn front-loads speed (fast out), and restarting
-            // immediately at the end of every cycle made it read as
-            // "fast fast" rather than a calm, premium sweep. This holds
-            // at the start for a beat, sweeps at a slower constant pace,
-            // then holds again before repeating — closer to the
-            // pause-then-sweep rhythm real shimmer placeholders use.
             animation = keyframes {
                 durationMillis = 2200
                 -400f at 0 using LinearEasing
@@ -161,30 +151,14 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                 label = "discoverState",
             ) { isLoading ->
                 if (isLoading) {
-                    // Keep the infinite transition out of composition once
-                    // loading finishes; otherwise an invisible shimmer keeps
-                    // scheduling frames for the lifetime of this screen.
                     val shimmer = shimmerBrush()
                     LazyColumn(
                         contentPadding = PaddingValues(
                             start = 16.dp,
                             end = 16.dp,
                             top = 16.dp,
-                            // Matches the real feed's own bottom inset below
-                            // (nav bar / gesture area) — this skeleton had a
-                            // flat 16dp instead, so its last row or two could
-                            // sit right against, or under, the system bar.
                             bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                         ),
-                        // Same grouped-surface language as the real feed
-                        // below (GroupGap, position-based rounding) instead
-                        // of separate fully-rounded cards with gaps — the
-                        // skeleton should already look like the layout
-                        // it's about to become, not a visually different
-                        // placeholder style. Unlike the real (endless) feed,
-                        // this is a fixed 10-row batch, so the last row gets
-                        // a real BOTTOM-rounded close instead of staying
-                        // MIDDLE forever — it visually "finishes".
                         verticalArrangement = Arrangement.spacedBy(GroupGap),
                     ) {
                         items(10) { index ->
@@ -195,10 +169,6 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                                     9 -> GroupPosition.BOTTOM
                                     else -> GroupPosition.MIDDLE
                                 },
-                                // A few varied widths in rotation reads as
-                                // placeholder TEXT of differing lengths
-                                // rather than one uniform repeated block —
-                                // small touch, much less "obviously fake".
                                 titleWidthFraction = listOf(0.62f, 0.48f, 0.7f, 0.55f)[index % 4],
                                 subtitleWidthFraction = listOf(0.4f, 0.3f, 0.45f, 0.35f)[index % 4],
                             )
@@ -226,20 +196,14 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                             top = 12.dp,
                             bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding()
                         ),
-                        // One continuous group for the whole feed — only
-                        // the very first row is rounded on top (TOP), every
-                        // row after that is MIDDLE (near-square, sitting
-                        // right against its neighbors) all the way down.
-                        // Chunking into repeated groups of 5 (each with its
-                        // own rounded top+bottom) made the surface visibly
-                        // "close" every 5-6 tracks while scrolling an
-                        // endless feed — wrong instinct for infinite
-                        // content: it should read as one unbroken container
-                        // that never closes off at the bottom.
                         verticalArrangement = Arrangement.spacedBy(GroupGap),
                         modifier = Modifier,
                     ) {
-                        itemsIndexed(state.tracks, key = { _, t -> t.key }) { index, track ->
+                        itemsIndexed(
+                            state.tracks,
+                            key = { _, t -> t.key },
+                            contentType = { _, _ -> "discover_track" },
+                        ) { index, track ->
                             val position = if (index == 0) GroupPosition.TOP else GroupPosition.MIDDLE
                             val isPlayingThisSong = playbackState.isPlaying &&
                                 playbackState.current?.title.equals(track.name, ignoreCase = true) &&
@@ -251,11 +215,11 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                                 isPlaying = isPlayingThisSong,
                                 onPlay = { playFromDiscover(track) },
                                 onMenu = { menuTrack = track },
-                                modifier = Modifier.animateItem(),
+                                modifier = Modifier,
                             )
                         }
                         if (state.isLoadingMore) {
-                            item {
+                            item(key = "loading_more", contentType = "loading") {
                                 Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                                     com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator()
                                 }

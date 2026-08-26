@@ -391,7 +391,11 @@ fun AlbumDetailScreen(
                     }
 
                     // 3. Track Items
-                    itemsIndexed(data.tracks, key = { index, track -> "${track.videoId ?: track.title}_$index" }) { index, track ->
+                    itemsIndexed(
+                        data.tracks,
+                        key = { index, track -> "${track.videoId ?: track.title}_$index" },
+                        contentType = { _, _ -> "album_track" },
+                    ) { index, track ->
                         val isPlayingThis = playbackState.isPlaying &&
                             playbackState.current?.title.equals(track.title, ignoreCase = true) &&
                             (playbackState.current?.artist.isNullOrBlank() || playbackState.current?.artist.equals(track.artist, ignoreCase = true))

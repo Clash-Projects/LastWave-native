@@ -543,59 +543,6 @@ fun PlaylistDetailScreen(
                 }
             }
 
-            // Track items
-            if (displayTracks.isEmpty()) {
-                item(key = "empty_tracks") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 48.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "No tracks in this playlist yet.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            } else {
-                itemsIndexed(
-                    items = displayTracks,
-                    key = { index, track -> "${track.name}|${track.artist}|$index" },
-                ) { index, track ->
-                    val isPlayingThisSong = playbackState.isPlaying &&
-                        playbackState.current?.title.equals(track.name, ignoreCase = true) &&
-                        playbackState.current?.artist.equals(track.artist, ignoreCase = true)
-
-                    Box(Modifier.animateItem()) {
-                        NativeTrackRow(
-                            index = index + 1,
-                            track = track,
-                            isPlaying = isPlayingThisSong,
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                musicPlayer.playQueue(
-                                    displayTracks.map { t ->
-                                        com.lastwave.app.playback.PlayableTrack(
-                                            title = t.name,
-                                            artist = t.artist,
-                                            album = t.album,
-                                            artworkUrl = t.artworkUrl,
-                                        )
-                                    },
-                                    startIndex = index,
-                                    sourceLabel = playlist.title,
-                                )
-                            },
-                            onMenu = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                menuTarget = track
-                            },
-                        )
-                    }
-                }
-            }
         }
 
         // 2. Floating Top Bar with Frosted Glass styling & Smooth Scrolled Header
@@ -858,6 +805,61 @@ fun PlaylistDetailScreen(
                         color = MaterialTheme.colorScheme.inverseOnSurface,
                         style = MaterialTheme.typography.labelLarge,
                     )
+                }
+            }
+
+            // Track items
+            if (displayTracks.isEmpty()) {
+                item(key = "empty_tracks", contentType = "empty") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "No tracks in this playlist yet.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            } else {
+                itemsIndexed(
+                    items = displayTracks,
+                    key = { index, track -> "${track.name}|${track.artist}|$index" },
+                    contentType = { _, _ -> "playlist_track" },
+                ) { index, track ->
+                    val isPlayingThisSong = playbackState.isPlaying &&
+                        playbackState.current?.title.equals(track.name, ignoreCase = true) &&
+                        playbackState.current?.artist.equals(track.artist, ignoreCase = true)
+
+                    Box {
+                        NativeTrackRow(
+                            index = index + 1,
+                            track = track,
+                            isPlaying = isPlayingThisSong,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                musicPlayer.playQueue(
+                                    displayTracks.map { t ->
+                                        com.lastwave.app.playback.PlayableTrack(
+                                            title = t.name,
+                                            artist = t.artist,
+                                            album = t.album,
+                                            artworkUrl = t.artworkUrl,
+                                        )
+                                    },
+                                    startIndex = index,
+                                    sourceLabel = playlist.title,
+                                )
+                            },
+                            onMenu = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                menuTarget = track
+                            },
+                        )
+                    }
                 }
             }
         }

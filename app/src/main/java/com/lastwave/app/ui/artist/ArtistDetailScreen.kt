@@ -468,7 +468,11 @@ fun ArtistDetailScreen(
                         }
 
                         // Top Songs List
-                        itemsIndexed(data.topSongs, key = { index, track -> "${track.videoId ?: track.title}_$index" }) { index, track ->
+                        itemsIndexed(
+                            data.topSongs,
+                            key = { index, track -> "${track.videoId ?: track.title}_$index" },
+                            contentType = { _, _ -> "artist_top_song" },
+                        ) { index, track ->
                             val isPlayingThis = playbackState.isPlaying &&
                                 playbackState.current?.title.equals(track.title, ignoreCase = true) &&
                                 playbackState.current?.artist.equals(track.artist, ignoreCase = true)

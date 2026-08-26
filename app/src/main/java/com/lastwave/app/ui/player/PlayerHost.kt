@@ -69,9 +69,9 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
+import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HighQuality
-import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -127,6 +127,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -203,6 +205,10 @@ class PlayerViewModel @Inject constructor(
     val state = player.state
     val chromeState = player.chromeState
     val progressState = player.progressState
+    val fullPlayerState = player.state
+        .map { it.copy(positionMs = 0L, bufferedPositionMs = 0L) }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, player.state.value.copy(positionMs = 0L, bufferedPositionMs = 0L))
     val settings: StateFlow<com.lastwave.app.data.local.MiscSettings> = settingsPreferences.settings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), com.lastwave.app.data.local.MiscSettings())
     private val _customPlaylists = MutableStateFlow<List<SavedPlaylist>>(emptyList())
@@ -266,8 +272,10 @@ class PlayerViewModel @Inject constructor(
                     _lyricsState.value = LyricsUiState.Success(
                         lines = result.lines,
                         isSynced = result.isSynced,
+                        isWordSynced = result.isWordSynced,
                         plainLyrics = result.plainLyrics,
                         isInstrumental = result.isInstrumental,
+                        source = result.source,
                     )
                 }
                 is LyricsResult.Empty -> {
@@ -433,14 +441,16 @@ private fun ExpandedPlayer(
     onCollapse: () -> Unit,
     onOpenArtist: (String) -> Unit,
 ) {
-    val state by viewModel.state.collectAsStateWithLifecycle()
+    val state by viewModel.fullPlayerState.collectAsStateWithLifecycle()
     val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     FullPlayer(
         state = state,
+        progressState = viewModel.progressState,
         player = viewModel.player,
         lyricsState = lyricsState,
         lyricsAnimation = settings.lyricsAnimation,
+        wavySeekbarEnabled = settings.wavySeekbarEnabled,
         currentTab = currentTab,
         onTabChange = onTabChange,
         onRetryLyrics = onRetryLyrics,
@@ -865,9 +875,11 @@ private enum class SeekDirection { REWIND, FORWARD }
 @Composable
 private fun FullPlayer(
     state: MusicPlayerState,
+    progressState: StateFlow<PlaybackProgressState>,
     player: MusicPlayer,
     lyricsState: LyricsUiState,
     lyricsAnimation: com.lastwave.app.data.local.LyricsAnimation = com.lastwave.app.data.local.LyricsAnimation.APPLE_FLUID,
+    wavySeekbarEnabled: Boolean = true,
     currentTab: FullPlayerTab,
     onTabChange: (FullPlayerTab) -> Unit,
     onRetryLyrics: () -> Unit,
@@ -986,13 +998,13 @@ private fun FullPlayer(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        scaleX = 1.48f
-                        scaleY = 1.48f
-                        alpha = 0.76f
+                        scaleX = 1.35f
+                        scaleY = 1.35f
+                        alpha = 0.72f
                     }
-                    .blur(72.dp),
+                    .blur(36.dp),
                 corner = 0.dp,
-                decodeSizePx = 360,
+                decodeSizePx = 200,
             )
 
             // Apple Music: Vibrant chromatic ambient mesh blobs
@@ -1101,7 +1113,7 @@ private fun FullPlayer(
                             .size(44.dp)
                             .clip(CircleShape)
                             .background(
-                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f),
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
                             ),
                     ) {
                         Icon(
@@ -1145,7 +1157,7 @@ private fun FullPlayer(
                             .size(44.dp)
                             .clip(CircleShape)
                             .background(
-                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.76f),
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
                             ),
                     ) {
                         Icon(
@@ -1174,6 +1186,7 @@ private fun FullPlayer(
                         FullPlayerTab.LYRICS -> {
                             LyricsPanel(
                                 state = state,
+                                progressState = progressState,
                                 player = player,
                                 lyricsState = lyricsState,
                                 lyricsAnimation = lyricsAnimation,
@@ -1189,7 +1202,7 @@ private fun FullPlayer(
                         FullPlayerTab.NOW_PLAYING -> {
                                 // ── Standard layout (unchanged) ────────────────
                                 Column(
-                                    Modifier.fillMaxSize().padding(bottom = 28.dp),
+                                    Modifier.fillMaxSize().padding(bottom = 12.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
                                     BoxWithConstraints(
@@ -1460,7 +1473,7 @@ private fun FullPlayer(
                                         Surface(
                                             onClick = { onTabChange(FullPlayerTab.LYRICS) },
                                             shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f),
+                                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f),
                                             contentColor = MaterialTheme.colorScheme.primary,
                                             tonalElevation = 2.dp,
                                             shadowElevation = 4.dp,
@@ -1468,16 +1481,23 @@ private fun FullPlayer(
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Icon(
-                                                    Icons.Filled.Lyrics,
+                                                    Icons.Filled.FormatQuote,
                                                     contentDescription = "Show lyrics",
-                                                    modifier = Modifier.size(23.dp),
+                                                    modifier = Modifier.size(24.dp),
                                                     tint = MaterialTheme.colorScheme.primary,
                                                 )
                                             }
                                         }
                                     }
                                     Spacer(Modifier.height(16.dp))
-                                    SeekBar(state, player::seekTo, isTranslucent = false)
+                                    SeekBar(
+                                        progressState = progressState,
+                                        isPlaying = state.isPlaying,
+                                        trackKey = track.videoId ?: "${track.artist}|${track.title}",
+                                        wavyEnabled = wavySeekbarEnabled,
+                                        onSeek = player::seekTo,
+                                        isTranslucent = false,
+                                    )
                                     Spacer(Modifier.height(16.dp))
                                     MainControls(state, player, isTranslucent = false)
                                     Spacer(Modifier.height(20.dp))
@@ -1606,12 +1626,53 @@ internal fun PlayerProgressSlider(
 }
 
 @Composable
-private fun SeekBar(state: MusicPlayerState, onSeek: (Long) -> Unit, isTranslucent: Boolean = false) {
-    WavySeekBar(
-        state = state,
-        onSeek = onSeek,
-        isTranslucent = isTranslucent,
-    )
+private fun SeekBar(
+    progressState: StateFlow<PlaybackProgressState>,
+    isPlaying: Boolean,
+    trackKey: String?,
+    wavyEnabled: Boolean = true,
+    onSeek: (Long) -> Unit,
+    isTranslucent: Boolean = false,
+) {
+    if (wavyEnabled) {
+        val progress by progressState.collectAsStateWithLifecycle()
+        WavySeekBar(
+            positionMs = progress.positionMs,
+            durationMs = progress.durationMs,
+            isPlaying = isPlaying,
+            onSeek = onSeek,
+            isTranslucent = isTranslucent,
+            trackKey = trackKey,
+        )
+    } else {
+        val progress by progressState.collectAsStateWithLifecycle()
+        var dragging by remember { mutableStateOf(false) }
+        var dragValue by remember { mutableFloatStateOf(0f) }
+        val end = progress.durationMs.coerceAtLeast(1).toFloat()
+        val shown = if (dragging) dragValue else progress.positionMs.coerceIn(0, progress.durationMs.coerceAtLeast(0)).toFloat()
+        Column(Modifier.fillMaxWidth()) {
+            PlayerProgressSlider(
+                value = shown.coerceIn(0f, end),
+                onValueChange = { dragging = true; dragValue = it },
+                onValueChangeFinished = { onSeek(dragValue.toLong()); dragging = false },
+                valueRange = 0f..end,
+                enabled = progress.durationMs > 0,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    formatTime(shown.toLong()),
+                    style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
+                    color = if (isTranslucent) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
+                )
+                Text(
+                    "−${formatTime((progress.durationMs - shown.toLong()).coerceAtLeast(0))}",
+                    style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
+                    color = if (isTranslucent) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -1624,7 +1685,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::previous,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
             tonalElevation = if (isTranslucent) 0.dp else 2.dp,
             shadowElevation = if (isTranslucent) 0.dp else 4.dp,
@@ -1637,7 +1698,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::togglePlayPause,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary,
+            color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.88f),
             contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
             tonalElevation = if (isTranslucent) 0.dp else 6.dp,
             shadowElevation = if (isTranslucent) 10.dp else 14.dp,
@@ -1658,7 +1719,7 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::next,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.82f),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
             tonalElevation = if (isTranslucent) 0.dp else 2.dp,
             shadowElevation = if (isTranslucent) 0.dp else 4.dp,
@@ -1680,8 +1741,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         targetValue = when {
             isTranslucent && shuffleActive -> Color.White.copy(alpha = 0.22f)
             isTranslucent -> Color.White.copy(alpha = 0.12f)
-            shuffleActive -> MaterialTheme.colorScheme.primaryContainer
-            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f)
+            shuffleActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f)
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
         },
         animationSpec = tween(ExpressiveMotion.Quick),
         label = "shuffleBg",
@@ -1700,8 +1761,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         targetValue = when {
             isTranslucent && repeatActive -> Color.White.copy(alpha = 0.22f)
             isTranslucent -> Color.White.copy(alpha = 0.12f)
-            repeatActive -> MaterialTheme.colorScheme.primaryContainer
-            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f)
+            repeatActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f)
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
         },
         animationSpec = tween(ExpressiveMotion.Quick),
         label = "repeatBg",
@@ -1739,8 +1800,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             shape = RoundedCornerShape(24.dp),
             color = when {
                 isTranslucent -> Color.White.copy(alpha = 0.12f)
-                state.isQobuz -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.78f)
+                state.isQobuz -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
             },
             contentColor = when {
                 isTranslucent -> Color.White

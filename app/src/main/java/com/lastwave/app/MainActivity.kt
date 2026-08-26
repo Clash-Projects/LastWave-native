@@ -99,24 +99,29 @@ class MainActivity : ComponentActivity() {
      */
     @Suppress("DEPRECATION")
     private fun requestHighestSupportedRefreshRate() {
-        // OEM display services occasionally expose invalid/transient modes.
-        // A high-refresh preference is optional and must never block launch.
         runCatching {
-            val display = windowManager.defaultDisplay
+            val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                display ?: windowManager.defaultDisplay
+            } else {
+                windowManager.defaultDisplay
+            }
             val currentMode = display.mode
-            // Before Android 14 the preference must match a rate supported by
-            // the default resolution. Do not select a rate from another mode.
-            val highest = display.supportedModes
-                .asSequence()
-                .filter {
-                    it.physicalWidth == currentMode.physicalWidth &&
-                        it.physicalHeight == currentMode.physicalHeight
-                }
-                .maxOfOrNull { it.refreshRate }
-                ?: currentMode.refreshRate
+            val matchingModes = display.supportedModes.filter {
+                it.physicalWidth == currentMode.physicalWidth &&
+                    it.physicalHeight == currentMode.physicalHeight
+            }
+            val highestMode = matchingModes.maxByOrNull { it.refreshRate } ?: currentMode
             val attributes = window.attributes
-            if (attributes.preferredRefreshRate != highest) {
-                attributes.preferredRefreshRate = highest
+            var changed = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && attributes.preferredDisplayModeId != highestMode.modeId) {
+                attributes.preferredDisplayModeId = highestMode.modeId
+                changed = true
+            }
+            if (attributes.preferredRefreshRate != highestMode.refreshRate) {
+                attributes.preferredRefreshRate = highestMode.refreshRate
+                changed = true
+            }
+            if (changed) {
                 window.attributes = attributes
             }
         }
