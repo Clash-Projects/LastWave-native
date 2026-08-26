@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Support 16 KB page sizes on Android 15+ (e.g. Galaxy S25 series)
+add_link_options("-Wl,-z,max-page-size=16384")
+
 find_package(oboe REQUIRED CONFIG)
 
 # libsoxr 0.1.3 is pinned for reproducible HQ sinc resampling. It is built as

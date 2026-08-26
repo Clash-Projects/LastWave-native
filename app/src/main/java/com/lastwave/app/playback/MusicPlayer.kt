@@ -11,6 +11,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -30,6 +31,7 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioCapabilities
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.lastwave.app.data.discover.DiscoverRepository
 import com.lastwave.app.data.generate.GeneratedTrack
@@ -410,6 +412,25 @@ class MusicPlayer @Inject constructor(
         }.apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
             setEnableAudioTrackPlaybackParams(true)
+            setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+                val decoders = MediaCodecSelector.DEFAULT.getDecoderInfos(
+                    mimeType,
+                    requiresSecureDecoder,
+                    requiresTunnelingDecoder,
+                )
+                if (mimeType.equals(MimeTypes.AUDIO_FLAC, ignoreCase = true) || mimeType.equals("audio/flac", ignoreCase = true)) {
+                    // Samsung's proprietary FLAC decoders (c2.sec.flac.decoder / OMX.SEC.FLAC.Decoder / OMX.Exynos.FLAC.Decoder)
+                    // have a known bug on One UI where 24-bit / Hi-Res audio output PCM encoding is corrupted or
+                    // misreported, leading to 1.5x fast playback and heavy digital distortion.
+                    // Deprioritize vendor decoders so standard reference AOSP decoders (c2.android.flac.decoder) are used first.
+                    decoders.sortedBy { decoder ->
+                        val name = decoder.name.lowercase()
+                        if (name.contains("sec.") || name.contains("exynos")) 1 else 0
+                    }
+                } else {
+                    decoders
+                }
+            }
         }
 
         ExoPlayer.Builder(appContext, renderersFactory)
