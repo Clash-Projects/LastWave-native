@@ -398,9 +398,7 @@ class MusicPlayer @Inject constructor(
                 val engine = runCatching { nativeAudioEngine.get() }.getOrNull()
                 if (engine?.isAvailable != true) return platformSink
                 return NativeProcessingAudioSink(
-                    context = context,
                     delegate = platformSink,
-                    engine = engine,
                     processor = NativePcmAudioProcessor(engine),
                 )
             }

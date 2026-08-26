@@ -1177,12 +1177,12 @@ private fun FullPlayer(
                         FullPlayerTab.NOW_PLAYING -> {
                                 // ── Standard layout (unchanged) ────────────────
                                 Column(
-                                    Modifier.fillMaxSize().padding(bottom = 12.dp),
+                                    Modifier.fillMaxSize().padding(bottom = 28.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
                                     BoxWithConstraints(
                                         modifier = Modifier.fillMaxWidth().weight(1f),
-                                        contentAlignment = Alignment.Center,
+                                        contentAlignment = Alignment(0f, -0.40f),
                                     ) {
                                         val artworkSize = (minOf(maxWidth, maxHeight) - 6.dp)
                                             .coerceAtLeast(0.dp)
@@ -1399,7 +1399,7 @@ private fun FullPlayer(
                                             }
                                         }
                                     }
-                                    Spacer(Modifier.height(12.dp))
+                                    Spacer(Modifier.height(18.dp))
                                     Row(
                                         Modifier
                                             .fillMaxWidth()
@@ -1458,31 +1458,27 @@ private fun FullPlayer(
                                         Surface(
                                             onClick = { onTabChange(FullPlayerTab.LYRICS) },
                                             shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            border = BorderStroke(
-                                                1.dp,
-                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                                            ),
+                                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f),
+                                            contentColor = MaterialTheme.colorScheme.primary,
                                             tonalElevation = 2.dp,
-                                            shadowElevation = 6.dp,
-                                            modifier = Modifier.size(50.dp),
+                                            shadowElevation = 4.dp,
+                                            modifier = Modifier.size(46.dp),
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
                                                 Icon(
                                                     Icons.Filled.Lyrics,
                                                     contentDescription = "Show lyrics",
-                                                    modifier = Modifier.size(24.dp),
-                                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                    modifier = Modifier.size(23.dp),
+                                                    tint = MaterialTheme.colorScheme.primary,
                                                 )
                                             }
                                         }
                                     }
-                                    Spacer(Modifier.height(10.dp))
-                                    SeekBar(state, player::seekTo, isTranslucent = false)
-                                    Spacer(Modifier.height(10.dp))
-                                    MainControls(state, player, isTranslucent = false)
                                     Spacer(Modifier.height(16.dp))
+                                    SeekBar(state, player::seekTo, isTranslucent = false)
+                                    Spacer(Modifier.height(16.dp))
+                                    MainControls(state, player, isTranslucent = false)
+                                    Spacer(Modifier.height(20.dp))
                                     PlayerUtilityControls(state, player, isTranslucent = false)
                                 }
                         }
