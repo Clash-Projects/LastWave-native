@@ -250,20 +250,22 @@ class TrackDownloadManager @Inject constructor(
                         resolvedArtworkUrl = bestMatch.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                     }
                     if (resolvedAlbum == null) resolvedAlbum = bestMatch.album
+                    durationMs = bestMatch.durationSeconds?.toLong()?.times(1_000L) ?: 0L
                     val ytStream = innerTube.resolveAudioStream(videoId)
                     resolvedUrl = ytStream.url
                     val rawMime = ytStream.mimeType.orEmpty().lowercase()
+                    val rawCodec = ytStream.codec.orEmpty().lowercase()
                     if (rawMime.contains("mp4") || rawMime.contains("m4a") || rawMime.contains("aac")) {
                         extension = "m4a"
                         mimeType = "audio/mp4"
                         formatBadge = "M4A AAC"
-                    } else if (rawMime.contains("webm")) {
-                        extension = "webm"
-                        mimeType = "audio/webm"
-                        formatBadge = "WEBM OPUS"
-                    } else if (rawMime.contains("ogg") || rawMime.contains("opus")) {
+                    } else if (rawMime.contains("ogg") || rawMime.contains("audio/opus")) {
                         extension = "opus"
                         mimeType = "audio/ogg"
+                        formatBadge = "OPUS"
+                    } else if (rawCodec.contains("opus") || rawMime.contains("webm")) {
+                        extension = "webm"
+                        mimeType = "audio/webm"
                         formatBadge = "OPUS"
                     } else {
                         extension = "m4a"
@@ -276,6 +278,7 @@ class TrackDownloadManager @Inject constructor(
                 // 2. Download raw stream to local temp cache file
                 val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
                 tempDownloadFile = rawFile
+                var workingAudioFile = rawFile
 
                     var bytesReadTotal = 0L
                     var totalLength = -1L
@@ -308,7 +311,7 @@ class TrackDownloadManager @Inject constructor(
                         if (contentType.contains("webm")) {
                             extension = "webm"
                             mimeType = "audio/webm"
-                            formatBadge = "WEBM OPUS"
+                            formatBadge = "OPUS"
                         } else if (contentType.contains("ogg") || contentType.contains("opus")) {
                             extension = "opus"
                             mimeType = "audio/ogg"
@@ -335,7 +338,7 @@ class TrackDownloadManager @Inject constructor(
                             showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
                         }
 
-                        FileOutputStream(tempDownloadFile).use { fos ->
+                        FileOutputStream(rawFile).use { fos ->
                             while (source.read(buffer).also { bytesRead = it } != -1) {
                                 if (!coroutineContext.isActive) {
                                     source.close()
@@ -386,6 +389,35 @@ class TrackDownloadManager @Inject constructor(
                         downloadSuccess = true
                     }
 
+                    // YouTube serves Opus inside WebM. Move the already-compressed
+                    // packets into a real Ogg Opus container without decoding or
+                    // re-encoding, then tag that .opus file below.
+                    if (!isQobuz && (extension.equals("webm", ignoreCase = true) || mimeType.contains("webm", ignoreCase = true))) {
+                        updateProgress(
+                            DownloadProgress(
+                                key = key,
+                                title = title,
+                                artist = artist,
+                                progressPercent = 100,
+                                bytesDownloaded = bytesReadTotal,
+                                totalBytes = bytesReadTotal,
+                                formatBadge = "REMUXING OPUS",
+                            ),
+                        )
+                        showDownloadNotification(notifId, key, title, artist, 100, true, "REMUXING OPUS")
+                        val opusFile = File.createTempFile("dl_opus_", ".opus", context.cacheDir)
+                        if (!WebmOpusRemuxer.remux(rawFile, opusFile)) {
+                            runCatching { opusFile.delete() }
+                            throw IOException("YouTube stream was not a valid WebM Opus file")
+                        }
+                        workingAudioFile = opusFile
+                        tempDownloadFile = opusFile
+                        runCatching { rawFile.delete() }
+                        extension = "opus"
+                        mimeType = "audio/ogg"
+                        formatBadge = "OPUS"
+                    }
+
                     val safeFilename = sanitizeFilename("$artist - $title") + ".$extension"
 
                     // 3. Fetch lyrics BEFORE tagging so they can be embedded
@@ -415,12 +447,13 @@ class TrackDownloadManager @Inject constructor(
                     // PICTURE for FLAC/Opus, Matroska tags for WebM,
                     // iTunes atoms for M4A, ID3v2.3 otherwise).
                     val metadataEmbedded = audioTagWriter.embedMetadata(
-                        audioFile = tempDownloadFile,
+                        audioFile = workingAudioFile,
                         title = title,
                         artist = artist,
                         album = resolvedAlbum,
                         artworkUrl = resolvedArtworkUrl,
-                        lyrics = syncedLyrics ?: plainLyrics,
+                        lyrics = syncedLyrics,
+                        unsyncedLyrics = plainLyrics,
                     )
                     if (!metadataEmbedded) {
                         throw IOException("Could not safely embed audio metadata")
@@ -440,7 +473,7 @@ class TrackDownloadManager @Inject constructor(
                     if (uri != null) activeUris[key] = uri
                     if (file != null) activeFiles[key] = file
 
-                    tempDownloadFile.inputStream().use { input ->
+                    workingAudioFile.inputStream().use { input ->
                         destStream.use { output ->
                             input.copyTo(output)
                             output.flush()
@@ -475,7 +508,7 @@ class TrackDownloadManager @Inject constructor(
                     artworkUrl = resolvedArtworkUrl,
                     filePath = finalPath,
                     mediaStoreUri = uri?.toString(),
-                    fileSizeBytes = tempDownloadFile.length(),
+                    fileSizeBytes = workingAudioFile.length(),
                     formatBadge = formatBadge,
                     durationMs = durationMs,
                     isQobuz = isQobuz,

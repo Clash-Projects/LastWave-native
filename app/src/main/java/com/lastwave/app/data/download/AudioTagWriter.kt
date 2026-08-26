@@ -79,6 +79,7 @@ class AudioTagWriter @Inject constructor(
         album: String? = null,
         artworkUrl: String? = null,
         lyrics: String? = null,
+        unsyncedLyrics: String? = null,
     ): Boolean {
         if (!audioFile.exists() || audioFile.length() <= 0) return false
 
@@ -88,16 +89,18 @@ class AudioTagWriter @Inject constructor(
             } else null
 
             val kind = detectContainerKind(audioFile)
+            val preferredLyrics = lyrics?.takeIf { it.isNotBlank() }
+                ?: unsyncedLyrics?.takeIf { it.isNotBlank() }
             val ok = when (kind) {
                 // A FLAC whose metadata chain doesn't parse cleanly is left
                 // untouched — prepending ID3 there is nonstandard and can
                 // break strict extractors' format sniffing.
-                ContainerKind.FLAC -> embedIntoFlac(audioFile, title, artist, album, artworkBytes, lyrics)
+                ContainerKind.FLAC -> embedIntoFlac(audioFile, title, artist, album, artworkBytes, preferredLyrics, unsyncedLyrics)
                 // Keep MP4/WebM metadata native; ID3 prepends corrupt their container contract.
-                ContainerKind.MP4 -> embedIntoMp4(audioFile, title, artist, album, artworkBytes, lyrics)
-                ContainerKind.WEBM -> embedIntoWebm(audioFile, title, artist, album, artworkBytes, lyrics)
-                ContainerKind.OGG -> embedIntoOggOpus(audioFile, title, artist, album, artworkBytes, lyrics)
-                else -> embedId3Prepend(audioFile, title, artist, album, artworkBytes, lyrics)
+                ContainerKind.MP4 -> embedIntoMp4(audioFile, title, artist, album, artworkBytes, preferredLyrics)
+                ContainerKind.WEBM -> embedIntoWebm(audioFile, title, artist, album, artworkBytes, preferredLyrics, unsyncedLyrics)
+                ContainerKind.OGG -> embedIntoOggOpus(audioFile, title, artist, album, artworkBytes, preferredLyrics, unsyncedLyrics)
+                else -> embedId3Prepend(audioFile, title, artist, album, artworkBytes, preferredLyrics)
             }
             if (ok) {
                 Log.d(TAG, "Embedded ${kind.name} tags into ${audioFile.name}")
@@ -315,6 +318,7 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
+        unsyncedLyrics: String?,
     ): Boolean {
         val blocks = mutableListOf<FlacBlockRef>()
         var framesStart = -1L
@@ -374,6 +378,9 @@ class AudioTagWriter @Inject constructor(
         if (artist.isNotBlank()) comments += "ALBUMARTIST=$artist"
         if (!album.isNullOrBlank()) comments += "ALBUM=$album"
         if (!lyrics.isNullOrBlank()) comments += "LYRICS=$lyrics"
+        if (!unsyncedLyrics.isNullOrBlank() && unsyncedLyrics != lyrics) {
+            comments += "UNSYNCEDLYRICS=$unsyncedLyrics"
+        }
 
         data class OutBlock(val type: Int, val fromSource: FlacBlockRef?, val generated: ByteArray?)
         val outChain = mutableListOf<OutBlock>()
@@ -530,11 +537,20 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
+        unsyncedLyrics: String?,
     ): Boolean {
         val pages = readOggPages(audioFile)
         if (pages.isEmpty()) return false
         val location = findOpusTags(audioFile, pages) ?: return false
-        val newPacket = buildOpusTagsPacket(location.packet, title, artist, album, artworkBytes, lyrics)
+        val newPacket = buildOpusTagsPacket(
+            location.packet,
+            title,
+            artist,
+            album,
+            artworkBytes,
+            lyrics,
+            unsyncedLyrics,
+        )
         if (newPacket.isEmpty()) return false
 
         val tempFile = File.createTempFile("tagged_", ".opus", audioFile.parentFile)
@@ -716,6 +732,7 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
+        unsyncedLyrics: String?,
     ): ByteArray {
         val replacedFields = buildSet {
             addAll(setOf("TITLE", "ARTIST", "ALBUMARTIST", "ALBUM", "LYRICS", "UNSYNCEDLYRICS"))
@@ -733,6 +750,9 @@ class AudioTagWriter @Inject constructor(
         }
         if (!album.isNullOrBlank()) comments += "ALBUM=$album"
         if (!lyrics.isNullOrBlank()) comments += "LYRICS=$lyrics"
+        if (!unsyncedLyrics.isNullOrBlank() && unsyncedLyrics != lyrics) {
+            comments += "UNSYNCEDLYRICS=$unsyncedLyrics"
+        }
         if (artworkBytes != null && artworkBytes.isNotEmpty()) {
             comments += "METADATA_BLOCK_PICTURE=${base64NoWrap(buildFlacPictureBody(artworkBytes))}"
         }
@@ -970,8 +990,9 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
+        unsyncedLyrics: String?,
     ): Boolean {
-        val metadata = buildWebmMetadata(title, artist, album, artworkBytes, lyrics)
+        val metadata = buildWebmMetadata(title, artist, album, artworkBytes, lyrics, unsyncedLyrics)
         if (metadata.isEmpty()) return false
 
         val fileSize = audioFile.length()
@@ -1083,6 +1104,7 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
+        unsyncedLyrics: String?,
     ): ByteArray {
         val tagBody = ByteArrayOutputStream()
         // TargetTypeValue 30 is Matroska's TRACK/SONG level.
@@ -1093,6 +1115,9 @@ class AudioTagWriter @Inject constructor(
         addWebmSimpleTag(tagBody, "ALBUMARTIST", artist)
         if (!album.isNullOrBlank()) addWebmSimpleTag(tagBody, "ALBUM", album)
         if (!lyrics.isNullOrBlank()) addWebmSimpleTag(tagBody, "LYRICS", lyrics)
+        if (!unsyncedLyrics.isNullOrBlank() && unsyncedLyrics != lyrics) {
+            addWebmSimpleTag(tagBody, "UNSYNCEDLYRICS", unsyncedLyrics)
+        }
 
         val output = ByteArrayOutputStream()
         val tag = ebmlElement(byteArrayOf(0x73, 0x73), tagBody.toByteArray())

@@ -57,6 +57,7 @@ data class YouTubeAudioStream(
     val url: String,
     val mimeType: String?,
     val bitrate: Int,
+    val codec: String? = null,
 )
 
 data class YtMusicTasteSignals(
@@ -1123,9 +1124,15 @@ class InnerTubeMusicApi @Inject constructor(
                                 url = finalUrl,
                                 mimeType = mime.substringBefore(';'),
                                 bitrate = format.int("bitrate") ?: 0,
+                                codec = mime.substringAfter("codecs=", "")
+                                    .trim()
+                                    .trim('"', '\''),
                             )
                         }
-                    val bestStream = candidates.maxByOrNull { it.bitrate }
+                    val bestStream = candidates.maxWithOrNull(
+                        compareBy<YouTubeAudioStream> { if (it.codec.orEmpty().contains("opus", ignoreCase = true)) 1 else 0 }
+                            .thenBy { it.bitrate },
+                    )
                     if (bestStream != null) {
                         delivered = channel.trySend(bestStream).isSuccess
                     }
