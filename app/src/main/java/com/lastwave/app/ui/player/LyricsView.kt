@@ -157,36 +157,8 @@ fun LyricsPanel(
         primary,
         0.25f,
     )
-    val ambientModifier = Modifier.drawBehind {
-        val maxDim = maxOf(size.width, size.height).coerceAtLeast(1f)
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    primary.copy(alpha = if (liquidGlass) 0.19f else 0.12f),
-                    primary.copy(alpha = if (liquidGlass) 0.055f else 0.025f),
-                    Color.Transparent,
-                ),
-                center = Offset(size.width * 0.22f, size.height * 0.22f),
-                radius = maxDim * 0.78f,
-            ),
-        )
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    companion.copy(alpha = if (liquidGlass) 0.16f else 0.10f),
-                    deep.copy(alpha = if (liquidGlass) 0.045f else 0.024f),
-                    Color.Transparent,
-                ),
-                center = Offset(size.width * 0.88f, size.height * 0.72f),
-                radius = maxDim * 0.72f,
-            ),
-        )
-    }
-
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .then(ambientModifier),
+        modifier = modifier.fillMaxSize(),
     ) {
         // Main lyrics display area
         Box(

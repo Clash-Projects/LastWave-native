@@ -298,20 +298,7 @@ fun WavySeekBar(
                         populateWave(pathFilled2, pathContour2, waveLength2Px, amp2, currPhase2)
                         populateWave(pathFilled3, pathContour3, waveLength3Px, amp3, currPhase3)
 
-                        val activeWidth = thumbX.coerceAtLeast(1f)
-
-                        // Layer 1: Light -> Dark
-                        drawPath(
-                            path = pathFilled1,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    layer1Light.copy(alpha = if (isTranslucent) 0.28f else 0.26f),
-                                    layer1Dark.copy(alpha = if (isTranslucent) 0.10f else 0.08f),
-                                ),
-                                start = Offset(0f, centerY - 20.dp.toPx()),
-                                end = Offset(activeWidth, bottomY),
-                            ),
-                        )
+                        // Layer 1: Soft organic wave
                         drawPath(
                             path = pathContour1,
                             brush = Brush.horizontalGradient(
@@ -322,21 +309,10 @@ fun WavySeekBar(
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
-                            style = Stroke(width = 0.9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                            style = Stroke(width = 1.0.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                         )
 
-                        // Layer 2: Dark -> Light
-                        drawPath(
-                            path = pathFilled2,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    layer2Dark.copy(alpha = if (isTranslucent) 0.58f else 0.54f),
-                                    layer2Light.copy(alpha = if (isTranslucent) 0.24f else 0.20f),
-                                ),
-                                start = Offset(0f, centerY - 15.dp.toPx()),
-                                end = Offset(activeWidth, bottomY),
-                            ),
-                        )
+                        // Layer 2: Medium harmonic wave
                         drawPath(
                             path = pathContour2,
                             brush = Brush.horizontalGradient(
@@ -347,21 +323,10 @@ fun WavySeekBar(
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
-                            style = Stroke(width = 1.1.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                            style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                         )
 
-                        // Layer 3: Light -> Deep Vibrant Primary
-                        drawPath(
-                            path = pathFilled3,
-                            brush = Brush.linearGradient(
-                                colors = listOf(
-                                    layer3Light.copy(alpha = if (isTranslucent) 0.94f else 0.90f),
-                                    layer3Dark.copy(alpha = if (isTranslucent) 0.58f else 0.50f),
-                                ),
-                                start = Offset(0f, centerY - 10.dp.toPx()),
-                                end = Offset(activeWidth, bottomY),
-                            ),
-                        )
+                        // Layer 3: Vibrant primary wave
                         drawPath(
                             path = pathContour3,
                             brush = Brush.horizontalGradient(
@@ -372,7 +337,7 @@ fun WavySeekBar(
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
-                            style = Stroke(width = 1.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                            style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                         )
 
                         // 3. Crisp Baseline Bar with Light -> Dark dynamic gradient

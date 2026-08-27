@@ -25,6 +25,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
@@ -32,7 +33,11 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -1090,14 +1095,14 @@ private fun FullPlayer(
             Column(
                 Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(horizontal = 20.dp),
+                    .windowInsetsPadding(WindowInsets.safeDrawing),
             ) {
                 // ── Header: slimmer, calmer, premium ─────────────────────
                 Box(
                     Modifier
                         .fillMaxWidth()
                         .height(52.dp)
+                        .padding(horizontal = 20.dp)
                         .playerVerticalSwipe(enabled = currentTab != FullPlayerTab.NOW_PLAYING),
                 ) {
                     IconButton(
@@ -1199,13 +1204,13 @@ private fun FullPlayer(
                         }
 
                         FullPlayerTab.QUEUE -> {
-                            QueuePanel(state, player, Modifier.fillMaxSize())
+                            QueuePanel(state, player, Modifier.fillMaxSize().padding(horizontal = 20.dp))
                         }
 
                         FullPlayerTab.NOW_PLAYING -> {
-                                // ── Standard layout (unchanged) ────────────────
+                                // ── Standard layout (lifted and balanced) ──────
                                 Column(
-                                    Modifier.fillMaxSize().padding(bottom = 18.dp),
+                                    Modifier.fillMaxSize().padding(horizontal = 20.dp).padding(bottom = 18.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
                                     BoxWithConstraints(
@@ -1417,7 +1422,7 @@ private fun FullPlayer(
                                             }
                                         }
                                     }
-                                    Spacer(Modifier.height(14.dp))
+                                    Spacer(Modifier.height(6.dp))
                                     Row(
                                         Modifier
                                             .fillMaxWidth()
@@ -1503,7 +1508,7 @@ private fun FullPlayer(
                                     )
                                     Spacer(Modifier.height(14.dp))
                                     MainControls(state, player, isTranslucent = false)
-                                    Spacer(Modifier.height(16.dp))
+                                    Spacer(Modifier.height(24.dp))
                                     PlayerUtilityControls(state, player, isTranslucent = false)
                                 }
                         }
@@ -1563,72 +1568,6 @@ private fun FullPlayer(
 }
 
 @Composable
-internal fun PlayerProgressSlider(
-    value: Float,
-    onValueChange: (Float) -> Unit,
-    onValueChangeFinished: () -> Unit,
-    valueRange: ClosedFloatingPointRange<Float>,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    val inactive = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.20f else 0.12f)
-    val range = (valueRange.endInclusive - valueRange.start).coerceAtLeast(0.0001f)
-    val fraction = ((value - valueRange.start) / range).coerceIn(0f, 1f)
-
-    Slider(
-        value = value,
-        onValueChange = onValueChange,
-        onValueChangeFinished = onValueChangeFinished,
-        valueRange = valueRange,
-        enabled = enabled,
-        modifier = modifier.drawBehind {
-            val inset = 10.dp.toPx()
-            val startX = inset
-            val endX = (size.width - inset).coerceAtLeast(startX)
-            val activeEndX = startX + ((endX - startX) * fraction)
-            val centerY = size.height / 2f
-            drawLine(
-                color = inactive,
-                start = androidx.compose.ui.geometry.Offset(startX, centerY),
-                end = androidx.compose.ui.geometry.Offset(endX, centerY),
-                strokeWidth = 3.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
-            if (activeEndX > startX) {
-                drawLine(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            primary.copy(alpha = if (enabled) 1f else 0.42f),
-                            tertiary.copy(alpha = if (enabled) 0.92f else 0.36f),
-                        ),
-                        startX = startX,
-                        endX = activeEndX,
-                    ),
-                    start = androidx.compose.ui.geometry.Offset(startX, centerY),
-                    end = androidx.compose.ui.geometry.Offset(activeEndX, centerY),
-                    strokeWidth = 4.dp.toPx(),
-                    cap = StrokeCap.Round,
-                )
-            }
-        },
-        colors = SliderDefaults.colors(
-            thumbColor = primary,
-            activeTrackColor = Color.Transparent,
-            inactiveTrackColor = Color.Transparent,
-            activeTickColor = Color.Transparent,
-            inactiveTickColor = Color.Transparent,
-            disabledThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f),
-            disabledActiveTrackColor = Color.Transparent,
-            disabledInactiveTrackColor = Color.Transparent,
-            disabledActiveTickColor = Color.Transparent,
-            disabledInactiveTickColor = Color.Transparent,
-        ),
-    )
-}
-
-@Composable
 private fun SeekBar(
     progressState: StateFlow<PlaybackProgressState>,
     isPlaying: Boolean,
@@ -1637,43 +1576,123 @@ private fun SeekBar(
     onSeek: (Long) -> Unit,
     isTranslucent: Boolean = false,
 ) {
-    if (wavyEnabled) {
-        val progress by progressState.collectAsStateWithLifecycle()
-        WavySeekBar(
-            positionMs = progress.positionMs,
-            durationMs = progress.durationMs,
-            isPlaying = isPlaying,
-            onSeek = onSeek,
-            isTranslucent = isTranslucent,
-            trackKey = trackKey,
-        )
+    val progress by progressState.collectAsStateWithLifecycle()
+    var dragging by remember(trackKey) { mutableStateOf(false) }
+    var dragFraction by remember(trackKey) { mutableFloatStateOf(0f) }
+
+    val boundedDurationMs = progress.durationMs.coerceAtLeast(0L)
+    val currentFraction = if (boundedDurationMs > 0L) {
+        (progress.positionMs.toDouble() / boundedDurationMs.toDouble()).toFloat().coerceIn(0f, 1f)
     } else {
-        val progress by progressState.collectAsStateWithLifecycle()
-        var dragging by remember { mutableStateOf(false) }
-        var dragValue by remember { mutableFloatStateOf(0f) }
-        val end = progress.durationMs.coerceAtLeast(1).toFloat()
-        val shown = if (dragging) dragValue else progress.positionMs.coerceIn(0, progress.durationMs.coerceAtLeast(0)).toFloat()
-        Column(Modifier.fillMaxWidth()) {
-            PlayerProgressSlider(
-                value = shown.coerceIn(0f, end),
-                onValueChange = { dragging = true; dragValue = it },
-                onValueChangeFinished = { onSeek(dragValue.toLong()); dragging = false },
-                valueRange = 0f..end,
-                enabled = progress.durationMs > 0,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(
-                    formatTime(shown.toLong()),
-                    style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
-                    color = if (isTranslucent) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
+        0f
+    }
+    val fraction = if (dragging) dragFraction else currentFraction
+    val shownMs = if (dragging) {
+        (dragFraction * boundedDurationMs).toLong().coerceIn(0L, boundedDurationMs)
+    } else {
+        progress.positionMs.coerceIn(0L, boundedDurationMs)
+    }
+
+    val primaryColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
+    val inactiveColor = if (isTranslucent) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.50f)
+    val textColor = if (isTranslucent) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f)
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(34.dp)
+                .pointerInput(boundedDurationMs, trackKey) {
+                    detectTapGestures { offset ->
+                        if (boundedDurationMs > 0) {
+                            val newFraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                            onSeek((newFraction * boundedDurationMs).toLong())
+                        }
+                    }
+                }
+                .pointerInput(boundedDurationMs, trackKey) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { offset ->
+                            dragging = true
+                            dragFraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        },
+                        onDragEnd = {
+                            if (boundedDurationMs > 0) {
+                                onSeek((dragFraction * boundedDurationMs).toLong())
+                            }
+                            dragging = false
+                        },
+                        onDragCancel = {
+                            dragging = false
+                        },
+                        onHorizontalDrag = { change, _ ->
+                            change.consume()
+                            dragFraction = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                        },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(modifier = Modifier.fillMaxWidth().height(34.dp)) {
+                val width = size.width
+                val height = size.height
+                val centerY = height / 2f
+                val trackHeightPx = 8.dp.toPx()
+                val cornerRadius = CornerRadius(trackHeightPx / 2f, trackHeightPx / 2f)
+
+                // 1. Inactive background capsule track
+                drawRoundRect(
+                    color = inactiveColor,
+                    topLeft = Offset(0f, centerY - trackHeightPx / 2f),
+                    size = Size(width, trackHeightPx),
+                    cornerRadius = cornerRadius,
                 )
-                Text(
-                    "−${formatTime((progress.durationMs - shown.toLong()).coerceAtLeast(0))}",
-                    style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
-                    color = if (isTranslucent) Color.White.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f),
+
+                // 2. Active filled capsule track
+                val activeWidth = (fraction * width).coerceIn(0f, width)
+                if (activeWidth > 0f) {
+                    drawRoundRect(
+                        color = primaryColor,
+                        topLeft = Offset(0f, centerY - trackHeightPx / 2f),
+                        size = Size(activeWidth, trackHeightPx),
+                        cornerRadius = cornerRadius,
+                    )
+                }
+
+                // 3. Vertical pill thumb bar
+                val thumbWidthPx = 4.dp.toPx()
+                val thumbHeightPx = 26.dp.toPx()
+                val thumbX = (activeWidth - thumbWidthPx / 2f).coerceIn(0f, width - thumbWidthPx)
+                val thumbCornerRadius = CornerRadius(thumbWidthPx / 2f, thumbWidthPx / 2f)
+
+                drawRoundRect(
+                    color = primaryColor,
+                    topLeft = Offset(thumbX, centerY - thumbHeightPx / 2f),
+                    size = Size(thumbWidthPx, thumbHeightPx),
+                    cornerRadius = thumbCornerRadius,
                 )
             }
+        }
+
+        Spacer(Modifier.height(2.dp))
+
+        // Time labels
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = formatTime(shownMs),
+                style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
+                color = textColor,
+            )
+            Text(
+                text = "−${formatTime((boundedDurationMs - shownMs).coerceAtLeast(0))}",
+                style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium) else MaterialTheme.typography.labelMedium,
+                color = textColor,
+            )
         }
     }
 }
