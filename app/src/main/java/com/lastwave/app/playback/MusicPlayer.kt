@@ -273,6 +273,7 @@ class MusicPlayer @Inject constructor(
         }
         override fun onPlayerError(error: PlaybackException) {
             val currentTrack = _state.value.current
+            val failedQobuzStream = _state.value.isQobuz
             val currentPos = player.currentPosition.coerceAtLeast(0)
             val videoId = currentTrack?.videoId
             val failedIndex = player.currentMediaItemIndex
@@ -286,7 +287,10 @@ class MusicPlayer @Inject constructor(
             val confirmedWithoutRetry = isExplicitlyUnplayableFailure(error) ||
                 isUnsupportedMediaFailure(error)
             val confirmedAfterRetry = errorRetryCount > 0 && isPermanentHttpFailure(error)
-            if (confirmedWithoutRetry || confirmedAfterRetry) {
+            // Any Qobuz CDN/format failure gets one immediate YouTube Music
+            // fallback. Permanent-error skipping applies only after that
+            // alternate source has also failed.
+            if ((confirmedWithoutRetry || confirmedAfterRetry) && !failedQobuzStream) {
                 _state.update {
                     it.copy(error = "Track unavailable", isPlaying = false, isBuffering = false)
                 }
@@ -300,7 +304,11 @@ class MusicPlayer @Inject constructor(
                     _state.update { it.copy(isBuffering = true, error = null) }
                     var retryFailure: Throwable? = null
                     try {
-                        val stream = resolveTrackAudioStream(currentTrack, videoId)
+                        val stream = resolveTrackAudioStream(
+                            track = currentTrack,
+                            videoId = videoId,
+                            allowQobuz = !failedQobuzStream,
+                        )
                         publishResolvedQuality(stream)
                         val updated = currentTrack.copy(
                             playbackUrl = stream.url,
@@ -1050,17 +1058,18 @@ class MusicPlayer @Inject constructor(
     private suspend fun resolveTrackAudioStream(
         track: PlayableTrack,
         videoId: String?,
+        allowQobuz: Boolean = true,
     ): ResolvedStream = withContext(Dispatchers.IO) {
         val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
-        if (misc.preferQobuzStreaming) {
-            // Timeout Qobuz resolution so a slow CDN doesn't block playback.
-            // Falls through to YouTube Music if Qobuz takes longer than 5 seconds
-            // or returns no match.
-            val qobuzStream = withTimeoutOrNull(5_000L) {
+        if (allowQobuz) {
+            // Keep Qobuz primary without making an unavailable catalog entry
+            // visibly delay the YouTube Music fallback.
+            val qobuzStream = withTimeoutOrNull(QOBUZ_RESOLVE_TIMEOUT_MS) {
                 runCatching {
                     qobuzMusicApi.resolveStream(
                         title = track.title,
                         artist = track.artist,
+                        expectedAlbum = track.album,
                         preferredQuality = misc.qobuzQuality,
                     )
                 }.getOrNull()
@@ -1333,7 +1342,8 @@ class MusicPlayer @Inject constructor(
         /** Ticker-driven session persistence cadence (explicit state changes persist immediately). */
         const val TICKER_PERSIST_INTERVAL_MS = 2_000L
         /** Hard ceiling for the blocking data-spec stream resolution inside ExoPlayer's loader. */
-        const val RESOLVE_DATA_SPEC_TIMEOUT_MS = 25_000L
+        const val QOBUZ_RESOLVE_TIMEOUT_MS = 4_000L
+        const val RESOLVE_DATA_SPEC_TIMEOUT_MS = 35_000L
         const val MEDIA_STREAM_CACHE_BYTES = 256L * 1024 * 1024
         const val NEXT_TRACK_PREFETCH_BYTES = 4L * 1024 * 1024
         val PERMANENT_HTTP_STATUS_CODES = setOf(401, 404, 410, 451)

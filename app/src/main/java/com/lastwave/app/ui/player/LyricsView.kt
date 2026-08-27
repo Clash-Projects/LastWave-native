@@ -291,34 +291,6 @@ fun LyricsPanel(
                     }
                 }
             }
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .height(42.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.54f),
-                                Color.Transparent,
-                            ),
-                        ),
-                    ),
-            )
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(58.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.Transparent,
-                                MaterialTheme.colorScheme.surface.copy(alpha = 0.64f),
-                            ),
-                        ),
-                    ),
-            )
         }
 
         // Bottom compact playback bar in lyrics view
@@ -596,94 +568,34 @@ private fun SyncedLyricsList(
                 label = "lyricColor_$index",
             )
 
-            // Container Background & Border
+            // Container Background & Border (Clean floating layout - no box outlines)
             val pillShape = RoundedCornerShape(18.dp)
-            val cardBg = when {
-                liquidGlass && animationStyle == LyricsAnimation.CARD_POP -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.90f)
-                animationStyle == LyricsAnimation.CARD_POP -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.56f)
-                else -> Color.Transparent
-            }
-            val activeBrush = if (!isActive || animationStyle == LyricsAnimation.MINIMAL_WAVE) {
-                null
+            val cardBg = if (liquidGlass && animationStyle == LyricsAnimation.CARD_POP) {
+                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.90f)
+            } else if (animationStyle == LyricsAnimation.CARD_POP) {
+                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.56f)
             } else {
-                val colors = when (animationStyle) {
-                    LyricsAnimation.APPLE_FLUID -> listOf(
-                        primaryColor.copy(alpha = if (liquidGlass) 0.34f else 0.20f),
-                        accentSecondary.copy(alpha = if (liquidGlass) 0.20f else 0.10f),
-                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.34f),
-                    )
-                    LyricsAnimation.KARAOKE_PULSE -> listOf(
-                        primaryColor.copy(alpha = if (liquidGlass) 0.42f else 0.27f),
-                        accentDeep.copy(alpha = if (liquidGlass) 0.30f else 0.18f),
-                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.30f),
-                    )
-                    LyricsAnimation.KINETIC_SLIDE -> listOf(
-                        primaryColor.copy(alpha = if (liquidGlass) 0.38f else 0.23f),
-                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.26f),
-                        Color.Transparent,
-                    )
-                    LyricsAnimation.CINEMATIC_BLUR -> listOf(
-                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = if (liquidGlass) 0.74f else 0.52f),
-                        primaryColor.copy(alpha = 0.14f),
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.22f),
-                    )
-                    LyricsAnimation.LOSSLESS_GLOW -> listOf(
-                        primaryColor.copy(alpha = if (liquidGlass) 0.50f else 0.32f),
-                        accentSecondary.copy(alpha = if (liquidGlass) 0.36f else 0.23f),
-                        accentDeep.copy(alpha = if (liquidGlass) 0.24f else 0.15f),
-                    )
-                    LyricsAnimation.CARD_POP -> listOf(
+                Color.Transparent
+            }
+            val activeBrush = if (isActive && animationStyle == LyricsAnimation.CARD_POP) {
+                Brush.linearGradient(
+                    listOf(
                         MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (liquidGlass) 0.88f else 0.68f),
                         MaterialTheme.colorScheme.secondaryContainer.copy(alpha = if (liquidGlass) 0.66f else 0.44f),
                         MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.52f),
-                    )
-                    LyricsAnimation.APPLE_ZOOM -> listOf(
-                        primaryColor.copy(alpha = if (liquidGlass) 0.30f else 0.16f),
-                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.30f),
-                        Color.Transparent,
-                    )
-                    LyricsAnimation.MINIMAL_WAVE -> listOf(Color.Transparent, Color.Transparent)
-                }
-                Brush.linearGradient(colors)
+                    ),
+                )
+            } else {
+                null
             }
 
-            val strokeBorder = when {
-                isActive && animationStyle == LyricsAnimation.MINIMAL_WAVE -> null
-                isActive && animationStyle == LyricsAnimation.LOSSLESS_GLOW -> BorderStroke(
-                    1.25.dp,
-                    Brush.linearGradient(
-                        listOf(
-                            Color.White.copy(alpha = if (liquidGlass) 0.52f else 0.20f),
-                            primaryColor.copy(alpha = 0.72f),
-                            accentSecondary.copy(alpha = 0.42f),
-                        ),
-                    ),
-                )
-                isActive && liquidGlass -> BorderStroke(
-                    1.dp,
-                    Brush.linearGradient(
-                        listOf(
-                            Color.White.copy(alpha = 0.40f),
-                            primaryColor.copy(alpha = 0.50f),
-                            Color.White.copy(alpha = 0.12f),
-                        ),
-                    ),
-                )
-                isActive && animationStyle == LyricsAnimation.CARD_POP -> BorderStroke(
+            val strokeBorder = if (isActive && animationStyle == LyricsAnimation.CARD_POP) {
+                BorderStroke(
                     1.dp,
                     MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
                 )
-                isActive -> BorderStroke(
-                    1.dp,
-                    Brush.linearGradient(
-                        listOf(
-                            primaryColor.copy(alpha = 0.44f),
-                            accentDeep.copy(alpha = 0.24f),
-                            Color.White.copy(alpha = 0.08f),
-                        ),
-                    ),
-                )
-                else -> null
+            } else {
+                null
             }
 
             Box(
@@ -698,27 +610,17 @@ private fun SyncedLyricsList(
                         rotationZ = rotation
                         rotationX = depthRotation
                         if (depthRotation != 0f) cameraDistance = 24f * density
-                        val elevated = animationStyle == LyricsAnimation.CARD_POP ||
-                            animationStyle == LyricsAnimation.LOSSLESS_GLOW ||
-                            animationStyle == LyricsAnimation.APPLE_ZOOM
-                        if (isActive && elevated) {
-                            shadowElevation = when (animationStyle) {
-                                LyricsAnimation.CARD_POP -> 12.dp.toPx()
-                                LyricsAnimation.LOSSLESS_GLOW -> 8.dp.toPx()
-                                else -> 5.dp.toPx()
-                            }
+                        if (isActive && animationStyle == LyricsAnimation.CARD_POP) {
+                            shadowElevation = 12.dp.toPx()
                             shape = pillShape
-                            clip = animationStyle == LyricsAnimation.CARD_POP
+                            clip = true
                         }
                     }
-                    .clip(pillShape)
-                    .liquidGlassChrome(
-                        pillShape,
-                        liquidGlass && (isActive || animationStyle == LyricsAnimation.CARD_POP),
-                    )
+                    .then(if (animationStyle == LyricsAnimation.CARD_POP) Modifier.clip(pillShape) else Modifier)
                     .then(
                         if (activeBrush != null) Modifier.background(activeBrush, pillShape)
-                        else Modifier.background(cardBg, pillShape),
+                        else if (cardBg != Color.Transparent) Modifier.background(cardBg, pillShape)
+                        else Modifier,
                     )
                     .then(if (strokeBorder != null) Modifier.border(strokeBorder, pillShape) else Modifier)
                     .clickable(
@@ -728,7 +630,7 @@ private fun SyncedLyricsList(
                         onSeek(line.timeMs)
                     }
                     .padding(
-                        horizontal = if (isActive || animationStyle == LyricsAnimation.CARD_POP) 16.dp else 12.dp,
+                        horizontal = if (animationStyle == LyricsAnimation.CARD_POP) 16.dp else 12.dp,
                         vertical = if (isActive) 10.dp else 8.dp,
                     ),
             ) {
@@ -1085,130 +987,101 @@ private fun LyricsBottomControls(
     accentSecondary: Color,
     modifier: Modifier = Modifier,
 ) {
-    val barShape = RoundedCornerShape(26.dp)
-    val barBg = if (liquidGlass) {
-        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
-    }
-
-    Surface(
-        shape = barShape,
-        color = barBg,
-        border = BorderStroke(
-            1.dp,
-            Brush.linearGradient(
-                listOf(
-                    Color.White.copy(alpha = if (liquidGlass) 0.32f else 0.12f),
-                    accentPrimary.copy(alpha = 0.34f),
-                    accentSecondary.copy(alpha = 0.18f),
-                ),
-            ),
-        ),
-        tonalElevation = 2.dp,
-        shadowElevation = 8.dp,
-        modifier = modifier.liquidGlassChrome(barShape, liquidGlass),
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Column(
+        var dragging by remember { mutableStateOf(false) }
+        var dragValue by remember { mutableFloatStateOf(0f) }
+        val end = totalDurationMs.coerceAtLeast(1).toFloat()
+        val shown = if (dragging) dragValue else currentPositionMs.coerceIn(0, totalDurationMs.coerceAtLeast(0)).toFloat()
+
+        PlayerProgressSlider(
+            value = shown.coerceIn(0f, end),
+            onValueChange = { dragging = true; dragValue = it },
+            onValueChangeFinished = { player.seekTo(dragValue.toLong()); dragging = false },
+            valueRange = 0f..end,
+            enabled = totalDurationMs > 0,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+                .padding(horizontal = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            var dragging by remember { mutableStateOf(false) }
-            var dragValue by remember { mutableFloatStateOf(0f) }
-            val end = totalDurationMs.coerceAtLeast(1).toFloat()
-            val shown = if (dragging) dragValue else currentPositionMs.coerceIn(0, totalDurationMs.coerceAtLeast(0)).toFloat()
-
-            PlayerProgressSlider(
-                value = shown.coerceIn(0f, end),
-                onValueChange = { dragging = true; dragValue = it },
-                onValueChangeFinished = { player.seekTo(dragValue.toLong()); dragging = false },
-                valueRange = 0f..end,
-                enabled = totalDurationMs > 0,
-                modifier = Modifier.fillMaxWidth(),
+            Text(
+                formatTime(shown.toLong()),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
             )
 
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    formatTime(shown.toLong()),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
-                )
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                IconButton(
+                    onClick = player::previous,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
                 ) {
-                    IconButton(
-                        onClick = player::previous,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.58f)),
-                    ) {
-                        Icon(
-                            Icons.Filled.SkipPrevious,
-                            "Previous",
-                            Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
+                    Icon(
+                        Icons.Filled.SkipPrevious,
+                        "Previous",
+                        Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
 
-                    Surface(
-                        onClick = player::togglePlayPause,
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        border = BorderStroke(
-                            1.dp,
-                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f),
-                        ),
-                        tonalElevation = 2.dp,
-                        shadowElevation = 6.dp,
-                        modifier = Modifier.size(44.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            if (state.isBuffering) {
-                                ExpressiveInlineLoadingIndicator(
-                                    size = 20.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    strokeWidth = 2.dp,
-                                )
-                            } else {
-                                AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(24.dp))
-                            }
+                Surface(
+                    onClick = player::togglePlayPause,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                    modifier = Modifier.size(52.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (state.isBuffering) {
+                            ExpressiveInlineLoadingIndicator(
+                                size = 22.dp,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.5.dp,
+                            )
+                        } else {
+                            AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(28.dp))
                         }
-                    }
-
-                    IconButton(
-                        onClick = player::next,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.58f)),
-                    ) {
-                        Icon(
-                            Icons.Filled.SkipNext,
-                            "Next",
-                            Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.onSurface,
-                        )
                     }
                 }
 
-                Text(
-                    "−${formatTime((totalDurationMs - shown.toLong()).coerceAtLeast(0))}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
-                )
+                IconButton(
+                    onClick = player::next,
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
+                ) {
+                    Icon(
+                        Icons.Filled.SkipNext,
+                        "Next",
+                        Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
             }
+
+            Text(
+                "−${formatTime((totalDurationMs - shown.toLong()).coerceAtLeast(0))}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.94f),
+            )
         }
     }
 }

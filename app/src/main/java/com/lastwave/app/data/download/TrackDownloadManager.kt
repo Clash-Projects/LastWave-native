@@ -81,6 +81,7 @@ class TrackDownloadManager @Inject constructor(
         private const val PUBLIC_DIR_NAME = "LastWave"
         private const val DOWNLOAD_BUFFER_SIZE = 512 * 1024 // 512 KB
         private const val MAX_DOWNLOAD_RETRIES = 1
+        private const val QOBUZ_RESOLVE_TIMEOUT_MS = 4_000L
     }
 
     // Dedicated HTTP client with extended timeouts and high-throughput connection pooling
@@ -207,7 +208,7 @@ class TrackDownloadManager @Inject constructor(
                         }?.takeIf { ArtworkNormalizer.isRealImage(it) }
                 }
 
-                // 1. Resolve source — respect user's Qobuz preference for downloads too
+                // 1. Resolve source — verified Qobuz first, YouTube Music fallback.
                 val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
                 var resolvedUrl: String? = null
                 var mimeType = "audio/flac"
@@ -216,30 +217,29 @@ class TrackDownloadManager @Inject constructor(
                 var isQobuz = false
                 var durationMs = 0L
 
-                if (misc.preferQobuzStreaming) {
-                    val qobuzStream = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
-                        runCatching {
-                            qobuzMusicApi.resolveStream(
-                                title = title,
-                                artist = artist,
-                                preferredQuality = QobuzMusicApi.QUALITY_MAX_HI_RES,
-                            )
-                        }.getOrNull()
-                    }
+                val qobuzStream = kotlinx.coroutines.withTimeoutOrNull(QOBUZ_RESOLVE_TIMEOUT_MS) {
+                    runCatching {
+                        qobuzMusicApi.resolveStream(
+                            title = title,
+                            artist = artist,
+                            expectedAlbum = album,
+                            preferredQuality = misc.qobuzQuality,
+                        )
+                    }.getOrNull()
+                }
 
-                    if (qobuzStream != null) {
-                        resolvedUrl = qobuzStream.url
-                        mimeType = qobuzStream.mimeType
-                        extension = if (qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320) "mp3" else "flac"
-                        formatBadge = when {
-                            qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
-                            qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS FLAC"
-                            qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "320k MP3"
-                            else -> "FLAC"
-                        }
-                        isQobuz = true
-                        durationMs = 0L
+                if (qobuzStream != null) {
+                    resolvedUrl = qobuzStream.url
+                    mimeType = qobuzStream.mimeType
+                    extension = if (qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320) "mp3" else "flac"
+                    formatBadge = when {
+                        qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
+                        qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS FLAC"
+                        qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "320k MP3"
+                        else -> "FLAC"
                     }
+                    isQobuz = true
+                    durationMs = 0L
                 }
 
                 if (resolvedUrl == null) {

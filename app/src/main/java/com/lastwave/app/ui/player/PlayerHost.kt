@@ -1113,7 +1113,7 @@ private fun FullPlayer(
                             .size(44.dp)
                             .clip(CircleShape)
                             .background(
-                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
                             ),
                     ) {
                         Icon(
@@ -1157,7 +1157,7 @@ private fun FullPlayer(
                             .size(44.dp)
                             .clip(CircleShape)
                             .background(
-                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
                             ),
                     ) {
                         Icon(
@@ -1205,12 +1205,12 @@ private fun FullPlayer(
                         FullPlayerTab.NOW_PLAYING -> {
                                 // ── Standard layout (unchanged) ────────────────
                                 Column(
-                                    Modifier.fillMaxSize().padding(bottom = 12.dp),
+                                    Modifier.fillMaxSize().padding(bottom = 18.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
                                     BoxWithConstraints(
                                         modifier = Modifier.fillMaxWidth().weight(1f),
-                                        contentAlignment = BiasAlignment(0f, -0.40f),
+                                        contentAlignment = BiasAlignment(0f, -0.55f),
                                     ) {
                                         val artworkSize = (minOf(maxWidth, maxHeight) - 6.dp)
                                             .coerceAtLeast(0.dp)
@@ -1417,7 +1417,7 @@ private fun FullPlayer(
                                             }
                                         }
                                     }
-                                    Spacer(Modifier.height(18.dp))
+                                    Spacer(Modifier.height(14.dp))
                                     Row(
                                         Modifier
                                             .fillMaxWidth()
@@ -1476,10 +1476,10 @@ private fun FullPlayer(
                                         Surface(
                                             onClick = { onTabChange(FullPlayerTab.LYRICS) },
                                             shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f),
+                                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
                                             contentColor = MaterialTheme.colorScheme.primary,
-                                            tonalElevation = 2.dp,
-                                            shadowElevation = 4.dp,
+                                            tonalElevation = 0.dp,
+                                            shadowElevation = 0.dp,
                                             modifier = Modifier.size(46.dp),
                                         ) {
                                             Box(contentAlignment = Alignment.Center) {
@@ -1492,7 +1492,7 @@ private fun FullPlayer(
                                             }
                                         }
                                     }
-                                    Spacer(Modifier.height(16.dp))
+                                    Spacer(Modifier.height(14.dp))
                                     SeekBar(
                                         progressState = progressState,
                                         isPlaying = state.isPlaying,
@@ -1501,9 +1501,9 @@ private fun FullPlayer(
                                         onSeek = player::seekTo,
                                         isTranslucent = false,
                                     )
-                                    Spacer(Modifier.height(16.dp))
+                                    Spacer(Modifier.height(14.dp))
                                     MainControls(state, player, isTranslucent = false)
-                                    Spacer(Modifier.height(20.dp))
+                                    Spacer(Modifier.height(16.dp))
                                     PlayerUtilityControls(state, player, isTranslucent = false)
                                 }
                         }
@@ -1688,10 +1688,10 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::previous,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
-            tonalElevation = if (isTranslucent) 0.dp else 2.dp,
-            shadowElevation = if (isTranslucent) 0.dp else 4.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1701,10 +1701,10 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::togglePlayPause,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.88f),
+            color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
             contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
-            tonalElevation = if (isTranslucent) 0.dp else 6.dp,
-            shadowElevation = if (isTranslucent) 10.dp else 14.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier.size(if (isTranslucent) 72.dp else 76.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1722,10 +1722,10 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         Surface(
             onClick = player::next,
             shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f),
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
-            tonalElevation = if (isTranslucent) 0.dp else 2.dp,
-            shadowElevation = if (isTranslucent) 0.dp else 4.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1744,8 +1744,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         targetValue = when {
             isTranslucent && shuffleActive -> Color.White.copy(alpha = 0.22f)
             isTranslucent -> Color.White.copy(alpha = 0.12f)
-            shuffleActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f)
-            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
+            shuffleActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)
         },
         animationSpec = tween(ExpressiveMotion.Quick),
         label = "shuffleBg",
@@ -1764,8 +1764,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         targetValue = when {
             isTranslucent && repeatActive -> Color.White.copy(alpha = 0.22f)
             isTranslucent -> Color.White.copy(alpha = 0.12f)
-            repeatActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.78f)
-            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
+            repeatActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)
         },
         animationSpec = tween(ExpressiveMotion.Quick),
         label = "repeatBg",
@@ -1791,8 +1791,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             shape = CircleShape,
             color = shuffleBg,
             contentColor = shuffleContent,
-            tonalElevation = if (shuffleActive) 2.dp else 1.dp,
-            shadowElevation = 2.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
@@ -1803,16 +1803,16 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             shape = RoundedCornerShape(24.dp),
             color = when {
                 isTranslucent -> Color.White.copy(alpha = 0.12f)
-                state.isQobuz -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
+                state.isQobuz -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.40f)
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)
             },
             contentColor = when {
                 isTranslucent -> Color.White
                 state.isQobuz -> MaterialTheme.colorScheme.primary
                 else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
             },
-            tonalElevation = 1.dp,
-            shadowElevation = 2.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier.weight(1.3f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
             Row(
@@ -1841,8 +1841,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             shape = CircleShape,
             color = repeatBg,
             contentColor = repeatContent,
-            tonalElevation = if (repeatActive) 2.dp else 1.dp,
-            shadowElevation = 2.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {

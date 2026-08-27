@@ -61,8 +61,8 @@ class LyricsPlusApi @Inject constructor(
     }
 
     private val endpoints = listOf(
-        "https://lyricsplus.clashgram.workers.dev/v2/lyrics/get",
         "https://lyricsplus.prjktla.my.id/v2/lyrics/get",
+        "https://lyricsplus.clashgram.workers.dev/v2/lyrics/get",
     )
 
     suspend fun fetchWordLyrics(

@@ -608,28 +608,18 @@ fun SettingsScreen(
                         else -> "Max (Up to 24-bit / 192 kHz)"
                     }
 
-                    SettingsGroup(rowCount = if (misc.crossfadeEnabled) 4 else 3) { index, position ->
+                    SettingsGroup(rowCount = if (misc.crossfadeEnabled) 3 else 2) { index, position ->
                         when (index) {
-                            0 -> SettingsToggleCard(
+                            0 -> SettingsActionCard(
                                 icon = Icons.Filled.HighQuality,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Prefer Qobuz Audio",
-                                subtitle = if (misc.preferQobuzStreaming) "Direct Lossless/Hi-Res stream with YouTube fallback" else "YouTube Music streaming only",
-                                checked = misc.preferQobuzStreaming,
-                                onCheckedChange = viewModel::setPreferQobuzStreaming,
-                                position = position,
-                            )
-                            1 -> SettingsActionCard(
-                                icon = Icons.Filled.Tune,
-                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Qobuz Streaming Quality",
-                                subtitle = qualitySubtitle,
+                                title = "Qobuz-first Streaming",
+                                subtitle = "$qualitySubtitle \u2022 YouTube Music fallback",
                                 onClick = { showQualityDialog = true },
                                 position = position,
                             )
-                            2 -> SettingsToggleCard(
+                            1 -> SettingsToggleCard(
                                 icon = Icons.Filled.GraphicEq,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
@@ -643,7 +633,7 @@ fun SettingsScreen(
                                 onCheckedChange = viewModel::setCrossfadeEnabled,
                                 position = position,
                             )
-                            3 -> CrossfadeDurationRow(
+                            2 -> CrossfadeDurationRow(
                                 seconds = misc.crossfadeSeconds,
                                 onSecondsChange = viewModel::setCrossfadeSeconds,
                                 position = position,
