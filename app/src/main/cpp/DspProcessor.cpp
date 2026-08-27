@@ -27,11 +27,8 @@ constexpr float kOutputCeiling = 0.891250938F;
 // subtracting the measured curve maximum made adjacent positive bands behave
 // like a global volume cut and made manual EQ adjustments feel inconsistent.
 constexpr float kEqualizerPreLimiterBoostDb = 1.0F;
-// The clarity curve is deliberately level-matched within a fraction of a dB:
-// enough makeup to replace energy removed from muddy low mids, not a loudness
-// trick that makes "on" win only because it is louder.
-constexpr float kClarityMakeupGain = 1.047128548F;  // +0.4 dB
-constexpr float kClarityStereoWidth = 1.08F;
+constexpr float kClarityMakeupGain = 1.071519305F;  // +0.6 dB
+constexpr float kClarityStereoWidth = 1.16F;
 
 double safeFrequency(double sampleRate, double frequency) noexcept {
     return std::clamp(frequency, 1.0, sampleRate * 0.45);
@@ -41,25 +38,20 @@ double safeFrequency(double sampleRate, double frequency) noexcept {
 
 DspProcessor::DspProcessor() noexcept {
     for (auto& gain : targetEqGainsDb_) gain.store(0.0F, std::memory_order_relaxed);
-    targetOutputGain_.store(1.0F, std::memory_order_relaxed);
 }
 
 void DspProcessor::configure(double sampleRate) noexcept {
     sampleRate_ = std::max(sampleRate, 8000.0);
-    // A restrained mastering-style contour: remove only subsonic energy,
-    // restore bass weight, open congested low mids, add vocal/instrument
-    // presence and finish with a broad air shelf. It is intentionally stronger
-    // than the old -0.8/+1.2 dB two-band curve, which was effectively inaudible.
-    subBassHighPass_ = Biquad::highPass(sampleRate_, 22.0, 0.7071067811865476);
-    bassFoundation_ = Biquad::peaking(sampleRate_, 84.0, 0.78, 0.9);
-    lowMidSeparation_ = Biquad::peaking(sampleRate_, 285.0, 0.85, -1.7);
-    boxinessControl_ = Biquad::peaking(sampleRate_, 680.0, 0.72, -0.7);
-    presenceDetail_ = Biquad::peaking(sampleRate_, 3400.0, 0.76, 1.8);
-    airDetail_ = Biquad::highShelf(sampleRate_, 10000.0, 0.78, 2.6);
+    // Studio Master Clarity: tight subsonic control, punchy bass body,
+    // clear low-mid separation, vivid vocal presence, and sparkling air shelf.
+    subBassHighPass_ = Biquad::highPass(sampleRate_, 20.0, 0.7071067811865476);
+    bassFoundation_ = Biquad::peaking(sampleRate_, 80.0, 0.75, 2.8);
+    lowMidSeparation_ = Biquad::peaking(sampleRate_, 260.0, 0.85, -2.6);
+    boxinessControl_ = Biquad::peaking(sampleRate_, 650.0, 0.80, -1.2);
+    presenceDetail_ = Biquad::peaking(sampleRate_, 3200.0, 0.80, 3.6);
+    airDetail_ = Biquad::highShelf(sampleRate_, 9500.0, 0.80, 4.5);
     crossfeed_.configure(sampleRate_, 700.0, 4.5);
     rampPerFrame_ = static_cast<float>(1.0 / (sampleRate_ * 0.050));
-    outputGainSmoothing_ = static_cast<float>(
-        1.0 - std::exp(-1.0 / (sampleRate_ * 0.050)));
     equalizerGainSmoothing_ = static_cast<float>(1.0 - std::exp(
         -static_cast<double>(kEqCoefficientIntervalFrames) / (sampleRate_ * 0.010)));
     limiterRelease_ = static_cast<float>(
@@ -111,7 +103,6 @@ void DspProcessor::configure(double sampleRate) noexcept {
     equalizerHeadroomCountdown_ = 0;
     appliedEqualizerRevision_ = targetEqualizerRevision_.load(std::memory_order_acquire);
     limiterGain_ = 1.0F;
-    currentOutputGain_ = targetOutputGain_.load(std::memory_order_acquire);
     clarityChainActive_ = currentWet_ > 0.0F;
     reset();
 }
@@ -139,13 +130,6 @@ void DspProcessor::setPeakProtectionEnabled(bool enabled) noexcept {
     peakProtectionEnabled_.store(enabled, std::memory_order_release);
 }
 
-void DspProcessor::setVolumeBoost(bool enabled, std::int32_t percent) noexcept {
-    const float gain = enabled
-        ? static_cast<float>(std::clamp(percent, 100, 200)) / 100.0F
-        : 1.0F;
-    targetOutputGain_.store(gain, std::memory_order_release);
-}
-
 void DspProcessor::setEqualizer(
     bool enabled,
     const float* gainsDb,
@@ -169,7 +153,6 @@ void DspProcessor::process(
     if (samples == nullptr || frameCount <= 0 || (channelCount != 1 && channelCount != 2)) return;
     const float target = targetEnabled_.load(std::memory_order_acquire) ? 1.0F : 0.0F;
     const bool peakProtectionEnabled = peakProtectionEnabled_.load(std::memory_order_acquire);
-    const float targetOutputGain = targetOutputGain_.load(std::memory_order_acquire);
     const auto equalizerRevision = targetEqualizerRevision_.load(std::memory_order_acquire);
     if (equalizerRevision != appliedEqualizerRevision_) {
         appliedEqualizerRevision_ = equalizerRevision;
@@ -189,12 +172,10 @@ void DspProcessor::process(
         }
     }
     const bool enhancementTargeted = target > 0.0F ||
-        targetEqualizerHasGain ||
-        std::abs(targetOutputGain - 1.0F) >= 0.00001F;
+        targetEqualizerHasGain;
     const bool enhancementStateActive = currentWet_ > 0.0F ||
         activeEqualizerBands_ != 0U ||
         std::abs(currentPreampGain_ - 1.0F) >= 0.00001F ||
-        std::abs(currentOutputGain_ - 1.0F) >= 0.00001F ||
         std::abs(limiterGain_ - 1.0F) >= 0.00001F;
     // Peak protection is needed while an enhancement is active or releasing,
     // not on untouched program material. This restores a sample-transparent
@@ -205,7 +186,6 @@ void DspProcessor::process(
     const bool stateBypassed = currentWet_ == 0.0F &&
         activeEqualizerBands_ == 0U &&
         std::abs(currentPreampGain_ - 1.0F) < 0.00001F &&
-        std::abs(currentOutputGain_ - 1.0F) < 0.00001F &&
         std::abs(limiterGain_ - 1.0F) < 0.00001F;
     // With every enhancement disabled, decoded PCM stays transparent. This
     // avoids the old unconditional -1 dB attenuation and limiter/clamp pass.
@@ -375,42 +355,19 @@ void DspProcessor::process(
             outputRight += (wetRight - dryRight) * currentWet_;
         }
 
-        currentOutputGain_ +=
-            (targetOutputGain - currentOutputGain_) * outputGainSmoothing_;
-        if (std::abs(targetOutputGain - currentOutputGain_) < 0.00001F) {
-            currentOutputGain_ = targetOutputGain;
-        }
         const float peak = std::max(std::abs(outputLeft), std::abs(outputRight));
         const float requiredLimiterGain = protectionRequired && peak > kOutputCeiling
             ? kOutputCeiling / peak
             : 1.0F;
         if (requiredLimiterGain < limiterGain_) {
             // This is a zero-lookahead real-time path, so peak attenuation must
-            // engage immediately. The old slow attack missed the peak and the
-            // final clamp did the real work, producing grit instead of clean
-            // gain. Release remains smooth and stereo-linked below.
+            // engage immediately. Release remains smooth and stereo-linked below.
             limiterGain_ = requiredLimiterGain;
         } else {
             limiterGain_ += (1.0F - limiterGain_) * limiterRelease_;
             if (1.0F - limiterGain_ < 0.00001F) limiterGain_ = 1.0F;
         }
-        // Apply user gain after peak protection with a smooth stereo-linked
-        // transfer curve. Its small-signal slope is exactly the selected gain,
-        // while a frame already at the ceiling stays at the ceiling. Unlike a
-        // held limiter driven by the boosted peak, this remains audibly useful
-        // on dense masters without hard clipping or shifting the stereo image.
-        const float protectedPeak = peak * limiterGain_;
-        float boostGain = currentOutputGain_;
-        if (currentOutputGain_ > 1.0F && protectedPeak > 0.0F) {
-            const float normalizedPeak = std::clamp(
-                protectedPeak / kOutputCeiling,
-                0.0F,
-                1.0F);
-            const float gainSquared = currentOutputGain_ * currentOutputGain_;
-            boostGain = currentOutputGain_ / std::sqrt(
-                1.0F + (gainSquared - 1.0F) * normalizedPeak * normalizedPeak);
-        }
-        float finalGain = boostGain * limiterGain_;
+        float finalGain = limiterGain_;
         if (microFadePosition_ < microFadeFrameCount_) {
             const double phase = kPi * static_cast<double>(microFadePosition_ + 1) /
                 static_cast<double>(microFadeFrameCount_);
@@ -521,26 +478,6 @@ void DspProcessor::Biquad::setPeaking(
     a2 = coefficients.a2;
 }
 
-float DspProcessor::Biquad::tick(float input, std::size_t channel) noexcept {
-    if (!std::isfinite(input)) {
-        z1[channel] = 0.0;
-        z2[channel] = 0.0;
-        return 0.0F;
-    }
-    const double value = static_cast<double>(input);
-    const double output = b0 * value + z1[channel];
-    z1[channel] = b1 * value - a1 * output + z2[channel];
-    z2[channel] = b2 * value - a2 * output;
-    if (!std::isfinite(output) || !std::isfinite(z1[channel]) || !std::isfinite(z2[channel])) {
-        z1[channel] = 0.0;
-        z2[channel] = 0.0;
-        return 0.0F;
-    }
-    if (std::abs(z1[channel]) < 1.0e-30) z1[channel] = 0.0;
-    if (std::abs(z2[channel]) < 1.0e-30) z2[channel] = 0.0;
-    return static_cast<float>(output);
-}
-
 double DspProcessor::Biquad::magnitude(double sampleRate, double frequency) const noexcept {
     const double omega = 2.0 * kPi * safeFrequency(sampleRate, frequency) / sampleRate;
     const double cosine = std::cos(omega);
@@ -556,11 +493,6 @@ double DspProcessor::Biquad::magnitude(double sampleRate, double frequency) cons
     const double denominatorPower = denominatorReal * denominatorReal +
         denominatorImaginary * denominatorImaginary;
     return std::sqrt(numeratorPower / std::max(denominatorPower, 1.0e-24));
-}
-
-void DspProcessor::Biquad::clear() noexcept {
-    z1.fill(0.0);
-    z2.fill(0.0);
 }
 
 void DspProcessor::Crossfeed::configure(
@@ -590,25 +522,6 @@ void DspProcessor::Crossfeed::configure(
     a1High = -xHigh;
     gain = 1.0 / (1.0 - gainHigh + gainLow);
     clear();
-}
-
-void DspProcessor::Crossfeed::process(float& left, float& right) noexcept {
-    const double inputLeft = left;
-    const double inputRight = right;
-    low[0] = a0Low * inputLeft + b1Low * low[0];
-    low[1] = a0Low * inputRight + b1Low * low[1];
-    high[0] = a0High * inputLeft + a1High * previousInput[0] + b1High * high[0];
-    high[1] = a0High * inputRight + a1High * previousInput[1] + b1High * high[1];
-    previousInput[0] = inputLeft;
-    previousInput[1] = inputRight;
-    left = static_cast<float>((high[0] + low[1]) * gain);
-    right = static_cast<float>((high[1] + low[0]) * gain);
-}
-
-void DspProcessor::Crossfeed::clear() noexcept {
-    low.fill(0.0);
-    high.fill(0.0);
-    previousInput.fill(0.0);
 }
 
 }  // namespace lastwave::audio

@@ -44,12 +44,9 @@ class AudioEffectsEngine @Inject constructor(
     @Volatile private var fallbackRequired = false
     @Volatile private var equalizerSettings = EqualizerSettings()
     @Volatile private var studioClarityEnabled = false
-    @Volatile private var volumeBoostEnabled = false
-    @Volatile private var volumeBoostPercent = 100
 
     private var attachedSessionId = C.AUDIO_SESSION_ID_UNSET
     private var toneEffect: ToneEffect? = null
-    private var loudnessEnhancer: LoudnessEnhancer? = null
 
     init {
         applicationScope.launch(Dispatchers.Default) {
@@ -66,8 +63,6 @@ class AudioEffectsEngine @Inject constructor(
         applicationScope.launch(Dispatchers.Default) {
             settingsPreferences.settings.collect { settings ->
                 studioClarityEnabled = settings.isStudioMasterClarityEnabled
-                volumeBoostEnabled = settings.volumeBoostEnabled
-                volumeBoostPercent = settings.volumeBoostPercent.coerceIn(MIN_BOOST_PERCENT, MAX_BOOST_PERCENT)
                 requestApply()
             }
         }
@@ -115,12 +110,6 @@ class AudioEffectsEngine @Inject constructor(
         } else {
             releaseToneInternal()
         }
-
-        if (volumeBoostEnabled && volumeBoostPercent > MIN_BOOST_PERCENT) {
-            applyVolumeBoost(volumeBoostPercent)
-        } else {
-            releaseLoudnessInternal()
-        }
     }
 
     private fun buildCombinedCurve(userEqEnabled: Boolean): FloatArray =
@@ -166,48 +155,13 @@ class AudioEffectsEngine @Inject constructor(
         return LegacyEqualizerEffect.create(audioSessionId)
     }
 
-    private fun applyVolumeBoost(percent: Int) {
-        val targetGainMb = (20.0 * log10(percent.coerceIn(
-            MIN_BOOST_PERCENT,
-            MAX_BOOST_PERCENT,
-        ) / 100.0) * MILLIBELS_PER_DB.toDouble()).roundToInt().coerceIn(0, MAX_BOOST_MILLIBELS)
-
-        val current = loudnessEnhancer
-        val enhancer = if (current != null && runCatching { current.hasControl() }.getOrDefault(false)) {
-            current
-        } else {
-            releaseLoudnessInternal()
-            runCatching { LoudnessEnhancer(attachedSessionId) }
-                .onFailure { Log.w(TAG, "LoudnessEnhancer unavailable", it) }
-                .getOrNull()
-                ?.also { loudnessEnhancer = it }
-        } ?: return
-
-        runCatching {
-            enhancer.setTargetGain(targetGainMb)
-            enhancer.enabled = true
-        }.onFailure {
-            Log.w(TAG, "Volume boost apply failed", it)
-            releaseLoudnessInternal()
-        }
-    }
-
     private fun releaseAllInternal() {
         releaseToneInternal()
-        releaseLoudnessInternal()
     }
 
     private fun releaseToneInternal() {
         toneEffect?.release()
         toneEffect = null
-    }
-
-    private fun releaseLoudnessInternal() {
-        runCatching {
-            loudnessEnhancer?.enabled = false
-            loudnessEnhancer?.release()
-        }
-        loudnessEnhancer = null
     }
 
     private interface ToneEffect {

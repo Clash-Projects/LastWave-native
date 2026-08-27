@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.flow.Flow
@@ -54,10 +55,6 @@ data class MiscSettings(
     val isStudioMasterClarityEnabled: Boolean = false,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
-    /** Experimental output gain. Disabled by default; when enabled the DSP
-     *  can raise quiet-track level from 100% up to a bounded 200%. */
-    val volumeBoostEnabled: Boolean = false,
-    val volumeBoostPercent: Int = 100,
     /** Blend the end of one queued track into the beginning of the next. */
     val crossfadeEnabled: Boolean = false,
     /** Crossfade length in seconds; kept within the native settings slider range. */
@@ -78,13 +75,11 @@ class SettingsPreferences @Inject constructor(
         val USE_CUSTOM_FONT = booleanPreferencesKey("lw_use_custom_font")
         val PINNED_FRIENDS = stringSetPreferencesKey("lw_pinned_friends")
         val PREFER_QOBUZ_STREAMING = booleanPreferencesKey("lw_prefer_qobuz_streaming")
-        val QOBUZ_QUALITY = androidx.datastore.preferences.core.intPreferencesKey("lw_qobuz_quality")
+        val QOBUZ_QUALITY = intPreferencesKey("lw_qobuz_quality")
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
         val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
-        val VOLUME_BOOST_ENABLED = booleanPreferencesKey("lw_volume_boost_enabled")
-        val VOLUME_BOOST_PERCENT = androidx.datastore.preferences.core.intPreferencesKey("lw_volume_boost_percent")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
-        val CROSSFADE_SECONDS = androidx.datastore.preferences.core.intPreferencesKey("lw_crossfade_seconds")
+        val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
         val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
     }
 
@@ -99,8 +94,6 @@ class SettingsPreferences @Inject constructor(
                 qobuzQuality = p.readSafely(Keys.QOBUZ_QUALITY)?.takeIf { it in QOBUZ_QUALITIES } ?: 27,
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: false,
                 lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
-                volumeBoostEnabled = p.readSafely(Keys.VOLUME_BOOST_ENABLED) ?: false,
-                volumeBoostPercent = (p.readSafely(Keys.VOLUME_BOOST_PERCENT) ?: 100).coerceIn(100, 200),
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 10),
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
@@ -129,14 +122,6 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setLyricsAnimation(animation: LyricsAnimation) {
         dataStore.edit { it[Keys.LYRICS_ANIMATION] = animation.id }
-    }
-
-    suspend fun setVolumeBoostEnabled(enabled: Boolean) {
-        dataStore.edit { it[Keys.VOLUME_BOOST_ENABLED] = enabled }
-    }
-
-    suspend fun setVolumeBoostPercent(percent: Int) {
-        dataStore.edit { it[Keys.VOLUME_BOOST_PERCENT] = percent.coerceIn(100, 200) }
     }
 
     suspend fun setCrossfadeEnabled(enabled: Boolean) {

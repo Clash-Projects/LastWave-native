@@ -122,17 +122,7 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetStudioMasterClarity(
     }
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetVolumeBoost(
-    JNIEnv*,
-    jobject,
-    jlong handle,
-    jboolean enabled,
-    jint percent) {
-    if (auto* engine = fromHandle(handle); engine != nullptr) {
-        engine->setVolumeBoost(enabled == JNI_TRUE, percent);
-    }
-}
+
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetEqualizer(

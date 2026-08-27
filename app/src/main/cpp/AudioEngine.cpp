@@ -396,11 +396,6 @@ void AudioEngine::setStudioMasterClarity(bool enabled) noexcept {
     mediaDsp_.setStudioMasterClarity(enabled);
 }
 
-void AudioEngine::setVolumeBoost(bool enabled, std::int32_t percent) noexcept {
-    oboeDsp_.setVolumeBoost(enabled, percent);
-    mediaDsp_.setVolumeBoost(enabled, percent);
-}
-
 void AudioEngine::setEqualizer(
     bool enabled,
     const float* gainsDb,

@@ -139,8 +139,34 @@ class SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SettingsSharing, EqualizerSettings())
     private var immediateEqGains = EqualizerSettings().gainsDb.toFloatArray()
     private var immediateEqEnabled = false
-    private var immediateVolumeBoostEnabled = false
-    private var immediateVolumeBoostPercent = 100
+
+    val downloadCount: StateFlow<Int> = downloadedTrackDao.count()
+        .withSettingsFallback("download count", 0)
+        .stateIn(viewModelScope, SettingsSharing, 0)
+
+    val downloadTotalBytes: StateFlow<Long?> = downloadedTrackDao.totalBytes()
+        .withSettingsFallback("download size", 0L)
+        .stateIn(viewModelScope, SettingsSharing, 0L)
+
+    private val _uiState = MutableStateFlow(SettingsScreenState())
+    val uiState: StateFlow<SettingsScreenState> = _uiState.asStateFlow()
+
+    /** Prevent DataStore/Room/runtime write failures from escaping as an
+     * uncaught root coroutine and terminating the app. */
+    private fun launchSettingsAction(action: String, block: suspend () -> Unit) =
+        viewModelScope.launch {
+            try {
+                block()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                android.util.Log.e(SETTINGS_TAG, "Failed to $action", error)
+                _uiState.update { state ->
+                    state.copy(toastMessage = "Couldn't $action. Please try again.")
+                }
+            } catch (error: LinkageError) {
+                // Missing/altered framework or JNI symbols on a custom ROM
+    private var immediateEqEnabled = false
 
     val downloadCount: StateFlow<Int> = downloadedTrackDao.count()
         .withSettingsFallback("download count", 0)
@@ -181,12 +207,6 @@ class SettingsViewModel @Inject constructor(
             equalizer.collect {
                 immediateEqEnabled = it.enabled
                 immediateEqGains = it.gainsDb.toFloatArray()
-            }
-        }
-        viewModelScope.launch {
-            misc.collect { settings ->
-                immediateVolumeBoostEnabled = settings.volumeBoostEnabled
-                immediateVolumeBoostPercent = settings.volumeBoostPercent.coerceIn(100, 200)
             }
         }
         viewModelScope.launch {
@@ -246,17 +266,6 @@ class SettingsViewModel @Inject constructor(
         launchSettingsAction("update Studio Master Clarity") { settingsPreferences.setStudioMasterClarity(enabled) }
     }
     fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
-    fun setVolumeBoostEnabled(enabled: Boolean) {
-        immediateVolumeBoostEnabled = enabled
-        runCatching { audioEngine.get().setVolumeBoost(enabled, immediateVolumeBoostPercent) }
-        launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostEnabled(enabled) }
-    }
-    fun setVolumeBoostPercent(percent: Int) {
-        val safePercent = percent.coerceIn(100, 200)
-        immediateVolumeBoostPercent = safePercent
-        runCatching { audioEngine.get().setVolumeBoost(immediateVolumeBoostEnabled, safePercent) }
-        launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostPercent(safePercent) }
-    }
     fun setCrossfadeEnabled(enabled: Boolean) = launchSettingsAction("update crossfade") { settingsPreferences.setCrossfadeEnabled(enabled) }
     fun setCrossfadeSeconds(seconds: Int) = launchSettingsAction("update crossfade duration") {
         settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 10))

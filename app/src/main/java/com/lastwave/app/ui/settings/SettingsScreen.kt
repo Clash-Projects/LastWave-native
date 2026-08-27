@@ -237,6 +237,103 @@ fun SettingsScreen(
     val downloadTotalBytes by viewModel.downloadTotalBytes.collectAsStateWithLifecycle()
     val ytConnection by viewModel.ytConnection.collectAsStateWithLifecycle()
     val ytSyncEnabled by viewModel.ytSyncEnabled.collectAsStateWithLifecycle()
+import com.lastwave.app.data.local.EqualizerSettings
+import com.lastwave.app.data.local.eqBandLabel
+import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.safeHorizontalContentPadding
+import com.lastwave.app.ui.theme.ExpressivePillShape
+
+private data class AccentPreset(val name: String, val hex: String)
+private val ACCENT_PRESETS = listOf(
+    AccentPreset("Crimson", "#E03030"),
+    AccentPreset("Violet", "#7C4DFF"),
+    AccentPreset("Ocean", "#2196C6"),
+    AccentPreset("Sage", "#6B9E6B"),
+    AccentPreset("Amber", "#E0A030"),
+    AccentPreset("Rose", "#E0507A"),
+)
+
+// -- Expressive shape scale used only within this screen --
+private val CardOuterShape = RoundedCornerShape(28.dp)
+private val IconBadgeShape = RoundedCornerShape(14.dp)
+
+/** Where a row sits within a visually-connected group of settings rows —
+ *  drives per-row corner radii so a multi-row group reads as one premium
+ *  surface split into rows, not a stack of separate cards (see groupShape
+ *  below and the GROUP_GAP spacing used between rows in a group's Column). */
+private enum class GroupPosition { SINGLE, TOP, MIDDLE, BOTTOM }
+
+private val GROUP_OUTER_RADIUS = 28.dp
+private val GROUP_INNER_RADIUS = 6.dp
+private val GROUP_GAP = 3.dp
+
+private fun groupShape(position: GroupPosition): RoundedCornerShape = when (position) {
+    GroupPosition.SINGLE -> RoundedCornerShape(GROUP_OUTER_RADIUS)
+    GroupPosition.TOP -> RoundedCornerShape(
+        topStart = GROUP_OUTER_RADIUS, topEnd = GROUP_OUTER_RADIUS,
+        bottomStart = GROUP_INNER_RADIUS, bottomEnd = GROUP_INNER_RADIUS,
+    )
+    GroupPosition.MIDDLE -> RoundedCornerShape(GROUP_INNER_RADIUS)
+    GroupPosition.BOTTOM -> RoundedCornerShape(
+        topStart = GROUP_INNER_RADIUS, topEnd = GROUP_INNER_RADIUS,
+        bottomStart = GROUP_OUTER_RADIUS, bottomEnd = GROUP_OUTER_RADIUS,
+    )
+}
+
+/** Wraps a fixed list of settings rows and assigns each one its
+ *  GroupPosition automatically — SINGLE for a lone row, TOP/BOTTOM for the
+ *  ends of a longer group, MIDDLE for everything between. Rows are stacked
+ *  with a tiny GROUP_GAP rather than normal item spacing, so the group
+ *  reads as one connected surface with rows peeking through a hairline gap
+ *  rather than a list of separate cards. */
+@Composable
+private fun SettingsGroup(rowCount: Int, content: @Composable (index: Int, position: GroupPosition) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
+        for (i in 0 until rowCount) {
+            val position = when {
+                rowCount == 1 -> GroupPosition.SINGLE
+                i == 0 -> GroupPosition.TOP
+                i == rowCount - 1 -> GroupPosition.BOTTOM
+                else -> GroupPosition.MIDDLE
+            }
+            content(i, position)
+        }
+    }
+}
+
+/**
+ * Faithful port of settings.js (par 8): Last.fm account management, appearance
+ * (AMOLED / Dynamic Color / Monochrome / accent presets / custom color
+ * wheel), iTunes/ListenBrainz artwork toggles, data management (clear
+ * recommendation exclusions, clear all data), backup & restore, and app info.
+ *
+ * Visuals only: restyled into a Material 3 Expressive presentation
+ * (larger touch targets, per-row cards, tonal icon badges, spring-based
+ * press feedback). Every setting, callback, and piece of state below is
+ * unchanged from the original implementation.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(
+    onBack: () -> Unit = {},
+    onLoggedOut: () -> Unit = {},
+    onOpenChooseApps: () -> Unit = {},
+    onOpenDownloads: () -> Unit = {},
+    onOpenExcludedSongs: () -> Unit = {},
+    onOpenYouTubeImport: () -> Unit = {},
+    onOpenYouTubeLogin: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel(),
+) {
+    val session by viewModel.session.collectAsStateWithLifecycle()
+    val theme by viewModel.theme.collectAsStateWithLifecycle()
+    val misc by viewModel.misc.collectAsStateWithLifecycle()
+    val scrobbler by viewModel.scrobbler.collectAsStateWithLifecycle()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val downloadCount by viewModel.downloadCount.collectAsStateWithLifecycle()
+    val downloadTotalBytes by viewModel.downloadTotalBytes.collectAsStateWithLifecycle()
+    val ytConnection by viewModel.ytConnection.collectAsStateWithLifecycle()
+    val ytSyncEnabled by viewModel.ytSyncEnabled.collectAsStateWithLifecycle()
     val ytSyncState by viewModel.ytSyncState.collectAsStateWithLifecycle()
     val ytLastSyncAt by viewModel.ytLastSyncAt.collectAsStateWithLifecycle()
     val syncedPlaylistIds by viewModel.syncedPlaylistIds.collectAsStateWithLifecycle()
@@ -246,7 +343,6 @@ fun SettingsScreen(
     var showQualityDialog by remember { mutableStateOf(false) }
     var showEqSheet by remember { mutableStateOf(false) }
     var showLyricsAnimationSheet by remember { mutableStateOf(false) }
-    var showVolumeBoostSheet by remember { mutableStateOf(false) }
     var showSyncPlaylistsSheet by remember { mutableStateOf(false) }
     var showYtDisconnectConfirm by remember { mutableStateOf(false) }
 
@@ -531,7 +627,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Experimental")
-                    SettingsGroup(rowCount = 6) { index, position ->
+                    SettingsGroup(rowCount = 5) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.BubbleChart,
@@ -591,19 +687,6 @@ fun SettingsScreen(
                                 },
                                 checked = misc.isStudioMasterClarityEnabled,
                                 onCheckedChange = viewModel::setStudioMasterClarity,
-                                position = position,
-                            )
-                            5 -> SettingsActionCard(
-                                icon = Icons.Filled.VolumeUp,
-                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                title = "Volume Boost",
-                                subtitle = if (misc.volumeBoostEnabled) {
-                                    "Clean gain • ${misc.volumeBoostPercent}% • peak protected"
-                                } else {
-                                    "Optional adaptive protected gain up to 200%"
-                                },
-                                onClick = { showVolumeBoostSheet = true },
                                 position = position,
                             )
                         }
@@ -955,17 +1038,6 @@ fun SettingsScreen(
             onPickPreset = viewModel::applyEqPreset,
             onBandPreview = viewModel::previewEqBandGain,
             onBandChange = viewModel::setEqBandGain,
-        )
-    }
-
-    // -- Experimental volume boost --
-    if (showVolumeBoostSheet) {
-        VolumeBoostSheet(
-            enabled = misc.volumeBoostEnabled,
-            percent = misc.volumeBoostPercent,
-            onSetEnabled = viewModel::setVolumeBoostEnabled,
-            onSetPercent = viewModel::setVolumeBoostPercent,
-            onDismiss = { showVolumeBoostSheet = false },
         )
     }
 
@@ -2323,474 +2395,6 @@ private fun EqualizerSheet(
                                     gains = gains.copyOf().also { it[index] = value }
                                     onBandPreview(index, value)
                                 },
-                                onChangeFinished = { onBandChange(index, gains[index]) },
-                            )
-                        }
-                    }
-                }
-            }
-
-            Text(
-                text = when {
-                    !eq.enabled -> "Turn on to apply equalization live"
-                    eq.presetName == EqualizerPresets.CUSTOM_NAME -> "Custom profile \u2022 touch and drag any bar up/down"
-                    else -> "${eq.presetName} preset active \u2022 touch any bar to customize"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-            )
-        }
-    }
-}
-
-/**
- * Goated native hardware equalizer fader bar:
- * - Vertical capsule track with central 0 dB baseline notch and active level gradient beam
- * - Tactile hardware capsule thumb knob with double grip ridges
- * - Real-time continuous numeric dB badge on top with container coloring
- * - Standard frequency label + band category tag underneath
- */
-@Composable
-private fun EqNativeSlider(
-    gainDb: Float,
-    hz: Int,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-    onGainChange: (Float) -> Unit,
-    onChangeFinished: () -> Unit,
-) {
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    val normalized = ((gainDb + EQ_MAX_DB) / (EQ_MAX_DB * 2f)).coerceIn(0f, 1f)
-    var isDragging by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // Numeric Gain on top in a small pill container
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = when {
-                !enabled -> MaterialTheme.colorScheme.surfaceContainer
-                gainDb > 0f -> MaterialTheme.colorScheme.primaryContainer
-                gainDb < 0f -> MaterialTheme.colorScheme.tertiaryContainer
-                else -> MaterialTheme.colorScheme.surfaceContainerHighest
-            },
-        ) {
-            Text(
-                text = if (gainDb > 0f) "+${"%.1f".format(gainDb)}" else "${"%.1f".format(gainDb)}",
-                fontSize = 11.sp,
-                fontWeight = if (gainDb != 0f) FontWeight.Bold else FontWeight.Medium,
-                color = when {
-                    !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                    gainDb > 0f -> MaterialTheme.colorScheme.onPrimaryContainer
-                    gainDb < 0f -> MaterialTheme.colorScheme.onTertiaryContainer
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                maxLines = 1,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-            )
-        }
-
-        Spacer(Modifier.height(6.dp))
-
-        // Vertical Track Box
-        val trackHeight = 152.dp
-        val thumbHeight = 24.dp
-        val thumbWidth = 38.dp
-
-        Box(
-            modifier = Modifier
-                .width(44.dp)
-                .height(trackHeight)
-                .clip(RoundedCornerShape(22.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .pointerInput(enabled) {
-                    if (!enabled) return@pointerInput
-                    detectVerticalDragGestures(
-                        onDragStart = { isDragging = true },
-                        onDragEnd = {
-                            isDragging = false
-                            onChangeFinished()
-                        },
-                        onDragCancel = {
-                            isDragging = false
-                            onChangeFinished()
-                        },
-                    ) { change, dragAmount ->
-                        change.consume()
-                        val deltaFraction = -dragAmount / size.height.toFloat()
-                        val currentFraction = ((gainDb + EQ_MAX_DB) / (EQ_MAX_DB * 2f))
-                        val newFraction = (currentFraction + deltaFraction).coerceIn(0f, 1f)
-                        val newGain = (newFraction * EQ_MAX_DB * 2f - EQ_MAX_DB).let {
-                            if (it in -0.3f..0.3f) 0f else (Math.round(it * 2f) / 2f)
-                        }
-                        if (newGain != gainDb) {
-                            if (newGain == 0f && gainDb != 0f) {
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                            }
-                            onGainChange(newGain)
-                        }
-                    }
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            // Center Baseline Line (0 dB)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-            )
-
-            // Active Level Fill (from baseline to thumb)
-            val baselineFraction = 0.5f
-            val topFraction = if (normalized >= baselineFraction) 1f - normalized else 1f - baselineFraction
-            val heightFraction = Math.abs(normalized - baselineFraction)
-
-            if (heightFraction > 0.01f && enabled) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.55f)
-                        .fillMaxHeight(heightFraction)
-                        .align(Alignment.TopCenter)
-                        .graphicsLayer {
-                            translationY = size.height * topFraction
-                        }
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(
-                            if (gainDb > 0f) {
-                                Brush.verticalGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.primary,
-                                        MaterialTheme.colorScheme.primaryContainer,
-                                    ),
-                                )
-                            } else {
-                                Brush.verticalGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.tertiaryContainer,
-                                        MaterialTheme.colorScheme.tertiary,
-                                    ),
-                                )
-                            },
-                        ),
-                )
-            }
-
-            // Tactile Hardware Capsule Thumb Knob
-            Box(
-                modifier = Modifier
-                    .size(width = thumbWidth, height = thumbHeight)
-                    .align(Alignment.TopCenter)
-                    .graphicsLayer {
-                        val maxTravel = (trackHeight - thumbHeight).toPx()
-                        translationY = maxTravel * (1f - normalized)
-                    }
-                    .shadow(if (isDragging) 8.dp else 3.dp, RoundedCornerShape(12.dp))
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                // Double grip ridges
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(width = 14.dp, height = 2.dp)
-                            .clip(RoundedCornerShape(1.dp))
-                            .background(
-                                if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            ),
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(width = 14.dp, height = 2.dp)
-                            .clip(RoundedCornerShape(1.dp))
-                            .background(
-                                if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            ),
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // Frequency Label
-        Text(
-            text = eqBandLabel(hz),
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (gainDb != 0f && enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-        )
-        Text(
-            text = eqBandCategory(hz),
-            fontSize = 9.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-            maxLines = 1,
-        )
-    }
-}
-
-/**
- * Bottom sheet allowing user to select which specific playlists to mirror to YouTube Music.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SyncPlaylistsSheet(
-    playlists: List<com.lastwave.app.data.playlist.SavedPlaylist>,
-    syncedIds: Set<Long>?,
-    onToggleSync: (Long, Boolean) -> Unit,
-    onSelectAll: (Boolean) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    val allSelected = playlists.isNotEmpty() && (syncedIds == null || (playlists.all { it.id in syncedIds } && syncedIds.isNotEmpty()))
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        dragHandle = {
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .padding(top = 12.dp, bottom = 8.dp)
-                    .size(width = 36.dp, height = 4.dp),
-            ) {}
-        },
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 32.dp + safeDrawingBottomPadding()),
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "Sync Playlists",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        "Choose which playlists mirror to YouTube Music",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                TextButton(
-                    onClick = {
-                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                        onSelectAll(!allSelected)
-                    },
-                ) {
-                    Text(if (allSelected) "Deselect All" else "Select All", fontWeight = FontWeight.Bold)
-                }
-            }
-
-            if (playlists.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "No playlists in your library yet",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(playlists.size, key = { playlists[it].id }) { idx ->
-                        val playlist = playlists[idx]
-                        val isChecked = syncedIds == null || playlist.id in syncedIds
-                        Surface(
-                            onClick = {
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                onToggleSync(playlist.id, !isChecked)
-                            },
-                            shape = RoundedCornerShape(16.dp),
-                            color = if (isChecked) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainer,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (isChecked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest
-                                        ),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Icon(
-                                        Icons.Filled.QueueMusic,
-                                        contentDescription = null,
-                                        tint = if (isChecked) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(22.dp),
-                                    )
-                                }
-
-                                Spacer(Modifier.width(14.dp))
-
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        playlist.title,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                    )
-                                    Text(
-                                        "${playlist.tracks.size} tracks",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-
-                                Checkbox(
-                                    checked = isChecked,
-                                    onCheckedChange = { checked ->
-                                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                        onToggleSync(playlist.id, checked)
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            Button(
-                onClick = onDismiss,
-                shape = CircleShape,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-            ) {
-                Text("Done", fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-/** Experimental output gain control. The DSP keeps the player volume at its
- * normal level and applies a bounded, session-scoped gain instead. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun VolumeBoostSheet(
-    enabled: Boolean,
-    percent: Int,
-    onSetEnabled: (Boolean) -> Unit,
-    onSetPercent: (Int) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var sliderValue by remember(percent) { mutableStateOf(percent.coerceIn(100, 200).toFloat()) }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp + safeDrawingBottomPadding()),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconBadge(
-                    Icons.Filled.VolumeUp,
-                    MaterialTheme.colorScheme.tertiaryContainer,
-                    MaterialTheme.colorScheme.onTertiaryContainer,
-                )
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Volume Boost", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(
-                        "Raise quiet tracks up to 200% with bounded gain",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = enabled,
-                    onCheckedChange = { shouldEnable ->
-                        if (shouldEnable && sliderValue <= 100f) {
-                            sliderValue = 125f
-                            onSetPercent(125)
-                        }
-                        onSetEnabled(shouldEnable)
-                    },
-                )
-            }
-
-            Text(
-                "${sliderValue.toInt()}% output",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Slider(
-                value = sliderValue,
-                onValueChange = { sliderValue = it },
-                onValueChangeFinished = {
-                    val selectedPercent = sliderValue.toInt()
-                    onSetPercent(selectedPercent)
-                    onSetEnabled(selectedPercent > 100)
-                },
-                valueRange = 100f..200f,
-                steps = 19,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                "Peak-safe gain for quiet masters. It is off by default.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Button(
-                onClick = onDismiss,
-                shape = CircleShape,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-            ) {
-                Text("Done", fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-/**
  * Bottom sheet to pick from 8 experimental lyrics animation physics profiles.
  */
 @OptIn(ExperimentalMaterial3Api::class)

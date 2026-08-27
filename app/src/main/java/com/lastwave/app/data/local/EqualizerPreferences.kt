@@ -44,9 +44,9 @@ object EqualizerPresets {
     val STUDIO_MASTER = EqPreset(
         "Studio Master",
         listOf(
-            1.5f, 1.2f, 0.8f, 0.3f, -0.2f,
-            -0.8f, -0.5f, 0.0f, 0.6f, 1.2f,
-            1.8f, 2.2f, 2.6f, 3.2f, 3.5f,
+            2.6f, 2.8f, 2.2f, 0.6f, -1.8f,
+            -2.6f, -1.2f, 0.0f, 1.2f, 2.4f,
+            3.6f, 4.0f, 4.2f, 4.5f, 4.8f,
         ),
     )
 

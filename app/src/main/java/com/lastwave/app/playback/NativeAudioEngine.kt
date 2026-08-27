@@ -1,9 +1,9 @@
 package com.lastwave.app.playback
 
 import android.util.Log
-import com.lastwave.app.data.local.SettingsPreferences
-import com.lastwave.app.data.local.EqualizerPreferences
 import com.lastwave.app.data.local.EQ_MAX_GAIN_DB
+import com.lastwave.app.data.local.EqualizerPreferences
+import com.lastwave.app.data.local.SettingsPreferences
 import java.io.Closeable
 import java.nio.ByteBuffer
 import javax.inject.Inject
@@ -57,12 +57,6 @@ class NativeAudioEngine @Inject constructor(
                     .collect(::setStudioMasterClarity)
             }
             applicationScope.launch(Dispatchers.Default) {
-                settingsPreferences.settings
-                    .map { it.volumeBoostEnabled to it.volumeBoostPercent.coerceIn(100, 200) }
-                    .distinctUntilChanged()
-                    .collect { (enabled, percent) -> setVolumeBoost(enabled, percent) }
-            }
-            applicationScope.launch(Dispatchers.Default) {
                 equalizerPreferences.settings.collect { settings ->
                     setEqualizer(settings.enabled, settings.gainsDb.toFloatArray())
                 }
@@ -102,11 +96,6 @@ class NativeAudioEngine @Inject constructor(
     /** Thread-safe; native DSP crossfades wet/dry over exactly 50 ms. */
     fun setStudioMasterClarity(enabled: Boolean) {
         withHandle(Unit) { nativeSetStudioMasterClarity(it, enabled) }
-    }
-
-    /** Native adaptive gain; ramps smoothly and never exceeds the -1 dBFS ceiling. */
-    fun setVolumeBoost(enabled: Boolean, percent: Int) {
-        withHandle(Unit) { nativeSetVolumeBoost(it, enabled, percent.coerceIn(100, 200)) }
     }
 
     /** Updates the native 15-band EQ; its gains are smoothed in C++. */
@@ -315,7 +304,6 @@ class NativeAudioEngine @Inject constructor(
     private external fun nativeSetPlaying(handle: Long, playing: Boolean)
     private external fun nativeSetOutputVolume(handle: Long, volume: Float)
     private external fun nativeSetStudioMasterClarity(handle: Long, enabled: Boolean)
-    private external fun nativeSetVolumeBoost(handle: Long, enabled: Boolean, percent: Int)
     private external fun nativeSetEqualizer(handle: Long, enabled: Boolean, gainsDb: FloatArray)
     private external fun nativeConfigureMediaProcessor(
         handle: Long,
