@@ -32,8 +32,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -90,6 +88,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -985,8 +984,7 @@ private fun FullPlayer(
         }
     }
 
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
@@ -1115,11 +1113,7 @@ private fun FullPlayer(
                         },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(
-                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
-                            ),
+                            .size(44.dp),
                     ) {
                         Icon(
                             if (currentTab != FullPlayerTab.NOW_PLAYING) Icons.Filled.ArrowBack else Icons.Filled.ExpandMore,
@@ -1159,11 +1153,7 @@ private fun FullPlayer(
                         onClick = { showTrackMenu = true },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(
-                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
-                            ),
+                            .size(44.dp),
                     ) {
                         Icon(
                             Icons.Filled.MoreVert,
@@ -1195,9 +1185,6 @@ private fun FullPlayer(
                                 player = player,
                                 lyricsState = lyricsState,
                                 lyricsAnimation = lyricsAnimation,
-                                ambientPrimary = ambientColor,
-                                ambientSecondary = ambientCompanion,
-                                ambientDeep = ambientDeep,
                                 onRetry = onRetryLyrics,
                                 modifier = Modifier.fillMaxSize(),
                             )
@@ -1478,23 +1465,18 @@ private fun FullPlayer(
 
                                         Spacer(Modifier.width(12.dp))
 
-                                        Surface(
+                                        IconButton(
                                             onClick = { onTabChange(FullPlayerTab.LYRICS) },
-                                            shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
-                                            contentColor = MaterialTheme.colorScheme.primary,
-                                            tonalElevation = 0.dp,
-                                            shadowElevation = 0.dp,
                                             modifier = Modifier.size(46.dp),
+                                            colors = IconButtonDefaults.iconButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.primary,
+                                            ),
                                         ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    Icons.Filled.FormatQuote,
-                                                    contentDescription = "Show lyrics",
-                                                    modifier = Modifier.size(24.dp),
-                                                    tint = MaterialTheme.colorScheme.primary,
-                                                )
-                                            }
+                                            Icon(
+                                                Icons.Filled.FormatQuote,
+                                                contentDescription = "Show lyrics",
+                                                modifier = Modifier.size(24.dp),
+                                            )
                                         }
                                     }
                                     Spacer(Modifier.height(14.dp))
@@ -1660,75 +1642,70 @@ private fun SeekBar(
     }
 
     val primaryColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
-    val inactiveColor = if (isTranslucent) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.50f)
+    val inactiveColor = if (isTranslucent) {
+        Color.White.copy(alpha = 0.20f)
+    } else {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+    }
     val textColor = if (isTranslucent) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.92f)
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(34.dp)
-                .pointerInput(boundedDurationMs, trackKey) {
-                    detectTapGestures { offset ->
-                        if (boundedDurationMs > 0) {
-                            val newFraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                            onSeek((newFraction * boundedDurationMs).toLong())
-                        }
-                    }
-                }
-                .pointerInput(boundedDurationMs, trackKey) {
-                    detectHorizontalDragGestures(
-                        onDragStart = { offset ->
-                            dragging = true
-                            dragFraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        },
-                        onDragEnd = {
-                            if (boundedDurationMs > 0) {
-                                onSeek((dragFraction * boundedDurationMs).toLong())
-                            }
-                            dragging = false
-                        },
-                        onDragCancel = {
-                            dragging = false
-                        },
-                        onHorizontalDrag = { change, _ ->
-                            change.consume()
-                            dragFraction = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
-                        },
-                    )
-                },
+                .height(44.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Canvas(modifier = Modifier.fillMaxWidth().height(34.dp)) {
+            Canvas(modifier = Modifier.fillMaxWidth().height(44.dp)) {
                 val width = size.width
                 val height = size.height
                 val centerY = height / 2f
-                val trackHeightPx = 8.dp.toPx()
+                val trackHeightPx = 14.dp.toPx()
                 val cornerRadius = CornerRadius(trackHeightPx / 2f, trackHeightPx / 2f)
+                val thumbWidthPx = 5.dp.toPx()
+                val thumbHeightPx = 38.dp.toPx()
+                val thumbClearancePx = 9.dp.toPx()
+                val rawThumbCenterX = fraction * width
+                val thumbCenterX = if (width > thumbWidthPx) {
+                    rawThumbCenterX.coerceIn(thumbWidthPx / 2f, width - thumbWidthPx / 2f)
+                } else {
+                    width / 2f
+                }
+                val activeEndX = (thumbCenterX - thumbClearancePx).coerceIn(0f, width)
+                val inactiveStartX = (thumbCenterX + thumbClearancePx).coerceIn(0f, width)
 
-                // 1. Inactive background capsule track
-                drawRoundRect(
-                    color = inactiveColor,
-                    topLeft = Offset(0f, centerY - trackHeightPx / 2f),
-                    size = Size(width, trackHeightPx),
-                    cornerRadius = cornerRadius,
-                )
-
-                // 2. Active filled capsule track
-                val activeWidth = (fraction * width).coerceIn(0f, width)
-                if (activeWidth > 0f) {
+                // Thick active capsule ending before the vertical thumb.
+                if (activeEndX > 0f) {
                     drawRoundRect(
                         color = primaryColor,
                         topLeft = Offset(0f, centerY - trackHeightPx / 2f),
-                        size = Size(activeWidth, trackHeightPx),
+                        size = Size(activeEndX, trackHeightPx),
                         cornerRadius = cornerRadius,
                     )
                 }
 
-                // 3. Vertical pill thumb bar
-                val thumbWidthPx = 4.dp.toPx()
-                val thumbHeightPx = 26.dp.toPx()
-                val thumbX = (activeWidth - thumbWidthPx / 2f).coerceIn(0f, width - thumbWidthPx)
+                // Thick inactive capsule starting after the vertical thumb.
+                if (inactiveStartX < width) {
+                    drawRoundRect(
+                        color = inactiveColor,
+                        topLeft = Offset(inactiveStartX, centerY - trackHeightPx / 2f),
+                        size = Size(width - inactiveStartX, trackHeightPx),
+                        cornerRadius = cornerRadius,
+                    )
+                }
+
+                // Small endpoint marker from the reference design.
+                val endpointX = width - trackHeightPx / 2f
+                if (inactiveStartX < endpointX) {
+                    drawCircle(
+                        color = primaryColor.copy(alpha = 0.86f),
+                        radius = 2.dp.toPx(),
+                        center = Offset(endpointX, centerY),
+                    )
+                }
+
+                // Tall vertical pill thumb with clear space on both sides.
+                val thumbX = thumbCenterX - thumbWidthPx / 2f
                 val thumbCornerRadius = CornerRadius(thumbWidthPx / 2f, thumbWidthPx / 2f)
 
                 drawRoundRect(
@@ -1738,6 +1715,36 @@ private fun SeekBar(
                     cornerRadius = thumbCornerRadius,
                 )
             }
+
+            // Invisible Material interaction layer: custom visuals, reliable seeking semantics.
+            Slider(
+                value = fraction,
+                onValueChange = {
+                    dragging = true
+                    dragFraction = it
+                },
+                onValueChangeFinished = {
+                    if (boundedDurationMs > 0L) {
+                        onSeek((dragFraction * boundedDurationMs).toLong().coerceIn(0L, boundedDurationMs))
+                    }
+                    dragging = false
+                },
+                valueRange = 0f..1f,
+                enabled = boundedDurationMs > 0L,
+                modifier = Modifier.fillMaxSize(),
+                colors = SliderDefaults.colors(
+                    thumbColor = Color.Transparent,
+                    activeTrackColor = Color.Transparent,
+                    inactiveTrackColor = Color.Transparent,
+                    activeTickColor = Color.Transparent,
+                    inactiveTickColor = Color.Transparent,
+                    disabledThumbColor = Color.Transparent,
+                    disabledActiveTrackColor = Color.Transparent,
+                    disabledInactiveTrackColor = Color.Transparent,
+                    disabledActiveTickColor = Color.Transparent,
+                    disabledInactiveTickColor = Color.Transparent,
+                ),
+            )
         }
 
         Spacer(Modifier.height(2.dp))
@@ -1765,106 +1772,62 @@ private fun SeekBar(
 
 @Composable
 private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslucent: Boolean = false) {
+    val secondaryContent = if (isTranslucent) {
+        Color.White.copy(alpha = 0.94f)
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val primaryContent = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
+
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(if (isTranslucent) 18.dp else 16.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
+        IconButton(
             onClick = player::previous,
-            shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
-            contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
+            colors = IconButtonDefaults.iconButtonColors(contentColor = secondaryContent),
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
-            }
+            Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
         }
-        Surface(
+        IconButton(
             onClick = player::togglePlayPause,
-            shape = CircleShape,
-            color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-            contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
             modifier = Modifier.size(if (isTranslucent) 72.dp else 76.dp),
+            colors = IconButtonDefaults.iconButtonColors(contentColor = primaryContent),
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                if (state.isBuffering) {
-                    ExpressiveInlineLoadingIndicator(
-                        size = if (isTranslucent) 28.dp else 30.dp,
-                        color = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
-                        strokeWidth = 3.dp,
-                    )
-                } else {
-                    AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(if (isTranslucent) 36.dp else 39.dp))
-                }
+            if (state.isBuffering) {
+                ExpressiveInlineLoadingIndicator(
+                    size = if (isTranslucent) 28.dp else 30.dp,
+                    color = primaryContent,
+                    strokeWidth = 3.dp,
+                )
+            } else {
+                AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(if (isTranslucent) 36.dp else 39.dp))
             }
         }
-        Surface(
+        IconButton(
             onClick = player::next,
-            shape = CircleShape,
-            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
-            contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
+            colors = IconButtonDefaults.iconButtonColors(contentColor = secondaryContent),
         ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.SkipNext, "Next", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
-            }
+            Icon(Icons.Filled.SkipNext, "Next", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
         }
     }
 }
 
 @Composable
 private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, isTranslucent: Boolean = false) {
-    val shuffleActive = state.shuffleEnabled
-    val repeatActive = state.repeatMode != Player.REPEAT_MODE_OFF
-
-    val shuffleBg by animateColorAsState(
-        targetValue = when {
-            isTranslucent && shuffleActive -> Color.White.copy(alpha = 0.22f)
-            isTranslucent -> Color.White.copy(alpha = 0.12f)
-            shuffleActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
-            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)
-        },
-        animationSpec = tween(ExpressiveMotion.Quick),
-        label = "shuffleBg",
-    )
-    val shuffleContent by animateColorAsState(
-        targetValue = when {
-            isTranslucent && shuffleActive -> Color.White
-            isTranslucent -> Color.White.copy(alpha = 0.85f)
-            shuffleActive -> MaterialTheme.colorScheme.onPrimaryContainer
-            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
-        },
-        animationSpec = tween(ExpressiveMotion.Quick),
-        label = "shuffleContent",
-    )
-    val repeatBg by animateColorAsState(
-        targetValue = when {
-            isTranslucent && repeatActive -> Color.White.copy(alpha = 0.22f)
-            isTranslucent -> Color.White.copy(alpha = 0.12f)
-            repeatActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
-            else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)
-        },
-        animationSpec = tween(ExpressiveMotion.Quick),
-        label = "repeatBg",
-    )
-    val repeatContent by animateColorAsState(
-        targetValue = when {
-            isTranslucent && repeatActive -> Color.White
-            isTranslucent -> Color.White.copy(alpha = 0.85f)
-            repeatActive -> MaterialTheme.colorScheme.onPrimaryContainer
-            else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
-        },
-        animationSpec = tween(ExpressiveMotion.Quick),
-        label = "repeatContent",
-    )
+    val edgeButtonBackground = if (isTranslucent) {
+        Color.White.copy(alpha = 0.12f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)
+    }
+    val edgeButtonContent = if (isTranslucent) {
+        Color.White.copy(alpha = 0.85f)
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
+    }
 
     Row(
         Modifier.fillMaxWidth(),
@@ -1874,8 +1837,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         Surface(
             onClick = player::toggleShuffle,
             shape = CircleShape,
-            color = shuffleBg,
-            contentColor = shuffleContent,
+            color = edgeButtonBackground,
+            contentColor = edgeButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
@@ -1888,13 +1851,11 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
             shape = RoundedCornerShape(24.dp),
             color = when {
                 isTranslucent -> Color.White.copy(alpha = 0.12f)
-                state.isQobuz -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.40f)
-                else -> MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)
+                else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
             },
             contentColor = when {
                 isTranslucent -> Color.White
-                state.isQobuz -> MaterialTheme.colorScheme.primary
-                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
+                else -> MaterialTheme.colorScheme.onPrimaryContainer
             },
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
@@ -1908,7 +1869,7 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
                 Icon(
                     Icons.Filled.HighQuality,
                     null,
-                    tint = if (isTranslucent) Color.White.copy(alpha = 0.92f) else if (state.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f),
+                    tint = if (isTranslucent) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.size(17.dp),
                 )
                 Text(
@@ -1924,8 +1885,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         Surface(
             onClick = player::cycleRepeatMode,
             shape = CircleShape,
-            color = repeatBg,
-            contentColor = repeatContent,
+            color = edgeButtonBackground,
+            contentColor = edgeButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),

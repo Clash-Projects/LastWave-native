@@ -11,9 +11,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -34,8 +31,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lyrics
@@ -44,12 +39,12 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.SyncDisabled
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,10 +56,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextStyle
@@ -81,7 +72,6 @@ import com.lastwave.app.playback.PlaybackProgressState
 import com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator
 import com.lastwave.app.ui.common.ExpressiveMotion
 import com.lastwave.app.ui.theme.LocalLiquidGlass
-import com.lastwave.app.ui.theme.liquidGlassChrome
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 
@@ -107,9 +97,6 @@ fun LyricsPanel(
     lyricsState: LyricsUiState,
     progressState: StateFlow<PlaybackProgressState>? = null,
     lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
-    ambientPrimary: Color? = null,
-    ambientSecondary: Color? = null,
-    ambientDeep: Color? = null,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -143,41 +130,24 @@ fun LyricsPanel(
         }
     }
 
-    // Reuse the exact artwork-derived palette already animating behind the
-    // player tab. Theme colors remain a safe fallback when artwork extraction
-    // is unavailable, so switching tabs feels like one continuous surface.
-    val primary = ambientPrimary ?: MaterialTheme.colorScheme.primary
-    val companion = ambientSecondary ?: androidx.compose.ui.graphics.lerp(
-        MaterialTheme.colorScheme.tertiary,
-        primary,
-        0.42f,
-    )
-    val deep = ambientDeep ?: androidx.compose.ui.graphics.lerp(
-        MaterialTheme.colorScheme.secondary,
-        primary,
-        0.25f,
-    )
     Column(
         modifier = modifier.fillMaxSize(),
     ) {
-        // Main lyrics display area
-        Box(
+        // Weighted layout only: deliberately no card, background, border, or shadow.
+        AnimatedContent(
+            targetState = lyricsState,
+            transitionSpec = {
+                (fadeIn(tween(ExpressiveMotion.Quick)) +
+                    androidx.compose.animation.scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.96f)) togetherWith
+                    (fadeOut(tween(ExpressiveMotion.Quick)) +
+                        androidx.compose.animation.scaleOut(tween(ExpressiveMotion.Quick), targetScale = 0.96f))
+            },
+            label = "lyricsStateContent",
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-        ) {
-            AnimatedContent(
-                targetState = lyricsState,
-                transitionSpec = {
-                    (fadeIn(tween(ExpressiveMotion.Quick)) +
-                        androidx.compose.animation.scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.96f)) togetherWith
-                        (fadeOut(tween(ExpressiveMotion.Quick)) +
-                            androidx.compose.animation.scaleOut(tween(ExpressiveMotion.Quick), targetScale = 0.96f))
-                },
-                label = "lyricsStateContent",
-                modifier = Modifier.fillMaxSize(),
-            ) { targetState ->
-                when (targetState) {
+        ) { targetState ->
+            when (targetState) {
                     is LyricsUiState.Loading -> {
                         Box(
                             modifier = Modifier.fillMaxSize(),
@@ -203,26 +173,16 @@ fun LyricsPanel(
 
                     is LyricsUiState.Empty, is LyricsUiState.Error -> {
                         EmptyLyricsView(
-                            title = track.title,
-                            artist = track.artist,
                             isInstrumental = false,
                             onRetry = onRetry,
-                            liquidGlass = liquidGlass,
-                            accentPrimary = primary,
-                            accentSecondary = companion,
                         )
                     }
 
                     is LyricsUiState.Success -> {
                         if (targetState.isInstrumental) {
                             EmptyLyricsView(
-                                title = track.title,
-                                artist = track.artist,
                                 isInstrumental = true,
                                 onRetry = onRetry,
-                                liquidGlass = liquidGlass,
-                                accentPrimary = primary,
-                                accentSecondary = companion,
                             )
                         } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
                             SyncedLyricsList(
@@ -232,28 +192,17 @@ fun LyricsPanel(
                                 onSeek = player::seekTo,
                                 animationStyle = lyricsAnimation,
                                 liquidGlass = liquidGlass,
-                                accentPrimary = primary,
-                                accentSecondary = companion,
-                                accentDeep = deep,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         } else if (!targetState.plainLyrics.isNullOrBlank()) {
                             PlainLyricsView(
                                 plainLyrics = targetState.plainLyrics,
-                                liquidGlass = liquidGlass,
-                                accentPrimary = primary,
-                                accentSecondary = companion,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         } else {
                             EmptyLyricsView(
-                                title = track.title,
-                                artist = track.artist,
                                 isInstrumental = false,
                                 onRetry = onRetry,
-                                liquidGlass = liquidGlass,
-                                accentPrimary = primary,
-                                accentSecondary = companion,
                             )
                         }
                     }
@@ -261,19 +210,15 @@ fun LyricsPanel(
                     is LyricsUiState.Idle -> {
                         Box(Modifier.fillMaxSize())
                     }
-                }
             }
         }
 
-        // Bottom compact playback bar in lyrics view
-        LyricsBottomControls(
+        // Transparent playback controls; no separate player-bar container.
+        LyricsPlaybackControls(
             state = state,
             currentPositionMs = smoothedPositionMs,
             totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
             player = player,
-            liquidGlass = liquidGlass,
-            accentPrimary = primary,
-            accentSecondary = companion,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
@@ -290,9 +235,6 @@ private fun SyncedLyricsList(
     onSeek: (Long) -> Unit,
     animationStyle: LyricsAnimation,
     liquidGlass: Boolean,
-    accentPrimary: Color,
-    accentSecondary: Color,
-    accentDeep: Color,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -524,7 +466,6 @@ private fun SyncedLyricsList(
                 label = "lyricAlpha_$index",
             )
 
-            val primaryColor = accentPrimary
             val interactiveColor = MaterialTheme.colorScheme.primary
             val textColor by animateColorAsState(
                 targetValue = if (isActive) {
@@ -540,36 +481,6 @@ private fun SyncedLyricsList(
                 label = "lyricColor_$index",
             )
 
-            // Container Background & Border (Clean floating layout - no box outlines)
-            val pillShape = RoundedCornerShape(18.dp)
-            val cardBg = if (liquidGlass && animationStyle == LyricsAnimation.CARD_POP) {
-                MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.90f)
-            } else if (animationStyle == LyricsAnimation.CARD_POP) {
-                MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.56f)
-            } else {
-                Color.Transparent
-            }
-            val activeBrush = if (isActive && animationStyle == LyricsAnimation.CARD_POP) {
-                Brush.linearGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (liquidGlass) 0.88f else 0.68f),
-                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = if (liquidGlass) 0.66f else 0.44f),
-                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.52f),
-                    ),
-                )
-            } else {
-                null
-            }
-
-            val strokeBorder = if (isActive && animationStyle == LyricsAnimation.CARD_POP) {
-                BorderStroke(
-                    1.dp,
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                )
-            } else {
-                null
-            }
-
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -582,19 +493,7 @@ private fun SyncedLyricsList(
                         rotationZ = rotation
                         rotationX = depthRotation
                         if (depthRotation != 0f) cameraDistance = 24f * density
-                        if (isActive && animationStyle == LyricsAnimation.CARD_POP) {
-                            shadowElevation = 12.dp.toPx()
-                            shape = pillShape
-                            clip = true
-                        }
                     }
-                    .then(if (animationStyle == LyricsAnimation.CARD_POP) Modifier.clip(pillShape) else Modifier)
-                    .then(
-                        if (activeBrush != null) Modifier.background(activeBrush, pillShape)
-                        else if (cardBg != Color.Transparent) Modifier.background(cardBg, pillShape)
-                        else Modifier,
-                    )
-                    .then(if (strokeBorder != null) Modifier.border(strokeBorder, pillShape) else Modifier)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -790,63 +689,30 @@ private fun WordByWordLyricLine(
 @Composable
 private fun PlainLyricsView(
     plainLyrics: String,
-    liquidGlass: Boolean,
-    accentPrimary: Color,
-    accentSecondary: Color,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
-    val pillShape = RoundedCornerShape(14.dp)
     Column(
         modifier = modifier
             .verticalScroll(scrollState)
             .padding(top = 24.dp, bottom = 90.dp, start = 16.dp, end = 16.dp),
     ) {
-        Surface(
-            shape = pillShape,
-            color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.74f)
-            else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f),
-            border = BorderStroke(
-                1.dp,
-                if (liquidGlass) {
-                    Brush.linearGradient(
-                        listOf(
-                            Color.White.copy(alpha = 0.25f),
-                            accentPrimary.copy(alpha = 0.24f),
-                            accentSecondary.copy(alpha = 0.12f),
-                            Color.White.copy(alpha = 0.05f),
-                        ),
-                    )
-                } else {
-                    Brush.linearGradient(
-                        listOf(
-                            accentPrimary.copy(alpha = 0.32f),
-                            accentSecondary.copy(alpha = 0.16f),
-                        ),
-                    )
-                },
-            ),
-            modifier = Modifier
-                .padding(bottom = 20.dp)
-                .liquidGlassChrome(pillShape, liquidGlass),
+        Row(
+            modifier = Modifier.padding(bottom = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Icon(
-                    Icons.Filled.SyncDisabled,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    "Lyrics not time-synced",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            Icon(
+                Icons.Filled.SyncDisabled,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                "Lyrics not time-synced",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
         Text(
@@ -864,13 +730,8 @@ private fun PlainLyricsView(
 
 @Composable
 private fun EmptyLyricsView(
-    title: String,
-    artist: String,
     isInstrumental: Boolean,
     onRetry: () -> Unit,
-    liquidGlass: Boolean,
-    accentPrimary: Color,
-    accentSecondary: Color,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -882,38 +743,12 @@ private fun EmptyLyricsView(
             verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.padding(horizontal = 32.dp),
         ) {
-            val iconShape = CircleShape
-            Surface(
-                shape = iconShape,
-                color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.74f)
-                else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f),
-                border = BorderStroke(
-                    1.dp,
-                    Brush.linearGradient(
-                        listOf(
-                            if (liquidGlass) Color.White.copy(alpha = 0.35f)
-                            else accentPrimary.copy(alpha = 0.52f),
-                            accentSecondary.copy(alpha = 0.22f),
-                            Color.White.copy(alpha = 0.06f),
-                        ),
-                    ),
-                ),
-                tonalElevation = 1.dp,
-                shadowElevation = 6.dp,
-                modifier = Modifier
-                    .size(72.dp)
-                    .liquidGlassChrome(iconShape, liquidGlass),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (isInstrumental) Icons.Filled.MusicOff else Icons.Filled.Lyrics,
-                        contentDescription = null,
-                        modifier = Modifier.size(34.dp),
-                        tint = if (liquidGlass) MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
+            Icon(
+                imageVector = if (isInstrumental) Icons.Filled.MusicOff else Icons.Filled.Lyrics,
+                contentDescription = null,
+                modifier = Modifier.size(42.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
 
             Text(
                 text = if (isInstrumental) "Instrumental" else "No lyrics",
@@ -935,9 +770,8 @@ private fun EmptyLyricsView(
 
             if (!isInstrumental) {
                 Spacer(Modifier.height(6.dp))
-                FilledTonalButton(
+                TextButton(
                     onClick = onRetry,
-                    shape = RoundedCornerShape(16.dp),
                 ) {
                     Icon(Icons.Filled.Refresh, contentDescription = null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -949,16 +783,14 @@ private fun EmptyLyricsView(
 }
 
 @Composable
-private fun LyricsBottomControls(
+private fun LyricsPlaybackControls(
     state: MusicPlayerState,
     currentPositionMs: Long,
     totalDurationMs: Long,
     player: MusicPlayer,
-    liquidGlass: Boolean,
-    accentPrimary: Color,
-    accentSecondary: Color,
     modifier: Modifier = Modifier,
 ) {
+    // This Column performs layout only. It intentionally draws no container.
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -998,10 +830,7 @@ private fun LyricsBottomControls(
             ) {
                 IconButton(
                     onClick = player::previous,
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
+                    modifier = Modifier.size(42.dp),
                 ) {
                     Icon(
                         Icons.Filled.SkipPrevious,
@@ -1011,34 +840,27 @@ private fun LyricsBottomControls(
                     )
                 }
 
-                Surface(
+                IconButton(
                     onClick = player::togglePlayPause,
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    tonalElevation = 0.dp,
-                    shadowElevation = 0.dp,
                     modifier = Modifier.size(52.dp),
+                    colors = IconButtonDefaults.iconButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ),
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        if (state.isBuffering) {
-                            ExpressiveInlineLoadingIndicator(
-                                size = 22.dp,
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                strokeWidth = 2.5.dp,
-                            )
-                        } else {
-                            AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(28.dp))
-                        }
+                    if (state.isBuffering) {
+                        ExpressiveInlineLoadingIndicator(
+                            size = 22.dp,
+                            color = MaterialTheme.colorScheme.primary,
+                            strokeWidth = 2.5.dp,
+                        )
+                    } else {
+                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(28.dp))
                     }
                 }
 
                 IconButton(
                     onClick = player::next,
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)),
+                    modifier = Modifier.size(42.dp),
                 ) {
                     Icon(
                         Icons.Filled.SkipNext,
