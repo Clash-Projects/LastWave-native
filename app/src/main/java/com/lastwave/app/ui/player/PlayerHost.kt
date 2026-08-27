@@ -1565,6 +1565,70 @@ private fun FullPlayer(
             onPlayInLastWave = { player.play(track, sourceLabel = state.sourceLabel) },
         )
     }
+@Composable
+internal fun PlayerProgressSlider(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val tertiary = MaterialTheme.colorScheme.tertiary
+    val inactive = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.20f else 0.12f)
+    val range = (valueRange.endInclusive - valueRange.start).coerceAtLeast(0.0001f)
+    val fraction = ((value - valueRange.start) / range).coerceIn(0f, 1f)
+
+    Slider(
+        value = value,
+        onValueChange = onValueChange,
+        onValueChangeFinished = onValueChangeFinished,
+        valueRange = valueRange,
+        enabled = enabled,
+        modifier = modifier.drawBehind {
+            val inset = 10.dp.toPx()
+            val startX = inset
+            val endX = (size.width - inset).coerceAtLeast(startX)
+            val activeEndX = startX + ((endX - startX) * fraction)
+            val centerY = size.height / 2f
+            drawLine(
+                color = inactive,
+                start = androidx.compose.ui.geometry.Offset(startX, centerY),
+                end = androidx.compose.ui.geometry.Offset(endX, centerY),
+                strokeWidth = 3.dp.toPx(),
+                cap = StrokeCap.Round,
+            )
+            if (activeEndX > startX) {
+                drawLine(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            primary.copy(alpha = if (enabled) 1f else 0.42f),
+                            tertiary.copy(alpha = if (enabled) 0.92f else 0.36f),
+                        ),
+                        startX = startX,
+                        endX = activeEndX,
+                    ),
+                    start = androidx.compose.ui.geometry.Offset(startX, centerY),
+                    end = androidx.compose.ui.geometry.Offset(activeEndX, centerY),
+                    strokeWidth = 4.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+            }
+        },
+        colors = SliderDefaults.colors(
+            thumbColor = primary,
+            activeTrackColor = Color.Transparent,
+            inactiveTrackColor = Color.Transparent,
+            activeTickColor = Color.Transparent,
+            inactiveTickColor = Color.Transparent,
+            disabledThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f),
+            disabledActiveTrackColor = Color.Transparent,
+            disabledInactiveTrackColor = Color.Transparent,
+            disabledActiveTickColor = Color.Transparent,
+            disabledInactiveTickColor = Color.Transparent,
+        ),
+    )
 }
 
 @Composable

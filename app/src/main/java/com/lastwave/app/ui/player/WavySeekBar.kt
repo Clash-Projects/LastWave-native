@@ -298,6 +298,8 @@ fun WavySeekBar(
                         populateWave(pathFilled2, pathContour2, waveLength2Px, amp2, currPhase2)
                         populateWave(pathFilled3, pathContour3, waveLength3Px, amp3, currPhase3)
 
+                        val activeWidth = thumbX.coerceAtLeast(1f)
+
                         // Layer 1: Soft organic wave
                         drawPath(
                             path = pathContour1,
