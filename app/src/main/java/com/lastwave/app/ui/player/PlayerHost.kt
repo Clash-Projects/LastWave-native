@@ -88,7 +88,6 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -365,14 +364,6 @@ fun PlayerHost(
             }
         }
     }
-    BackHandler(enabled = expanded) {
-        if (currentTab != FullPlayerTab.NOW_PLAYING) {
-            currentTab = FullPlayerTab.NOW_PLAYING
-        } else {
-            expanded = false
-        }
-    }
-
     CompositionLocalProvider(
         LocalMusicPlayer provides viewModel.player,
         LocalAddToPlaylist provides requestAddToPlaylist,
@@ -416,6 +407,15 @@ fun PlayerHost(
                         viewModel.openArtist(artist)
                     },
                 )
+            }
+            // Compose this after the underlying screen so the expanded player
+            // owns Back before any route-level handler can navigate away.
+            BackHandler(enabled = expanded && state.current != null) {
+                if (currentTab != FullPlayerTab.NOW_PLAYING) {
+                    currentTab = FullPlayerTab.NOW_PLAYING
+                } else {
+                    expanded = false
+                }
             }
         }
         playlistTrack?.let { track ->
@@ -984,7 +984,8 @@ private fun FullPlayer(
         }
     }
 
-    Box(
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
@@ -1113,7 +1114,11 @@ private fun FullPlayer(
                         },
                         modifier = Modifier
                             .align(Alignment.CenterStart)
-                            .size(44.dp),
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+                            ),
                     ) {
                         Icon(
                             if (currentTab != FullPlayerTab.NOW_PLAYING) Icons.Filled.ArrowBack else Icons.Filled.ExpandMore,
@@ -1153,7 +1158,11 @@ private fun FullPlayer(
                         onClick = { showTrackMenu = true },
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .size(44.dp),
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(
+                                MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+                            ),
                     ) {
                         Icon(
                             Icons.Filled.MoreVert,
@@ -1410,6 +1419,11 @@ private fun FullPlayer(
                                         }
                                     }
                                     Spacer(Modifier.height(6.dp))
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .graphicsLayer { translationY = -8.dp.toPx() },
+                                    ) {
                                     Row(
                                         Modifier
                                             .fillMaxWidth()
@@ -1465,18 +1479,22 @@ private fun FullPlayer(
 
                                         Spacer(Modifier.width(12.dp))
 
-                                        IconButton(
+                                        Surface(
                                             onClick = { onTabChange(FullPlayerTab.LYRICS) },
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+                                            contentColor = MaterialTheme.colorScheme.primary,
+                                            tonalElevation = 0.dp,
+                                            shadowElevation = 0.dp,
                                             modifier = Modifier.size(46.dp),
-                                            colors = IconButtonDefaults.iconButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.primary,
-                                            ),
                                         ) {
-                                            Icon(
-                                                Icons.Filled.FormatQuote,
-                                                contentDescription = "Show lyrics",
-                                                modifier = Modifier.size(24.dp),
-                                            )
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Filled.FormatQuote,
+                                                    contentDescription = "Show lyrics",
+                                                    modifier = Modifier.size(24.dp),
+                                                )
+                                            }
                                         }
                                     }
                                     Spacer(Modifier.height(14.dp))
@@ -1490,6 +1508,7 @@ private fun FullPlayer(
                                     )
                                     Spacer(Modifier.height(14.dp))
                                     MainControls(state, player, isTranslucent = false)
+                                    }
                                     Spacer(Modifier.height(24.dp))
                                     PlayerUtilityControls(state, player, isTranslucent = false)
                                 }
@@ -1625,6 +1644,19 @@ private fun SeekBar(
     isTranslucent: Boolean = false,
 ) {
     val progress by progressState.collectAsStateWithLifecycle()
+
+    if (wavyEnabled) {
+        WavySeekBar(
+            positionMs = progress.positionMs,
+            durationMs = progress.durationMs,
+            isPlaying = isPlaying,
+            onSeek = onSeek,
+            isTranslucent = isTranslucent,
+            trackKey = trackKey,
+        )
+        return
+    }
+
     var dragging by remember(trackKey) { mutableStateOf(false) }
     var dragFraction by remember(trackKey) { mutableFloatStateOf(0f) }
 
@@ -1772,46 +1804,57 @@ private fun SeekBar(
 
 @Composable
 private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslucent: Boolean = false) {
-    val secondaryContent = if (isTranslucent) {
-        Color.White.copy(alpha = 0.94f)
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
-    val primaryContent = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
-
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(if (isTranslucent) 18.dp else 16.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(
+        Surface(
             onClick = player::previous,
+            shape = CircleShape,
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+            contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
             modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
-            colors = IconButtonDefaults.iconButtonColors(contentColor = secondaryContent),
         ) {
-            Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
-        }
-        IconButton(
-            onClick = player::togglePlayPause,
-            modifier = Modifier.size(if (isTranslucent) 72.dp else 76.dp),
-            colors = IconButtonDefaults.iconButtonColors(contentColor = primaryContent),
-        ) {
-            if (state.isBuffering) {
-                ExpressiveInlineLoadingIndicator(
-                    size = if (isTranslucent) 28.dp else 30.dp,
-                    color = primaryContent,
-                    strokeWidth = 3.dp,
-                )
-            } else {
-                AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(if (isTranslucent) 36.dp else 39.dp))
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
             }
         }
-        IconButton(
-            onClick = player::next,
-            modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
-            colors = IconButtonDefaults.iconButtonColors(contentColor = secondaryContent),
+        Surface(
+            onClick = player::togglePlayPause,
+            shape = CircleShape,
+            color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+            contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            modifier = Modifier.size(if (isTranslucent) 72.dp else 76.dp),
         ) {
-            Icon(Icons.Filled.SkipNext, "Next", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
+            Box(contentAlignment = Alignment.Center) {
+                if (state.isBuffering) {
+                    ExpressiveInlineLoadingIndicator(
+                        size = if (isTranslucent) 28.dp else 30.dp,
+                        color = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 3.dp,
+                    )
+                } else {
+                    AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(if (isTranslucent) 36.dp else 39.dp))
+                }
+            }
+        }
+        Surface(
+            onClick = player::next,
+            shape = CircleShape,
+            color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+            contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
+            modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.SkipNext, "Next", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
+            }
         }
     }
 }
