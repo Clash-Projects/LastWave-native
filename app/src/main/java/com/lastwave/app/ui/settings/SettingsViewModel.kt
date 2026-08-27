@@ -166,34 +166,6 @@ class SettingsViewModel @Inject constructor(
                 }
             } catch (error: LinkageError) {
                 // Missing/altered framework or JNI symbols on a custom ROM
-    private var immediateEqEnabled = false
-
-    val downloadCount: StateFlow<Int> = downloadedTrackDao.count()
-        .withSettingsFallback("download count", 0)
-        .stateIn(viewModelScope, SettingsSharing, 0)
-
-    val downloadTotalBytes: StateFlow<Long?> = downloadedTrackDao.totalBytes()
-        .withSettingsFallback("download size", 0L)
-        .stateIn(viewModelScope, SettingsSharing, 0L)
-
-    private val _uiState = MutableStateFlow(SettingsScreenState())
-    val uiState: StateFlow<SettingsScreenState> = _uiState.asStateFlow()
-
-    /** Prevent DataStore/Room/runtime write failures from escaping as an
-     * uncaught root coroutine and terminating the app. */
-    private fun launchSettingsAction(action: String, block: suspend () -> Unit) =
-        viewModelScope.launch {
-            try {
-                block()
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Exception) {
-                android.util.Log.e(SETTINGS_TAG, "Failed to $action", error)
-                _uiState.update { state ->
-                    state.copy(toastMessage = "Couldn't $action. Please try again.")
-                }
-            } catch (error: LinkageError) {
-                // Missing/altered framework or JNI symbols on a custom ROM
                 // disable only this action, never the Settings destination.
                 android.util.Log.e(SETTINGS_TAG, "Unsupported platform action: $action", error)
                 _uiState.update { state ->
