@@ -1565,6 +1565,8 @@ private fun FullPlayer(
             onPlayInLastWave = { player.play(track, sourceLabel = state.sourceLabel) },
         )
     }
+}
+
 @Composable
 internal fun PlayerProgressSlider(
     value: Float,
