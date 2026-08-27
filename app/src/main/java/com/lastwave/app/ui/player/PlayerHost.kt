@@ -1190,6 +1190,9 @@ private fun FullPlayer(
                                 player = player,
                                 lyricsState = lyricsState,
                                 lyricsAnimation = lyricsAnimation,
+                                ambientPrimary = ambientColor,
+                                ambientSecondary = ambientCompanion,
+                                ambientDeep = ambientDeep,
                                 onRetry = onRetryLyrics,
                                 modifier = Modifier.fillMaxSize(),
                             )

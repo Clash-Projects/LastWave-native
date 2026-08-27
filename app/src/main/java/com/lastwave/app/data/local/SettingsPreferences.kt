@@ -55,7 +55,7 @@ data class MiscSettings(
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     /** Experimental output gain. Disabled by default; when enabled the DSP
-     *  can raise quiet-track level from 100% up to a bounded 150%. */
+     *  can raise quiet-track level from 100% up to a bounded 200%. */
     val volumeBoostEnabled: Boolean = false,
     val volumeBoostPercent: Int = 100,
     /** Blend the end of one queued track into the beginning of the next. */
@@ -100,7 +100,7 @@ class SettingsPreferences @Inject constructor(
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: false,
                 lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
                 volumeBoostEnabled = p.readSafely(Keys.VOLUME_BOOST_ENABLED) ?: false,
-                volumeBoostPercent = (p.readSafely(Keys.VOLUME_BOOST_PERCENT) ?: 100).coerceIn(100, 150),
+                volumeBoostPercent = (p.readSafely(Keys.VOLUME_BOOST_PERCENT) ?: 100).coerceIn(100, 200),
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 10),
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
@@ -136,7 +136,7 @@ class SettingsPreferences @Inject constructor(
     }
 
     suspend fun setVolumeBoostPercent(percent: Int) {
-        dataStore.edit { it[Keys.VOLUME_BOOST_PERCENT] = percent.coerceIn(100, 150) }
+        dataStore.edit { it[Keys.VOLUME_BOOST_PERCENT] = percent.coerceIn(100, 200) }
     }
 
     suspend fun setCrossfadeEnabled(enabled: Boolean) {

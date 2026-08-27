@@ -312,8 +312,8 @@ class AudioEffectsEngine @Inject constructor(
         const val MILLIHERTZ_PER_HZ = 1_000
         const val MILLIBELS_PER_DB = 100f
         const val MIN_BOOST_PERCENT = 100
-        const val MAX_BOOST_PERCENT = 150
-        const val MAX_BOOST_MILLIBELS = 353
+        const val MAX_BOOST_PERCENT = 200
+        const val MAX_BOOST_MILLIBELS = 602
         const val MAX_PRE_LIMITER_BOOST_DB = 1.0f
 
         fun calculateHeadroomDb(gainsDb: FloatArray): Float {

@@ -601,7 +601,7 @@ fun SettingsScreen(
                                 subtitle = if (misc.volumeBoostEnabled) {
                                     "Clean gain • ${misc.volumeBoostPercent}% • peak protected"
                                 } else {
-                                    "Optional adaptive protected gain up to 150%"
+                                    "Optional adaptive protected gain up to 200%"
                                 },
                                 onClick = { showVolumeBoostSheet = true },
                                 position = position,
@@ -953,6 +953,7 @@ fun SettingsScreen(
             onDismiss = { showEqSheet = false },
             onSetEnabled = viewModel::setEqualizerEnabled,
             onPickPreset = viewModel::applyEqPreset,
+            onBandPreview = viewModel::previewEqBandGain,
             onBandChange = viewModel::setEqBandGain,
         )
     }
@@ -1995,7 +1996,7 @@ private fun EqualizerCurveGraph(
                 strokeWidth = 1.5.dp.toPx(),
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f), 0f),
             )
-            // +12 dB line
+            // +8 dB line
             drawLine(
                 color = gridColor,
                 start = Offset(paddingX, topY),
@@ -2003,7 +2004,7 @@ private fun EqualizerCurveGraph(
                 strokeWidth = 1.dp.toPx(),
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f, 6f), 0f),
             )
-            // -12 dB line
+            // -8 dB line
             drawLine(
                 color = gridColor,
                 start = Offset(paddingX, bottomY),
@@ -2112,6 +2113,7 @@ private fun EqualizerSheet(
     onDismiss: () -> Unit,
     onSetEnabled: (Boolean) -> Unit,
     onPickPreset: (String) -> Unit,
+    onBandPreview: (Int, Float) -> Unit,
     onBandChange: (Int, Float) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -2288,13 +2290,13 @@ private fun EqualizerSheet(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "+12 dB (Boost)",
+                            "+8 dB (Boost)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary,
                         )
                         Text(
-                            "-12 dB (Cut)",
+                            "-8 dB (Cut)",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2319,6 +2321,7 @@ private fun EqualizerSheet(
                                 enabled = eq.enabled,
                                 onGainChange = { value ->
                                     gains = gains.copyOf().also { it[index] = value }
+                                    onBandPreview(index, value)
                                 },
                                 onChangeFinished = { onBandChange(index, gains[index]) },
                             )
@@ -2708,7 +2711,7 @@ private fun VolumeBoostSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var sliderValue by remember(percent) { mutableStateOf(percent.coerceIn(100, 150).toFloat()) }
+    var sliderValue by remember(percent) { mutableStateOf(percent.coerceIn(100, 200).toFloat()) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -2736,7 +2739,7 @@ private fun VolumeBoostSheet(
                 Column(Modifier.weight(1f)) {
                     Text("Volume Boost", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        "Raise quiet tracks up to 150% with bounded gain",
+                        "Raise quiet tracks up to 200% with bounded gain",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -2767,8 +2770,8 @@ private fun VolumeBoostSheet(
                     onSetPercent(selectedPercent)
                     onSetEnabled(selectedPercent > 100)
                 },
-                valueRange = 100f..150f,
-                steps = 9,
+                valueRange = 100f..200f,
+                steps = 19,
                 modifier = Modifier.fillMaxWidth(),
             )
             Text(

@@ -19,10 +19,14 @@ constexpr std::array<double, DspProcessor::kEqualizerBandCount> kEqFrequenciesHz
 constexpr std::int32_t kEqCoefficientIntervalFrames = 128;
 constexpr std::int32_t kEqHeadroomIntervalFrames = 1024;
 constexpr double kEqQ = 2.0;
-// A -1 dBFS ceiling keeps useful true-peak/OEM headroom without cancelling the
-// user-facing 100-150% gain control. The old -2 dBFS ceiling plus a permanent
-// 2-3 dB preamp cut made both clarity and boost sound almost bypassed.
+// A -1 dBFS ceiling keeps useful true-peak/OEM headroom. Volume boost uses a
+// stereo-linked saturating gain curve below, so this ceiling no longer cancels
+// the user-facing 100-200% gain control on already-mastered music.
 constexpr float kOutputCeiling = 0.891250938F;
+// Keep a small amount of controlled EQ lift before the linked limiter. Fully
+// subtracting the measured curve maximum made adjacent positive bands behave
+// like a global volume cut and made manual EQ adjustments feel inconsistent.
+constexpr float kEqualizerPreLimiterBoostDb = 1.0F;
 // The clarity curve is deliberately level-matched within a fraction of a dB:
 // enough makeup to replace energy removed from muddy low mids, not a loudness
 // trick that makes "on" win only because it is louder.
@@ -50,8 +54,8 @@ void DspProcessor::configure(double sampleRate) noexcept {
     bassFoundation_ = Biquad::peaking(sampleRate_, 84.0, 0.78, 0.9);
     lowMidSeparation_ = Biquad::peaking(sampleRate_, 285.0, 0.85, -1.7);
     boxinessControl_ = Biquad::peaking(sampleRate_, 680.0, 0.72, -0.7);
-    presenceDetail_ = Biquad::peaking(sampleRate_, 3400.0, 0.76, 1.6);
-    airDetail_ = Biquad::highShelf(sampleRate_, 10000.0, 0.78, 2.4);
+    presenceDetail_ = Biquad::peaking(sampleRate_, 3400.0, 0.76, 1.8);
+    airDetail_ = Biquad::highShelf(sampleRate_, 10000.0, 0.78, 2.6);
     crossfeed_.configure(sampleRate_, 700.0, 4.5);
     rampPerFrame_ = static_cast<float>(1.0 / (sampleRate_ * 0.050));
     outputGainSmoothing_ = static_cast<float>(
@@ -100,7 +104,7 @@ void DspProcessor::configure(double sampleRate) noexcept {
     // protection use the linked limiter instead; permanently subtracting
     // 2-3 dB here was the main reason bypass sounded better.
     currentPreampDb_ = activeEqualizerBands_ != 0U
-        ? -equalizerMaximumBoostDb_
+        ? -std::max(0.0F, equalizerMaximumBoostDb_ - kEqualizerPreLimiterBoostDb)
         : 0.0F;
     currentPreampGain_ = std::pow(10.0F, currentPreampDb_ / 20.0F);
     equalizerUpdateCountdown_ = 0;
@@ -137,7 +141,7 @@ void DspProcessor::setPeakProtectionEnabled(bool enabled) noexcept {
 
 void DspProcessor::setVolumeBoost(bool enabled, std::int32_t percent) noexcept {
     const float gain = enabled
-        ? static_cast<float>(std::clamp(percent, 100, 150)) / 100.0F
+        ? static_cast<float>(std::clamp(percent, 100, 200)) / 100.0F
         : 1.0F;
     targetOutputGain_.store(gain, std::memory_order_release);
 }
@@ -275,7 +279,9 @@ void DspProcessor::process(
                 equalizerHeadroomCountdown_ -= kEqCoefficientIntervalFrames;
             }
             const float targetPreampDb = activeEqualizerBands_ != 0U
-                ? -equalizerMaximumBoostDb_
+                ? -std::max(
+                    0.0F,
+                    equalizerMaximumBoostDb_ - kEqualizerPreLimiterBoostDb)
                 : 0.0F;
             const float preampDelta = targetPreampDb - currentPreampDb_;
             // pow() is relatively expensive on 32-bit ARM. Once the smooth
@@ -374,8 +380,7 @@ void DspProcessor::process(
         if (std::abs(targetOutputGain - currentOutputGain_) < 0.00001F) {
             currentOutputGain_ = targetOutputGain;
         }
-        const float peak = std::max(std::abs(outputLeft), std::abs(outputRight)) *
-            currentOutputGain_;
+        const float peak = std::max(std::abs(outputLeft), std::abs(outputRight));
         const float requiredLimiterGain = protectionRequired && peak > kOutputCeiling
             ? kOutputCeiling / peak
             : 1.0F;
@@ -389,7 +394,23 @@ void DspProcessor::process(
             limiterGain_ += (1.0F - limiterGain_) * limiterRelease_;
             if (1.0F - limiterGain_ < 0.00001F) limiterGain_ = 1.0F;
         }
-        float finalGain = currentOutputGain_ * limiterGain_;
+        // Apply user gain after peak protection with a smooth stereo-linked
+        // transfer curve. Its small-signal slope is exactly the selected gain,
+        // while a frame already at the ceiling stays at the ceiling. Unlike a
+        // held limiter driven by the boosted peak, this remains audibly useful
+        // on dense masters without hard clipping or shifting the stereo image.
+        const float protectedPeak = peak * limiterGain_;
+        float boostGain = currentOutputGain_;
+        if (currentOutputGain_ > 1.0F && protectedPeak > 0.0F) {
+            const float normalizedPeak = std::clamp(
+                protectedPeak / kOutputCeiling,
+                0.0F,
+                1.0F);
+            const float gainSquared = currentOutputGain_ * currentOutputGain_;
+            boostGain = currentOutputGain_ / std::sqrt(
+                1.0F + (gainSquared - 1.0F) * normalizedPeak * normalizedPeak);
+        }
+        float finalGain = boostGain * limiterGain_;
         if (microFadePosition_ < microFadeFrameCount_) {
             const double phase = kPi * static_cast<double>(microFadePosition_ + 1) /
                 static_cast<double>(microFadeFrameCount_);

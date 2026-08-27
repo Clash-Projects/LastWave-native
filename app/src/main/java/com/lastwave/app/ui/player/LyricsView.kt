@@ -107,6 +107,9 @@ fun LyricsPanel(
     lyricsState: LyricsUiState,
     progressState: StateFlow<PlaybackProgressState>? = null,
     lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
+    ambientPrimary: Color? = null,
+    ambientSecondary: Color? = null,
+    ambientDeep: Color? = null,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -140,9 +143,20 @@ fun LyricsPanel(
         }
     }
 
-    // Restrained lyric-stage glow over the shared artwork background
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
+    // Reuse the exact artwork-derived palette already animating behind the
+    // player tab. Theme colors remain a safe fallback when artwork extraction
+    // is unavailable, so switching tabs feels like one continuous surface.
+    val primary = ambientPrimary ?: MaterialTheme.colorScheme.primary
+    val companion = ambientSecondary ?: androidx.compose.ui.graphics.lerp(
+        MaterialTheme.colorScheme.tertiary,
+        primary,
+        0.42f,
+    )
+    val deep = ambientDeep ?: androidx.compose.ui.graphics.lerp(
+        MaterialTheme.colorScheme.secondary,
+        primary,
+        0.25f,
+    )
     val ambientModifier = Modifier.drawBehind {
         val maxDim = maxOf(size.width, size.height).coerceAtLeast(1f)
         drawRect(
@@ -159,8 +173,8 @@ fun LyricsPanel(
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    tertiary.copy(alpha = if (liquidGlass) 0.14f else 0.085f),
-                    tertiary.copy(alpha = if (liquidGlass) 0.035f else 0.018f),
+                    companion.copy(alpha = if (liquidGlass) 0.16f else 0.10f),
+                    deep.copy(alpha = if (liquidGlass) 0.045f else 0.024f),
                     Color.Transparent,
                 ),
                 center = Offset(size.width * 0.88f, size.height * 0.72f),
@@ -222,6 +236,8 @@ fun LyricsPanel(
                             isInstrumental = false,
                             onRetry = onRetry,
                             liquidGlass = liquidGlass,
+                            accentPrimary = primary,
+                            accentSecondary = companion,
                         )
                     }
 
@@ -233,6 +249,8 @@ fun LyricsPanel(
                                 isInstrumental = true,
                                 onRetry = onRetry,
                                 liquidGlass = liquidGlass,
+                                accentPrimary = primary,
+                                accentSecondary = companion,
                             )
                         } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
                             SyncedLyricsList(
@@ -242,12 +260,17 @@ fun LyricsPanel(
                                 onSeek = player::seekTo,
                                 animationStyle = lyricsAnimation,
                                 liquidGlass = liquidGlass,
+                                accentPrimary = primary,
+                                accentSecondary = companion,
+                                accentDeep = deep,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         } else if (!targetState.plainLyrics.isNullOrBlank()) {
                             PlainLyricsView(
                                 plainLyrics = targetState.plainLyrics,
                                 liquidGlass = liquidGlass,
+                                accentPrimary = primary,
+                                accentSecondary = companion,
                                 modifier = Modifier.fillMaxSize(),
                             )
                         } else {
@@ -257,6 +280,8 @@ fun LyricsPanel(
                                 isInstrumental = false,
                                 onRetry = onRetry,
                                 liquidGlass = liquidGlass,
+                                accentPrimary = primary,
+                                accentSecondary = companion,
                             )
                         }
                     }
@@ -303,6 +328,8 @@ fun LyricsPanel(
             totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
             player = player,
             liquidGlass = liquidGlass,
+            accentPrimary = primary,
+            accentSecondary = companion,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
@@ -319,6 +346,9 @@ private fun SyncedLyricsList(
     onSeek: (Long) -> Unit,
     animationStyle: LyricsAnimation,
     liquidGlass: Boolean,
+    accentPrimary: Color,
+    accentSecondary: Color,
+    accentDeep: Color,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -372,33 +402,35 @@ private fun SyncedLyricsList(
             val isPast = activeIndex >= 0 && index < activeIndex
             val distance = kotlin.math.abs(index - activeIndex)
 
-            // Motion Physics
+            // Each profile gets a distinct motion signature. These targets only
+            // change when focus changes (except the short onset pulse below), so
+            // off-screen/inactive rows never run a permanent animation loop.
             val scaleTarget = when (animationStyle) {
-                LyricsAnimation.APPLE_FLUID -> if (isActive) 1.06f else 1f
-                LyricsAnimation.KARAOKE_PULSE -> if (isActive) 1.09f else 1f
-                LyricsAnimation.KINETIC_SLIDE -> if (isActive) 1.03f else 1f
-                LyricsAnimation.CINEMATIC_BLUR -> if (isActive) 1.04f else 0.98f
-                LyricsAnimation.LOSSLESS_GLOW -> if (isActive) 1.05f else 1f
-                LyricsAnimation.CARD_POP -> if (isActive) 1.04f else 0.99f
+                LyricsAnimation.APPLE_FLUID -> if (isActive) 1.085f else if (distance == 1) 0.99f else 0.975f
+                LyricsAnimation.KARAOKE_PULSE -> if (isActive) 1.10f else if (distance == 1) 0.99f else 0.97f
+                LyricsAnimation.KINETIC_SLIDE -> if (isActive) 1.045f else if (isPast) 0.99f else 0.975f
+                LyricsAnimation.CINEMATIC_BLUR -> if (isActive) 1.065f else if (distance == 1) 0.96f else 0.93f
+                LyricsAnimation.LOSSLESS_GLOW -> if (isActive) 1.075f else if (distance == 1) 0.99f else 0.97f
+                LyricsAnimation.CARD_POP -> if (isActive) 1.065f else 0.985f
                 LyricsAnimation.APPLE_ZOOM -> when {
-                    isActive -> 1.15f
-                    distance == 1 -> 0.96f
-                    else -> 0.90f
+                    isActive -> 1.18f
+                    distance == 1 -> 0.94f
+                    else -> 0.88f
                 }
                 LyricsAnimation.MINIMAL_WAVE -> 1f
             }
 
             val scaleSpec: AnimationSpec<Float> = when (animationStyle) {
                 LyricsAnimation.KARAOKE_PULSE -> spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    dampingRatio = 0.62f,
                     stiffness = Spring.StiffnessLow,
                 )
                 LyricsAnimation.APPLE_FLUID, LyricsAnimation.APPLE_ZOOM -> spring(
-                    dampingRatio = 0.78f,
+                    dampingRatio = 0.74f,
                     stiffness = Spring.StiffnessMediumLow,
                 )
                 LyricsAnimation.CARD_POP -> spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    dampingRatio = 0.68f,
                     stiffness = Spring.StiffnessMedium,
                 )
                 LyricsAnimation.MINIMAL_WAVE -> tween(100)
@@ -414,42 +446,133 @@ private fun SyncedLyricsList(
                 label = "lyricScale_$index",
             )
 
-            // Horizontal Slide
+            // A short, position-locked vocal onset pulse. It settles cleanly
+            // when paused and does not need an infinite transition clock.
+            val onsetElapsedMs = (currentPositionMs - line.timeMs).coerceAtLeast(0L)
+            val onsetPhase = (onsetElapsedMs / 520f).coerceIn(0f, 1f)
+            val onsetWave = if (isActive && isPlaying && onsetPhase < 1f) {
+                kotlin.math.sin(Math.PI.toFloat() * onsetPhase)
+            } else 0f
+            val pulseScale = when (animationStyle) {
+                LyricsAnimation.KARAOKE_PULSE -> 1f + 0.045f * onsetWave
+                LyricsAnimation.APPLE_FLUID -> 1f + 0.014f * onsetWave
+                LyricsAnimation.LOSSLESS_GLOW -> 1f + 0.010f * onsetWave
+                else -> 1f
+            }
+
+            // Horizontal focus tracking / directional entry and exit.
             val translationXTarget = when (animationStyle) {
-                LyricsAnimation.KINETIC_SLIDE -> if (isActive) 0f else -14f
+                LyricsAnimation.APPLE_FLUID -> when {
+                    isActive -> 4f
+                    isPast -> 0f
+                    else -> -5f
+                }
+                LyricsAnimation.KARAOKE_PULSE -> if (isActive) 3f else 0f
+                LyricsAnimation.KINETIC_SLIDE -> when {
+                    isActive -> 0f
+                    isPast -> 12f
+                    else -> -24f
+                }
+                LyricsAnimation.LOSSLESS_GLOW -> if (isActive) 2f else 0f
+                LyricsAnimation.MINIMAL_WAVE -> when {
+                    isActive -> 2f
+                    isPast -> 0f
+                    else -> -2f
+                }
                 else -> 0f
             }
             val translationX by animateFloatAsState(
                 targetValue = translationXTarget,
-                animationSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
+                animationSpec = when (animationStyle) {
+                    LyricsAnimation.KINETIC_SLIDE -> spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow)
+                    LyricsAnimation.APPLE_FLUID -> spring(dampingRatio = 0.80f, stiffness = Spring.StiffnessMediumLow)
+                    LyricsAnimation.MINIMAL_WAVE -> tween(110)
+                    else -> spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
+                },
                 label = "lyricTransX_$index",
             )
 
-            // Vertical Drift
+            // Vertical depth drift gives past/future lines a readable direction.
             val translationYTarget = when (animationStyle) {
+                LyricsAnimation.APPLE_FLUID -> when {
+                    isActive -> -2f
+                    isPast -> -1f
+                    else -> 3f
+                }
+                LyricsAnimation.KARAOKE_PULSE -> if (isActive) -2f else 1f
+                LyricsAnimation.KINETIC_SLIDE -> if (isActive) -1f else 1f
                 LyricsAnimation.CINEMATIC_BLUR -> when {
                     isActive -> 0f
-                    isPast -> -4f
-                    else -> 4f
+                    isPast -> -10f
+                    else -> 10f
                 }
-                else -> 0f
+                LyricsAnimation.LOSSLESS_GLOW -> if (isActive) -2f else 1f
+                LyricsAnimation.CARD_POP -> if (isActive) -4f else 2f
+                LyricsAnimation.APPLE_ZOOM -> when {
+                    isActive -> -3f
+                    isPast -> -1f
+                    else -> 2f
+                }
+                LyricsAnimation.MINIMAL_WAVE -> if (isPast) -1f else if (isActive) 0f else 1f
             }
             val translationY by animateFloatAsState(
                 targetValue = translationYTarget,
-                animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium),
+                animationSpec = when (animationStyle) {
+                    LyricsAnimation.CINEMATIC_BLUR -> spring(dampingRatio = 0.88f, stiffness = Spring.StiffnessLow)
+                    LyricsAnimation.CARD_POP -> spring(dampingRatio = 0.70f, stiffness = Spring.StiffnessMediumLow)
+                    LyricsAnimation.MINIMAL_WAVE -> tween(100)
+                    else -> spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMedium)
+                },
                 label = "lyricTransY_$index",
+            )
+
+            val rotationTarget = when (animationStyle) {
+                LyricsAnimation.KINETIC_SLIDE -> when {
+                    isActive -> 0f
+                    isPast -> 0.35f
+                    else -> -0.65f
+                }
+                LyricsAnimation.CARD_POP -> when {
+                    isActive -> 0f
+                    isPast -> -0.35f
+                    else -> 0.55f
+                }
+                else -> 0f
+            }
+            val rotation by animateFloatAsState(
+                targetValue = rotationTarget,
+                animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
+                label = "lyricRotation_$index",
+            )
+            val depthRotationTarget = when (animationStyle) {
+                LyricsAnimation.CINEMATIC_BLUR -> when {
+                    isActive -> 0f
+                    isPast -> -1.25f
+                    else -> 1.25f
+                }
+                LyricsAnimation.CARD_POP -> when {
+                    isActive -> 0f
+                    isPast -> -0.6f
+                    else -> 0.8f
+                }
+                else -> 0f
+            }
+            val depthRotation by animateFloatAsState(
+                targetValue = depthRotationTarget,
+                animationSpec = spring(dampingRatio = 0.86f, stiffness = Spring.StiffnessMediumLow),
+                label = "lyricDepth_$index",
             )
 
             // Alpha Floor
             val alphaTarget = when (animationStyle) {
-                LyricsAnimation.MINIMAL_WAVE -> if (isActive) 1f else 0.48f
-                LyricsAnimation.CINEMATIC_BLUR -> if (isActive) 1f else if (distance <= 1) 0.52f else 0.36f
-                LyricsAnimation.APPLE_ZOOM -> if (isActive) 1f else if (distance == 1) 0.58f else 0.44f
-                else -> when {
-                    isActive -> 1f
-                    isPast -> 0.56f
-                    else -> 0.46f
-                }
+                LyricsAnimation.APPLE_FLUID -> if (isActive) 1f else if (distance == 1) 0.64f else if (isPast) 0.50f else 0.43f
+                LyricsAnimation.KARAOKE_PULSE -> if (isActive) 1f else if (isPast) 0.62f else 0.49f
+                LyricsAnimation.KINETIC_SLIDE -> if (isActive) 1f else if (isPast) 0.54f else 0.42f
+                LyricsAnimation.CINEMATIC_BLUR -> if (isActive) 1f else if (distance <= 1) 0.58f else 0.28f
+                LyricsAnimation.LOSSLESS_GLOW -> if (isActive) 1f else if (distance == 1) 0.66f else 0.46f
+                LyricsAnimation.CARD_POP -> if (isActive) 1f else if (isPast) 0.62f else 0.48f
+                LyricsAnimation.APPLE_ZOOM -> if (isActive) 1f else if (distance == 1) 0.55f else 0.32f
+                LyricsAnimation.MINIMAL_WAVE -> if (isActive) 1f else if (distance == 1) 0.58f else 0.38f
             }
             val alpha by animateFloatAsState(
                 targetValue = alphaTarget,
@@ -457,12 +580,13 @@ private fun SyncedLyricsList(
                 label = "lyricAlpha_$index",
             )
 
-            val primaryColor = MaterialTheme.colorScheme.primary
+            val primaryColor = accentPrimary
+            val interactiveColor = MaterialTheme.colorScheme.primary
             val textColor by animateColorAsState(
                 targetValue = if (isActive) {
                     when {
                         liquidGlass -> MaterialTheme.colorScheme.onPrimaryContainer
-                        animationStyle == LyricsAnimation.LOSSLESS_GLOW -> primaryColor
+                        animationStyle == LyricsAnimation.LOSSLESS_GLOW -> interactiveColor
                         else -> MaterialTheme.colorScheme.onSurface
                     }
                 } else {
@@ -479,25 +603,62 @@ private fun SyncedLyricsList(
                 animationStyle == LyricsAnimation.CARD_POP -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.56f)
                 else -> Color.Transparent
             }
-            val activeBrush = if (isActive) {
-                Brush.linearGradient(
-                    colors = if (liquidGlass) {
-                        listOf(
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.84f),
-                            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.60f),
-                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.48f),
-                        )
-                    } else {
-                        listOf(
-                            primaryColor.copy(alpha = 0.18f),
-                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.10f),
-                            MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.38f),
-                        )
-                    },
-                )
-            } else null
+            val activeBrush = if (!isActive || animationStyle == LyricsAnimation.MINIMAL_WAVE) {
+                null
+            } else {
+                val colors = when (animationStyle) {
+                    LyricsAnimation.APPLE_FLUID -> listOf(
+                        primaryColor.copy(alpha = if (liquidGlass) 0.34f else 0.20f),
+                        accentSecondary.copy(alpha = if (liquidGlass) 0.20f else 0.10f),
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.34f),
+                    )
+                    LyricsAnimation.KARAOKE_PULSE -> listOf(
+                        primaryColor.copy(alpha = if (liquidGlass) 0.42f else 0.27f),
+                        accentDeep.copy(alpha = if (liquidGlass) 0.30f else 0.18f),
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.30f),
+                    )
+                    LyricsAnimation.KINETIC_SLIDE -> listOf(
+                        primaryColor.copy(alpha = if (liquidGlass) 0.38f else 0.23f),
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.26f),
+                        Color.Transparent,
+                    )
+                    LyricsAnimation.CINEMATIC_BLUR -> listOf(
+                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = if (liquidGlass) 0.74f else 0.52f),
+                        primaryColor.copy(alpha = 0.14f),
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.22f),
+                    )
+                    LyricsAnimation.LOSSLESS_GLOW -> listOf(
+                        primaryColor.copy(alpha = if (liquidGlass) 0.50f else 0.32f),
+                        accentSecondary.copy(alpha = if (liquidGlass) 0.36f else 0.23f),
+                        accentDeep.copy(alpha = if (liquidGlass) 0.24f else 0.15f),
+                    )
+                    LyricsAnimation.CARD_POP -> listOf(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (liquidGlass) 0.88f else 0.68f),
+                        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = if (liquidGlass) 0.66f else 0.44f),
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.52f),
+                    )
+                    LyricsAnimation.APPLE_ZOOM -> listOf(
+                        primaryColor.copy(alpha = if (liquidGlass) 0.30f else 0.16f),
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.30f),
+                        Color.Transparent,
+                    )
+                    LyricsAnimation.MINIMAL_WAVE -> listOf(Color.Transparent, Color.Transparent)
+                }
+                Brush.linearGradient(colors)
+            }
 
             val strokeBorder = when {
+                isActive && animationStyle == LyricsAnimation.MINIMAL_WAVE -> null
+                isActive && animationStyle == LyricsAnimation.LOSSLESS_GLOW -> BorderStroke(
+                    1.25.dp,
+                    Brush.linearGradient(
+                        listOf(
+                            Color.White.copy(alpha = if (liquidGlass) 0.52f else 0.20f),
+                            primaryColor.copy(alpha = 0.72f),
+                            accentSecondary.copy(alpha = 0.42f),
+                        ),
+                    ),
+                )
                 isActive && liquidGlass -> BorderStroke(
                     1.dp,
                     Brush.linearGradient(
@@ -517,7 +678,7 @@ private fun SyncedLyricsList(
                     Brush.linearGradient(
                         listOf(
                             primaryColor.copy(alpha = 0.44f),
-                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.24f),
+                            accentDeep.copy(alpha = 0.24f),
                             Color.White.copy(alpha = 0.08f),
                         ),
                     ),
@@ -529,15 +690,25 @@ private fun SyncedLyricsList(
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
+                        scaleX = scale * pulseScale
+                        scaleY = scale * pulseScale
                         this.alpha = alpha
                         this.translationX = translationX * density
                         this.translationY = translationY * density
-                        if (animationStyle == LyricsAnimation.CARD_POP && isActive) {
-                            shadowElevation = 8.dp.toPx()
+                        rotationZ = rotation
+                        rotationX = depthRotation
+                        if (depthRotation != 0f) cameraDistance = 24f * density
+                        val elevated = animationStyle == LyricsAnimation.CARD_POP ||
+                            animationStyle == LyricsAnimation.LOSSLESS_GLOW ||
+                            animationStyle == LyricsAnimation.APPLE_ZOOM
+                        if (isActive && elevated) {
+                            shadowElevation = when (animationStyle) {
+                                LyricsAnimation.CARD_POP -> 12.dp.toPx()
+                                LyricsAnimation.LOSSLESS_GLOW -> 8.dp.toPx()
+                                else -> 5.dp.toPx()
+                            }
                             shape = pillShape
-                            clip = true
+                            clip = animationStyle == LyricsAnimation.CARD_POP
                         }
                     }
                     .clip(pillShape)
@@ -581,6 +752,8 @@ private fun SyncedLyricsList(
                     activeColor = textColor,
                     inactiveColor = MaterialTheme.colorScheme.onSurface,
                     liquidGlass = liquidGlass,
+                    accentColor = interactiveColor,
+                    animationStyle = animationStyle,
                     fontStyle = fontStyle,
                 )
             }
@@ -597,6 +770,8 @@ private fun WordByWordLyricLine(
     activeColor: Color,
     inactiveColor: Color,
     liquidGlass: Boolean,
+    accentColor: Color,
+    animationStyle: LyricsAnimation,
     fontStyle: TextStyle,
     modifier: Modifier = Modifier,
 ) {
@@ -635,20 +810,59 @@ private fun WordByWordLyricLine(
                 val isSyllableActive = currentPositionMs in sylStart until sylEnd
                 val isSyllablePast = currentPositionMs >= sylEnd
 
-                val sylScaleTarget = if (isSyllableActive) 1.06f else 1f
+                val sylScaleTarget = if (isSyllableActive) {
+                    when (animationStyle) {
+                        LyricsAnimation.APPLE_FLUID -> 1.08f
+                        LyricsAnimation.KARAOKE_PULSE -> 1.13f
+                        LyricsAnimation.KINETIC_SLIDE -> 1.07f
+                        LyricsAnimation.CINEMATIC_BLUR -> 1.05f
+                        LyricsAnimation.LOSSLESS_GLOW -> 1.09f
+                        LyricsAnimation.CARD_POP -> 1.07f
+                        LyricsAnimation.APPLE_ZOOM -> 1.11f
+                        LyricsAnimation.MINIMAL_WAVE -> 1.02f
+                    }
+                } else 1f
                 val sylScale by animateFloatAsState(
                     targetValue = sylScaleTarget,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                        stiffness = Spring.StiffnessLow,
-                    ),
+                    animationSpec = when (animationStyle) {
+                        LyricsAnimation.KARAOKE_PULSE -> spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessLow)
+                        LyricsAnimation.APPLE_FLUID, LyricsAnimation.APPLE_ZOOM -> spring(
+                            dampingRatio = 0.72f,
+                            stiffness = Spring.StiffnessMediumLow,
+                        )
+                        LyricsAnimation.MINIMAL_WAVE -> tween(70)
+                        else -> spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
+                    },
                     label = "sylScale_${sIndex}",
+                )
+
+                val sylLiftTarget = if (isSyllableActive) {
+                    when (animationStyle) {
+                        LyricsAnimation.KARAOKE_PULSE, LyricsAnimation.CARD_POP, LyricsAnimation.APPLE_ZOOM -> -3f
+                        LyricsAnimation.APPLE_FLUID, LyricsAnimation.KINETIC_SLIDE, LyricsAnimation.LOSSLESS_GLOW -> -2f
+                        LyricsAnimation.CINEMATIC_BLUR -> -1f
+                        LyricsAnimation.MINIMAL_WAVE -> 0f
+                    }
+                } else 0f
+                val sylLift by animateFloatAsState(
+                    targetValue = sylLiftTarget,
+                    animationSpec = if (animationStyle == LyricsAnimation.MINIMAL_WAVE) {
+                        tween(70)
+                    } else {
+                        spring(dampingRatio = 0.76f, stiffness = Spring.StiffnessMediumLow)
+                    },
+                    label = "sylLift_${sIndex}",
                 )
 
                 val sylAlphaTarget = when {
                     isSyllableActive -> 1f
                     isSyllablePast -> 0.96f
-                    else -> 0.40f
+                    else -> when (animationStyle) {
+                        LyricsAnimation.CINEMATIC_BLUR -> 0.28f
+                        LyricsAnimation.APPLE_ZOOM -> 0.34f
+                        LyricsAnimation.MINIMAL_WAVE -> 0.52f
+                        else -> 0.40f
+                    }
                 }
                 val sylAlpha by animateFloatAsState(
                     targetValue = sylAlphaTarget,
@@ -658,7 +872,11 @@ private fun WordByWordLyricLine(
 
                 val sylColor by animateColorAsState(
                     targetValue = when {
-                        isSyllableActive -> if (liquidGlass) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary
+                        isSyllableActive -> if (liquidGlass) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            accentColor
+                        }
                         isSyllablePast -> activeColor
                         else -> inactiveColor.copy(alpha = 0.40f)
                     },
@@ -674,6 +892,7 @@ private fun WordByWordLyricLine(
                         .graphicsLayer {
                             scaleX = sylScale
                             scaleY = sylScale
+                            translationY = sylLift * density
                             alpha = sylAlpha
                         },
                 )
@@ -698,6 +917,8 @@ private fun WordByWordLyricLine(
 private fun PlainLyricsView(
     plainLyrics: String,
     liquidGlass: Boolean,
+    accentPrimary: Color,
+    accentSecondary: Color,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -709,23 +930,24 @@ private fun PlainLyricsView(
     ) {
         Surface(
             shape = pillShape,
-            color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
-            else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f),
+            color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.74f)
+            else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f),
             border = BorderStroke(
                 1.dp,
                 if (liquidGlass) {
                     Brush.linearGradient(
                         listOf(
                             Color.White.copy(alpha = 0.25f),
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                            accentPrimary.copy(alpha = 0.24f),
+                            accentSecondary.copy(alpha = 0.12f),
                             Color.White.copy(alpha = 0.05f),
                         ),
                     )
                 } else {
                     Brush.linearGradient(
                         listOf(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.26f),
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
+                            accentPrimary.copy(alpha = 0.32f),
+                            accentSecondary.copy(alpha = 0.16f),
                         ),
                     )
                 },
@@ -743,7 +965,7 @@ private fun PlainLyricsView(
                     Icons.Filled.SyncDisabled,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = MaterialTheme.colorScheme.primary,
                 )
                 Text(
                     "Lyrics not time-synced",
@@ -773,6 +995,8 @@ private fun EmptyLyricsView(
     isInstrumental: Boolean,
     onRetry: () -> Unit,
     liquidGlass: Boolean,
+    accentPrimary: Color,
+    accentSecondary: Color,
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -787,15 +1011,16 @@ private fun EmptyLyricsView(
             val iconShape = CircleShape
             Surface(
                 shape = iconShape,
-                color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
-                else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.62f),
+                color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.74f)
+                else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f),
                 border = BorderStroke(
                     1.dp,
                     Brush.linearGradient(
                         listOf(
                             if (liquidGlass) Color.White.copy(alpha = 0.35f)
-                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.36f),
-                            Color.White.copy(alpha = 0.08f),
+                            else accentPrimary.copy(alpha = 0.52f),
+                            accentSecondary.copy(alpha = 0.22f),
+                            Color.White.copy(alpha = 0.06f),
                         ),
                     ),
                 ),
@@ -811,7 +1036,7 @@ private fun EmptyLyricsView(
                         contentDescription = null,
                         modifier = Modifier.size(34.dp),
                         tint = if (liquidGlass) MaterialTheme.colorScheme.onSurfaceVariant
-                        else MaterialTheme.colorScheme.onPrimaryContainer,
+                        else MaterialTheme.colorScheme.primary,
                     )
                 }
             }
@@ -856,13 +1081,15 @@ private fun LyricsBottomControls(
     totalDurationMs: Long,
     player: MusicPlayer,
     liquidGlass: Boolean,
+    accentPrimary: Color,
+    accentSecondary: Color,
     modifier: Modifier = Modifier,
 ) {
     val barShape = RoundedCornerShape(26.dp)
     val barBg = if (liquidGlass) {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.88f)
+        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.72f)
     } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.86f)
+        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
     }
 
     Surface(
@@ -873,13 +1100,13 @@ private fun LyricsBottomControls(
             Brush.linearGradient(
                 listOf(
                     Color.White.copy(alpha = if (liquidGlass) 0.32f else 0.12f),
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.24f),
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.18f),
+                    accentPrimary.copy(alpha = 0.34f),
+                    accentSecondary.copy(alpha = 0.18f),
                 ),
             ),
         ),
-        tonalElevation = 1.dp,
-        shadowElevation = 10.dp,
+        tonalElevation = 2.dp,
+        shadowElevation = 8.dp,
         modifier = modifier.liquidGlassChrome(barShape, liquidGlass),
     ) {
         Column(
@@ -921,7 +1148,10 @@ private fun LyricsBottomControls(
                 ) {
                     IconButton(
                         onClick = player::previous,
-                        modifier = Modifier.size(38.dp),
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.58f)),
                     ) {
                         Icon(
                             Icons.Filled.SkipPrevious,
@@ -959,7 +1189,10 @@ private fun LyricsBottomControls(
 
                     IconButton(
                         onClick = player::next,
-                        modifier = Modifier.size(38.dp),
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.58f)),
                     ) {
                         Icon(
                             Icons.Filled.SkipNext,

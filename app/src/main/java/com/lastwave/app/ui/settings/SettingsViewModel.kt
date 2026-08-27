@@ -138,6 +138,7 @@ class SettingsViewModel @Inject constructor(
         .withSettingsFallback("equalizer preferences", EqualizerSettings())
         .stateIn(viewModelScope, SettingsSharing, EqualizerSettings())
     private var immediateEqGains = EqualizerSettings().gainsDb.toFloatArray()
+    private var immediateEqEnabled = false
     private var immediateVolumeBoostEnabled = false
     private var immediateVolumeBoostPercent = 100
 
@@ -177,12 +178,15 @@ class SettingsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            equalizer.collect { immediateEqGains = it.gainsDb.toFloatArray() }
+            equalizer.collect {
+                immediateEqEnabled = it.enabled
+                immediateEqGains = it.gainsDb.toFloatArray()
+            }
         }
         viewModelScope.launch {
             misc.collect { settings ->
                 immediateVolumeBoostEnabled = settings.volumeBoostEnabled
-                immediateVolumeBoostPercent = settings.volumeBoostPercent.coerceIn(100, 150)
+                immediateVolumeBoostPercent = settings.volumeBoostPercent.coerceIn(100, 200)
             }
         }
         viewModelScope.launch {
@@ -248,7 +252,7 @@ class SettingsViewModel @Inject constructor(
         launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostEnabled(enabled) }
     }
     fun setVolumeBoostPercent(percent: Int) {
-        val safePercent = percent.coerceIn(100, 150)
+        val safePercent = percent.coerceIn(100, 200)
         immediateVolumeBoostPercent = safePercent
         runCatching { audioEngine.get().setVolumeBoost(immediateVolumeBoostEnabled, safePercent) }
         launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostPercent(safePercent) }
@@ -264,6 +268,7 @@ class SettingsViewModel @Inject constructor(
     // ── Experimental: 15-band equalizer ──
 
     fun setEqualizerEnabled(enabled: Boolean) {
+        immediateEqEnabled = enabled
         runCatching { audioEngine.get().setEqualizer(enabled, immediateEqGains) }
         launchSettingsAction("update the equalizer") { equalizerPreferences.setEnabled(enabled) }
     }
@@ -272,17 +277,29 @@ class SettingsViewModel @Inject constructor(
      *  fresh preset would read as a dead control. */
     fun applyEqPreset(name: String) {
         com.lastwave.app.data.local.EqualizerPresets.byName(name)?.let { preset ->
+            immediateEqEnabled = true
             immediateEqGains = preset.gainsDb.toFloatArray()
             runCatching { audioEngine.get().setEqualizer(true, immediateEqGains) }
             launchSettingsAction("apply the equalizer preset") { equalizerPreferences.applyPreset(preset) }
         }
     }
 
+    /** Audible preview during drag; persistence is deferred until release. */
+    fun previewEqBandGain(bandIndex: Int, gainDb: Float) {
+        if (bandIndex !in immediateEqGains.indices || !gainDb.isFinite()) return
+        immediateEqGains = immediateEqGains.copyOf().also {
+            it[bandIndex] = gainDb.coerceIn(
+                -com.lastwave.app.data.local.EQ_MAX_GAIN_DB,
+                com.lastwave.app.data.local.EQ_MAX_GAIN_DB,
+            )
+        }
+        runCatching { audioEngine.get().setEqualizer(immediateEqEnabled, immediateEqGains) }
+    }
+
     /** Manual band drag → curve becomes Custom. */
     fun setEqBandGain(bandIndex: Int, gainDb: Float) {
         if (bandIndex !in immediateEqGains.indices) return
-        immediateEqGains = immediateEqGains.copyOf().also { it[bandIndex] = gainDb }
-        runCatching { audioEngine.get().setEqualizer(equalizer.value.enabled, immediateEqGains) }
+        previewEqBandGain(bandIndex, gainDb)
         launchSettingsAction("update the equalizer band") { equalizerPreferences.setBandGain(bandIndex, gainDb) }
     }
 

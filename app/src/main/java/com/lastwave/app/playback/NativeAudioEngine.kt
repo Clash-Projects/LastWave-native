@@ -58,7 +58,7 @@ class NativeAudioEngine @Inject constructor(
             }
             applicationScope.launch(Dispatchers.Default) {
                 settingsPreferences.settings
-                    .map { it.volumeBoostEnabled to it.volumeBoostPercent.coerceIn(100, 150) }
+                    .map { it.volumeBoostEnabled to it.volumeBoostPercent.coerceIn(100, 200) }
                     .distinctUntilChanged()
                     .collect { (enabled, percent) -> setVolumeBoost(enabled, percent) }
             }
@@ -106,7 +106,7 @@ class NativeAudioEngine @Inject constructor(
 
     /** Native adaptive gain; ramps smoothly and never exceeds the -1 dBFS ceiling. */
     fun setVolumeBoost(enabled: Boolean, percent: Int) {
-        withHandle(Unit) { nativeSetVolumeBoost(it, enabled, percent.coerceIn(100, 150)) }
+        withHandle(Unit) { nativeSetVolumeBoost(it, enabled, percent.coerceIn(100, 200)) }
     }
 
     /** Updates the native 15-band EQ; its gains are smoothed in C++. */
