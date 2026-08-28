@@ -57,7 +57,6 @@ data class YouTubeAudioStream(
     val url: String,
     val mimeType: String?,
     val bitrate: Int,
-    val codec: String? = null,
 )
 
 data class YtMusicTasteSignals(
@@ -588,49 +587,24 @@ class InnerTubeMusicApi @Inject constructor(
 
     suspend fun searchSongs(query: String, limit: Int = 30): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
-        val trimmedQuery = query.trim()
-
-        fun execute(config: WebConfig, filter: String): Result<List<YouTubeMusicTrack>> = runCatching {
-            val body = buildJsonObject {
-                put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
-                put("query", trimmedQuery)
-                put("params", filter)
-            }
-            val root = post(
-                url = "$MUSIC_API/search?key=${config.apiKey}&prettyPrint=false",
-                body = body,
-                clientName = "WEB_REMIX",
-                clientVersion = config.clientVersion,
-                userAgent = WEB_USER_AGENT,
-            )
-            parseSongRenderers(root)
+        val config = getWebConfig()
+        val body = buildJsonObject {
+            put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
+            put("query", query.trim())
+            // YouTube Music's Songs filter, decoded (the endpoint JSON body
+            // accepts the base64 value directly).
+            put("params", "EgWKAQIIAWoKEAkQBRAKEAMQBA==")
         }
-
-        var config = getWebConfig()
-        var songsResult = execute(config, SONG_SEARCH_FILTER)
-        var videosResult = execute(config, VIDEO_SEARCH_FILTER)
-        if (songsResult.isFailure && videosResult.isFailure) {
-            // post() invalidates stale web metadata on rejected requests. A
-            // fresh page bootstrap makes the retry use the current API key,
-            // client version and visitor data instead of repeating 2024 data.
-            webConfig = null
-            config = getWebConfig()
-            songsResult = execute(config, SONG_SEARCH_FILTER)
-            videosResult = execute(config, VIDEO_SEARCH_FILTER)
-        }
-
-        val officialResults = songsResult.getOrDefault(emptyList())
-        val communityVideos = videosResult.getOrDefault(emptyList())
-        val videoQuota = if (limit >= 3) (limit / 3).coerceAtLeast(1) else 0
-        val officialQuota = limit - videoQuota
-        val combined = (
-            officialResults.take(officialQuota) +
-                communityVideos.take(videoQuota) +
-                officialResults.drop(officialQuota) +
-                communityVideos.drop(videoQuota)
-            ).distinctBy { it.videoId }.take(limit)
-        combined.take(2).forEach { prefetchStream(it.videoId) }
-        combined
+        val root = post(
+            url = "$MUSIC_API/search?key=${config.apiKey}&prettyPrint=false",
+            body = body,
+            clientName = "WEB_REMIX",
+            clientVersion = config.clientVersion,
+            userAgent = WEB_USER_AGENT,
+        )
+        val results = parseSongRenderers(root).take(limit)
+        results.take(2).forEach { prefetchStream(it.videoId) }
+        results
     }
 
     suspend fun searchArtists(query: String, limit: Int = 30): List<YouTubeMusicEntity> =
@@ -1060,6 +1034,14 @@ class InnerTubeMusicApi @Inject constructor(
         }
     }
 
+    /** Resolves stream specifically optimized for download compatibility (M4A AAC container). */
+    suspend fun resolveDownloadStream(videoId: String): YouTubeAudioStream = withContext(Dispatchers.IO) {
+        require(videoId.isNotBlank()) { "Missing YouTube Music video id" }
+        runCatching {
+            streamExtractor.resolveAudioStream(videoId, preferM4a = true)
+        }.getOrNull() ?: resolveAudioStream(videoId)
+    }
+
     private suspend fun resolveAudioStreamInternal(videoId: String): YouTubeAudioStream = kotlinx.coroutines.coroutineScope {
         val now = System.currentTimeMillis()
         
@@ -1149,15 +1131,9 @@ class InnerTubeMusicApi @Inject constructor(
                                 url = finalUrl,
                                 mimeType = mime.substringBefore(';'),
                                 bitrate = format.int("bitrate") ?: 0,
-                                codec = mime.substringAfter("codecs=", "")
-                                    .trim()
-                                    .trim('"', '\''),
                             )
                         }
-                    val bestStream = candidates.maxWithOrNull(
-                        compareBy<YouTubeAudioStream> { if (it.codec.orEmpty().contains("opus", ignoreCase = true)) 1 else 0 }
-                            .thenBy { it.bitrate },
-                    )
+                    val bestStream = candidates.maxByOrNull { it.bitrate }
                     if (bestStream != null) {
                         delivered = channel.trySend(bestStream).isSuccess
                     }
@@ -1270,15 +1246,8 @@ class InnerTubeMusicApi @Inject constructor(
             similarity(best.title, title),
             similarity(baseTitle(best.title), baseTitle(title)),
         )
-        val artistSimilarity = artistEvidenceSimilarity(best, artist)
-        val requestedCriticalVariants = variantTokens(title).intersect(IDENTITY_CRITICAL_VARIANTS)
-        val candidateCriticalVariants = variantTokens(best.title).intersect(IDENTITY_CRITICAL_VARIANTS)
-        val exactCommunityTitle = normalize(best.title) == normalize(title) &&
-            requestedCriticalVariants.any(COMMUNITY_UPLOAD_VARIANTS::contains)
-        if (titleSimilarity < 72 ||
-            (artist.isNotBlank() && artistSimilarity < 50 && !exactCommunityTitle) ||
-            requestedCriticalVariants != candidateCriticalVariants
-        ) {
+        val artistSimilarity = similarity(best.artist, artist)
+        if (titleSimilarity < 72 || (artist.isNotBlank() && artistSimilarity < 50)) {
             throw ConfirmedUnplayableMediaException("No reliable YouTube Music match found for $title by $artist")
         }
         return best.also {
@@ -1299,33 +1268,11 @@ class InnerTubeMusicApi @Inject constructor(
     suspend fun isPlayable(title: String, artist: String): Boolean =
         findBestMatchOrNull(title, artist) != null
 
-    private suspend fun getWebConfig(): WebConfig {
+    private fun getWebConfig(): WebConfig {
         webConfig?.let { return it }
-        configMutex.lock()
-        try {
-            webConfig?.let { return it }
-            val html = withContext(Dispatchers.IO) {
-                runCatching {
-                    val request = Request.Builder()
-                        .url("https://music.youtube.com/")
-                        .header("User-Agent", WEB_USER_AGENT)
-                        .header("Accept-Language", "en-US,en;q=0.9")
-                        .build()
-                    http.newCall(request).execute().use { response ->
-                        response.body?.string().orEmpty().takeIf { response.isSuccessful }
-                    }
-                }.getOrNull()
-            }.orEmpty()
-            return WebConfig(
-                apiKey = findConfig(html, "INNERTUBE_API_KEY") ?: FALLBACK_WEB_KEY,
-                clientVersion = findConfig(html, "INNERTUBE_CLIENT_VERSION")
-                    ?: findConfig(html, "INNERTUBE_CONTEXT_CLIENT_VERSION")
-                    ?: FALLBACK_WEB_VERSION,
-                visitorData = findConfig(html, "VISITOR_DATA"),
-            ).also { webConfig = it }
-        } finally {
-            configMutex.unlock()
-        }
+        val initial = WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null)
+        webConfig = initial
+        return initial
     }
 
     private fun findConfig(html: String, key: String): String? {
@@ -1409,13 +1356,11 @@ class InnerTubeMusicApi @Inject constructor(
         val renderers = mutableListOf<JsonObject>()
         collectObjects(root, "musicResponsiveListItemRenderer", renderers)
         val songs = renderers.mapNotNull(::parseSong).toMutableList()
-        val twoRowRenderers = mutableListOf<JsonObject>()
-        collectObjects(root, "musicTwoRowItemRenderer", twoRowRenderers)
-        songs.addAll(twoRowRenderers.mapNotNull(::parseTwoRowSong))
-        val ytVideos = mutableListOf<JsonObject>()
-        collectObjects(root, "playlistVideoRenderer", ytVideos)
-        collectObjects(root, "videoRenderer", ytVideos)
-        songs.addAll(ytVideos.mapNotNull(::parsePlaylistVideoRenderer))
+        if (songs.isEmpty()) {
+            val ytVideos = mutableListOf<JsonObject>()
+            collectObjects(root, "playlistVideoRenderer", ytVideos)
+            songs.addAll(ytVideos.mapNotNull(::parsePlaylistVideoRenderer))
+        }
         return songs.distinctBy { it.videoId }
     }
 
@@ -1480,18 +1425,12 @@ class InnerTubeMusicApi @Inject constructor(
         val title = renderer.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
             ?: renderer.obj("title")?.string("simpleText")
             ?: return null
-        val artist = listOf("shortBylineText", "ownerText", "longBylineText")
-            .firstNotNullOfOrNull { key ->
-                renderer.obj(key)?.array("runs")?.firstOrNull()?.asObject()?.string("text")
-            }
+        val artist = renderer.obj("shortBylineText")?.array("runs")?.firstOrNull()?.asObject()?.string("text")
             ?: "Unknown artist"
-        val durationText = renderer.obj("lengthText")?.string("simpleText")
-            ?: renderer.obj("lengthText")?.array("runs")
-                ?.joinToString("") { it.asObject()?.string("text").orEmpty() }
-        val duration = renderer.string("lengthSeconds")?.toIntOrNull() ?: durationText?.let(::parseDuration)
+        val duration = renderer.string("lengthSeconds")?.toIntOrNull()
         val thumbnails = renderer.obj("thumbnail")?.array("thumbnails")
         val artwork = thumbnails?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
-        return YouTubeMusicTrack(videoId, title.trim(), artist.trim(), null, artwork, duration)
+        return YouTubeMusicTrack(videoId, title, artist, null, artwork, duration)
     }
 
     private fun parseSong(renderer: JsonObject): YouTubeMusicTrack? {
@@ -1675,49 +1614,19 @@ class InnerTubeMusicApi @Inject constructor(
         var score = maxOf(
             similarity(candidate.title, title),
             similarity(baseTitle(candidate.title), baseTitle(title)),
-        ) * 5 + artistEvidenceSimilarity(candidate, artist) * 3
+        ) * 5 + similarity(candidate.artist, artist) * 3
         if (candidateTitle == wantedTitle) score += 600
         if (wantedArtist.isNotBlank() && candidateArtist == wantedArtist) score += 350
-        val wantedVariants = variantTokens(title)
-        val candidateVariants = variantTokens(candidate.title)
-        val unexpectedVariants = candidateVariants - wantedVariants
-        val missingVariants = wantedVariants - candidateVariants
+        val wantedVariants = tokens(title).intersect(VARIANT_WORDS)
+        val unexpectedVariants = tokens(candidate.title).intersect(VARIANT_WORDS) - wantedVariants
         score -= unexpectedVariants.size * 250
-        score -= missingVariants.size * 800
         return score
-    }
-
-    private fun artistEvidenceSimilarity(candidate: YouTubeMusicTrack, artist: String): Int {
-        if (artist.isBlank()) return 100
-        val uploaderSimilarity = similarity(candidate.artist, artist)
-        val separator = ARTIST_TITLE_SEPARATOR.find(candidate.title)
-        val creditedArtist = separator?.range?.first?.let { candidate.title.substring(0, it) }
-        val creditedArtistSimilarity = creditedArtist?.let { similarity(it, artist) } ?: 0
-
-        val wantedTokens = tokens(artist)
-        if (wantedTokens.isEmpty()) return maxOf(uploaderSimilarity, creditedArtistSimilarity)
-        val titleTokens = tokens(candidate.title)
-        val titleCoverage = if (wantedTokens.size > 1) {
-            (wantedTokens.intersect(titleTokens).size * 100) / wantedTokens.size
-        } else 0
-        return maxOf(uploaderSimilarity, creditedArtistSimilarity, titleCoverage)
     }
 
     private fun tokens(value: String): Set<String> = normalize(value)
         .split(' ')
         .filter { it.isNotBlank() && it !in MATCH_NOISE_WORDS }
         .toSet()
-
-    private fun variantTokens(value: String): Set<String> {
-        val normalized = normalize(value)
-            .replace("mash up", "mashup")
-            .replace("sped up", "spedup")
-        return normalized.split(' ')
-            .filterTo(mutableSetOf()) { it in VARIANT_WORDS }
-            .apply {
-                if (Regex("""\b[a-z0-9]+\s+x\s+[a-z0-9]+\b""").containsMatchIn(normalized)) add("mashup")
-            }
-    }
 
     private fun baseTitle(value: String): String = value
         .replace(FEATURING_CLAUSE, " ")
@@ -1751,18 +1660,11 @@ class InnerTubeMusicApi @Inject constructor(
         val MULTI_SPACE = Regex("\\s+")
         val VARIANT_WORDS = setOf(
             "live", "remix", "karaoke", "cover", "instrumental", "slowed", "sped", "nightcore",
-            "spedup", "reverb", "mashup", "fanmade", "acoustic", "demo", "edit", "remaster",
-            "remastered", "mono", "stereo",
+            "acoustic", "demo", "edit", "remaster", "remastered", "mono", "stereo",
         )
-        val IDENTITY_CRITICAL_VARIANTS = setOf(
-            "live", "remix", "karaoke", "cover", "instrumental", "slowed", "sped", "spedup",
-            "reverb", "nightcore", "mashup", "fanmade", "acoustic", "demo",
-        )
-        val COMMUNITY_UPLOAD_VARIANTS = setOf("mashup", "fanmade")
         val MATCH_NOISE_WORDS = setOf("official", "audio", "video", "visualizer", "lyrics", "lyric")
-        val ARTIST_TITLE_SEPARATOR = Regex("""\s+[-–—|:]\s+""")
         val FEATURING_CLAUSE = Regex("(?i)[(\\[]\\s*(feat(?:uring)?|ft)\\.?\\s+.*?[)\\]]")
-        val VERSION_CLAUSE = Regex("(?i)[(\\[][^)\\]]*(live|remix|mash[ -]?up|acoustic|demo|edit|slowed|sped[ -]?up|nightcore|remaster(?:ed)?|mono|stereo)[^)\\]]*[)\\]]")
+        val VERSION_CLAUSE = Regex("(?i)[(\\[][^)\\]]*(live|remix|acoustic|demo|edit|remaster(?:ed)?|mono|stereo)[^)\\]]*[)\\]]")
         val CLIENT_IDS = mapOf(
             "WEB_REMIX" to "67",
             "IOS" to "5",
@@ -1804,8 +1706,6 @@ class InnerTubeMusicApi @Inject constructor(
         const val WEB_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
         const val FALLBACK_WEB_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
         const val FALLBACK_WEB_VERSION = "1.20240715.00.00"
-        const val SONG_SEARCH_FILTER = "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
-        const val VIDEO_SEARCH_FILTER = "EgWKAQIQAWoKEAkQBRAKEAMQBA=="
         const val ARTIST_SEARCH_FILTER = "EgWKAQIgAWoKEAkQBRAKEAMQBA=="
         const val ALBUM_SEARCH_FILTER = "EgWKAQIYAWoKEAkQBRAKEAMQBA=="
         val PLAYER_CLIENTS = listOf(

@@ -139,6 +139,10 @@ android {
             useLegacyPackaging = true
         }
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -217,6 +221,17 @@ dependencies {
     // Resolves YouTube's current protected/ciphered playback URLs locally.
     // InnerTube remains responsible for YouTube Music search and metadata.
     implementation(libs.newpipe.extractor)
+
+    // Unit Testing dependencies
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("com.google.truth:truth:1.4.2")
+    testImplementation("org.robolectric:robolectric:4.12.2")
+    testImplementation("io.mockk:mockk:1.13.10")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+}
+
+tasks.withType<Test> {
+    maxHeapSize = "2048m"
 }
 
 

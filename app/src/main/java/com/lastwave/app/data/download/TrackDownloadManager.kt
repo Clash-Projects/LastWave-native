@@ -33,10 +33,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.Call
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
@@ -81,7 +79,6 @@ class TrackDownloadManager @Inject constructor(
         private const val PUBLIC_DIR_NAME = "LastWave"
         private const val DOWNLOAD_BUFFER_SIZE = 512 * 1024 // 512 KB
         private const val MAX_DOWNLOAD_RETRIES = 1
-        private const val QOBUZ_RESOLVE_TIMEOUT_MS = 4_000L
     }
 
     // Dedicated HTTP client with extended timeouts and high-throughput connection pooling
@@ -105,7 +102,6 @@ class TrackDownloadManager @Inject constructor(
             context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         }.getOrNull()
     }
-    private val activeCalls = ConcurrentHashMap<String, Call>()
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val activeUris = ConcurrentHashMap<String, Uri>()
     private val activeFiles = ConcurrentHashMap<String, File>()
@@ -145,14 +141,10 @@ class TrackDownloadManager @Inject constructor(
     }
 
     fun cancelDownload(key: String) {
-        // 1. Immediately abort active network socket / HTTP call in 0ms
-        activeCalls.remove(key)?.cancel()
-
-        // 2. Cancel coroutine job
         val job = activeJobs.remove(key)
         job?.cancel()
 
-        // 3. Clean up partial media entry/file
+        // Clean up partial media entry/file
         activeUris.remove(key)?.let { uri ->
             runCatching { context.contentResolver.delete(uri, null, null) }
         }
@@ -169,6 +161,7 @@ class TrackDownloadManager @Inject constructor(
         artist: String,
         album: String? = null,
         artworkUrl: String? = null,
+        year: String? = null,
     ) {
         val key = makeDownloadKey(title, artist)
         if (activeJobs.containsKey(key)) return
@@ -208,7 +201,7 @@ class TrackDownloadManager @Inject constructor(
                         }?.takeIf { ArtworkNormalizer.isRealImage(it) }
                 }
 
-                // 1. Resolve source — verified Qobuz first, YouTube Music fallback.
+                // 1. Resolve source — respect user's Qobuz preference for downloads too
                 val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
                 var resolvedUrl: String? = null
                 var mimeType = "audio/flac"
@@ -217,55 +210,54 @@ class TrackDownloadManager @Inject constructor(
                 var isQobuz = false
                 var durationMs = 0L
 
-                val qobuzStream = kotlinx.coroutines.withTimeoutOrNull(QOBUZ_RESOLVE_TIMEOUT_MS) {
-                    runCatching {
-                        qobuzMusicApi.resolveStream(
-                            title = title,
-                            artist = artist,
-                            expectedAlbum = album,
-                            preferredQuality = misc.qobuzQuality,
-                        )
-                    }.getOrNull()
-                }
-
-                if (qobuzStream != null) {
-                    resolvedUrl = qobuzStream.url
-                    mimeType = qobuzStream.mimeType
-                    extension = if (qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320) "mp3" else "flac"
-                    formatBadge = when {
-                        qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
-                        qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS FLAC"
-                        qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "320k MP3"
-                        else -> "FLAC"
+                if (misc.preferQobuzStreaming) {
+                    val qobuzStream = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                        runCatching {
+                            qobuzMusicApi.resolveStream(
+                                title = title,
+                                artist = artist,
+                                preferredQuality = QobuzMusicApi.QUALITY_MAX_HI_RES,
+                            )
+                        }.getOrNull()
                     }
-                    isQobuz = true
-                    durationMs = 0L
+
+                    if (qobuzStream != null) {
+                        resolvedUrl = qobuzStream.url
+                        mimeType = qobuzStream.mimeType
+                        extension = if (qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320) "mp3" else "flac"
+                        formatBadge = when {
+                            qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
+                            qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS FLAC"
+                            qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "320k MP3"
+                            else -> "FLAC"
+                        }
+                        isQobuz = true
+                        durationMs = 0L
+                    }
                 }
 
                 if (resolvedUrl == null) {
-                    // Fallback to YouTube Music
+                    // Fallback to YouTube Music (prefer M4A/AAC for universal media player compatibility)
                     val bestMatch = innerTube.findBestMatch(title, artist)
                     val videoId = bestMatch.videoId ?: error("No audio source found for $title")
                     if (resolvedArtworkUrl == null) {
                         resolvedArtworkUrl = bestMatch.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                     }
                     if (resolvedAlbum == null) resolvedAlbum = bestMatch.album
-                    durationMs = bestMatch.durationSeconds?.toLong()?.times(1_000L) ?: 0L
-                    val ytStream = innerTube.resolveAudioStream(videoId)
+                    val ytStream = innerTube.resolveDownloadStream(videoId)
                     resolvedUrl = ytStream.url
                     val rawMime = ytStream.mimeType.orEmpty().lowercase()
-                    val rawCodec = ytStream.codec.orEmpty().lowercase()
                     if (rawMime.contains("mp4") || rawMime.contains("m4a") || rawMime.contains("aac")) {
                         extension = "m4a"
                         mimeType = "audio/mp4"
                         formatBadge = "M4A AAC"
-                    } else if (rawMime.contains("ogg") || rawMime.contains("audio/opus")) {
-                        extension = "opus"
-                        mimeType = "audio/ogg"
-                        formatBadge = "OPUS"
-                    } else if (rawCodec.contains("opus") || rawMime.contains("webm")) {
+                    } else if (rawMime.contains("webm")) {
                         extension = "webm"
                         mimeType = "audio/webm"
+                        formatBadge = "WEBM OPUS"
+                    } else if (rawMime.contains("ogg") || rawMime.contains("opus")) {
+                        extension = "opus"
+                        mimeType = "audio/ogg"
                         formatBadge = "OPUS"
                     } else {
                         extension = "m4a"
@@ -278,7 +270,6 @@ class TrackDownloadManager @Inject constructor(
                 // 2. Download raw stream to local temp cache file
                 val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
                 tempDownloadFile = rawFile
-                var workingAudioFile = rawFile
 
                     var bytesReadTotal = 0L
                     var totalLength = -1L
@@ -286,19 +277,11 @@ class TrackDownloadManager @Inject constructor(
                     var downloadSuccess = false
 
                     while (downloadAttempt <= MAX_DOWNLOAD_RETRIES && !downloadSuccess) {
-                        if (!coroutineContext.isActive) throw CancellationException("Download cancelled by user")
                         val requestBuilder = Request.Builder().url(resolvedUrl!!)
-                        requestBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/133.0.0.0 Safari/537.36")
+                        requestBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
                         requestBuilder.header("Accept", "*/*")
                         val request = requestBuilder.build()
-                        val call = downloadClient.newCall(request)
-                        activeCalls[key] = call
-
-                        val response = try {
-                            call.execute()
-                        } finally {
-                            activeCalls.remove(key)
-                        }
+                        val response = downloadClient.newCall(request).execute()
 
                         if (!response.isSuccessful) throw IOException("HTTP ${response.code} downloading track")
 
@@ -311,7 +294,7 @@ class TrackDownloadManager @Inject constructor(
                         if (contentType.contains("webm")) {
                             extension = "webm"
                             mimeType = "audio/webm"
-                            formatBadge = "OPUS"
+                            formatBadge = "WEBM OPUS"
                         } else if (contentType.contains("ogg") || contentType.contains("opus")) {
                             extension = "opus"
                             mimeType = "audio/ogg"
@@ -338,12 +321,8 @@ class TrackDownloadManager @Inject constructor(
                             showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
                         }
 
-                        FileOutputStream(rawFile).use { fos ->
+                        FileOutputStream(tempDownloadFile).use { fos ->
                             while (source.read(buffer).also { bytesRead = it } != -1) {
-                                if (!coroutineContext.isActive) {
-                                    source.close()
-                                    throw CancellationException("Download cancelled by user")
-                                }
                                 fos.write(buffer, 0, bytesRead)
                                 bytesReadTotal += bytesRead
 
@@ -389,38 +368,10 @@ class TrackDownloadManager @Inject constructor(
                         downloadSuccess = true
                     }
 
-                    // YouTube serves Opus inside WebM. Move the already-compressed
-                    // packets into a real Ogg Opus container without decoding or
-                    // re-encoding, then tag that .opus file below.
-                    if (!isQobuz && (extension.equals("webm", ignoreCase = true) || mimeType.contains("webm", ignoreCase = true))) {
-                        updateProgress(
-                            DownloadProgress(
-                                key = key,
-                                title = title,
-                                artist = artist,
-                                progressPercent = 100,
-                                bytesDownloaded = bytesReadTotal,
-                                totalBytes = bytesReadTotal,
-                                formatBadge = "REMUXING OPUS",
-                            ),
-                        )
-                        showDownloadNotification(notifId, key, title, artist, 100, true, "REMUXING OPUS")
-                        val opusFile = File.createTempFile("dl_opus_", ".opus", context.cacheDir)
-                        if (!WebmOpusRemuxer.remux(rawFile, opusFile)) {
-                            runCatching { opusFile.delete() }
-                            throw IOException("YouTube stream was not a valid WebM Opus file")
-                        }
-                        workingAudioFile = opusFile
-                        tempDownloadFile = opusFile
-                        runCatching { rawFile.delete() }
-                        extension = "opus"
-                        mimeType = "audio/ogg"
-                        formatBadge = "OPUS"
-                    }
-
                     val safeFilename = sanitizeFilename("$artist - $title") + ".$extension"
 
                     // 3. Fetch lyrics BEFORE tagging so they can be embedded
+                    // INTO the audio file (a sidecar alone lands in a folder
                     // most players never associate with the track).
                     var hasLyrics = false
                     var syncedLyrics: String? = null
@@ -447,13 +398,13 @@ class TrackDownloadManager @Inject constructor(
                     // PICTURE for FLAC/Opus, Matroska tags for WebM,
                     // iTunes atoms for M4A, ID3v2.3 otherwise).
                     val metadataEmbedded = audioTagWriter.embedMetadata(
-                        audioFile = workingAudioFile,
+                        audioFile = tempDownloadFile,
                         title = title,
                         artist = artist,
                         album = resolvedAlbum,
                         artworkUrl = resolvedArtworkUrl,
-                        lyrics = syncedLyrics,
-                        unsyncedLyrics = plainLyrics,
+                        lyrics = syncedLyrics ?: plainLyrics,
+                        year = year,
                     )
                     if (!metadataEmbedded) {
                         throw IOException("Could not safely embed audio metadata")
@@ -466,6 +417,7 @@ class TrackDownloadManager @Inject constructor(
                         title = title,
                         artist = artist,
                         album = resolvedAlbum,
+                        year = year,
                         durationMs = durationMs,
                     )
                     destinationUri = uri
@@ -473,7 +425,7 @@ class TrackDownloadManager @Inject constructor(
                     if (uri != null) activeUris[key] = uri
                     if (file != null) activeFiles[key] = file
 
-                    workingAudioFile.inputStream().use { input ->
+                    tempDownloadFile.inputStream().use { input ->
                         destStream.use { output ->
                             input.copyTo(output)
                             output.flush()
@@ -493,6 +445,7 @@ class TrackDownloadManager @Inject constructor(
 
                     val finalPath = file?.absolutePath ?: uri?.toString() ?: safeFilename
 
+
                 // 7. Also write the sidecar .lrc companion file for players that read them
                 val lyricsText = syncedLyrics ?: plainLyrics
                 if (!lyricsText.isNullOrBlank()) {
@@ -500,7 +453,7 @@ class TrackDownloadManager @Inject constructor(
                     lrcPath = writePublicCompanionFile(lrcFilename, lyricsText, "text/plain")
                 }
 
-                // 8. Persist to Room database
+                // 6. Persist to Room database
                 val entity = DownloadedTrackEntity(
                     title = title,
                     artist = artist,
@@ -508,7 +461,7 @@ class TrackDownloadManager @Inject constructor(
                     artworkUrl = resolvedArtworkUrl,
                     filePath = finalPath,
                     mediaStoreUri = uri?.toString(),
-                    fileSizeBytes = workingAudioFile.length(),
+                    fileSizeBytes = tempDownloadFile.length(),
                     formatBadge = formatBadge,
                     durationMs = durationMs,
                     isQobuz = isQobuz,
@@ -541,35 +494,24 @@ class TrackDownloadManager @Inject constructor(
                 notificationManager?.cancel(notifId)
                 _downloads.update { it - key }
             } catch (error: Exception) {
-                val isCancel = error is java.io.InterruptedIOException ||
-                    error.message?.contains("canceled", ignoreCase = true) == true ||
-                    error.message?.contains("Socket closed", ignoreCase = true) == true ||
-                    !coroutineContext.isActive
-                if (isCancel) {
-                    destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
-                    destinationFile?.let { runCatching { if (it.exists()) it.delete() } }
-                    notificationManager?.cancel(notifId)
-                    _downloads.update { it - key }
-                } else {
-                    destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
-                    destinationFile?.let { runCatching { if (it.exists()) it.delete() } }
-                    updateProgress(
-                        DownloadProgress(
-                            key = key,
-                            title = title,
-                            artist = artist,
-                            error = error.localizedMessage ?: error.message ?: "Download failed",
-                        ),
-                    )
-                    showErrorNotification(notifId, title, artist, error.localizedMessage ?: "Failed")
-                }
+                destinationUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+                destinationFile?.let { runCatching { if (it.exists()) it.delete() } }
+                updateProgress(
+                    DownloadProgress(
+                        key = key,
+                        title = title,
+                        artist = artist,
+                        error = error.localizedMessage ?: error.message ?: "Download failed",
+                    ),
+                )
+                showErrorNotification(notifId, title, artist, error.localizedMessage ?: "Failed")
             } finally {
-                activeCalls.remove(key)
                 activeJobs.remove(key)
                 activeUris.remove(key)
                 activeFiles.remove(key)
                 tempDownloadFile?.let { runCatching { if (it.exists()) it.delete() } }
             }
+
         }
         activeJobs[key] = job
     }
@@ -584,6 +526,7 @@ class TrackDownloadManager @Inject constructor(
         title: String,
         artist: String,
         album: String?,
+        year: String? = null,
         durationMs: Long = 0L,
     ): Triple<java.io.OutputStream, Uri?, File?> {
         val resolver = context.contentResolver
@@ -606,7 +549,12 @@ class TrackDownloadManager @Inject constructor(
                 put(MediaStore.Audio.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MUSIC}/$PUBLIC_DIR_NAME")
                 put(MediaStore.Audio.Media.TITLE, title)
                 put(MediaStore.Audio.Media.ARTIST, artist)
+                put(MediaStore.Audio.Media.ALBUM_ARTIST, artist)
                 if (!album.isNullOrBlank()) put(MediaStore.Audio.Media.ALBUM, album)
+                val yearInt = year?.filter { it.isDigit() }?.take(4)?.toIntOrNull()
+                if (yearInt != null && yearInt > 0) {
+                    put(MediaStore.Audio.Media.YEAR, yearInt)
+                }
                 if (durationMs > 0) put(MediaStore.Audio.Media.DURATION, durationMs)
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
             }
