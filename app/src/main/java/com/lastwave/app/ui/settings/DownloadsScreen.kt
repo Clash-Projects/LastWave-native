@@ -105,6 +105,7 @@ fun DownloadsScreen(
     val tracks by viewModel.downloadedTracks.collectAsStateWithLifecycle()
     val totalBytes by viewModel.totalBytes.collectAsStateWithLifecycle()
     val activeDownloadsMap by viewModel.activeDownloads.collectAsStateWithLifecycle()
+    val downloadLyrics by viewModel.downloadLyrics.collectAsStateWithLifecycle()
     val activeDownloads = activeDownloadsMap.values.filter { !it.isFinished && it.error == null }
 
     val haptic = LocalHapticFeedback.current
@@ -144,6 +145,23 @@ fun DownloadsScreen(
                             expanded = showOptionsMenu,
                             onDismissRequest = { showOptionsMenu = false },
                         ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                    ) {
+                                        Text("Download Lyrics")
+                                        androidx.compose.material3.Switch(
+                                            checked = downloadLyrics,
+                                            onCheckedChange = { viewModel.setDownloadLyrics(it) },
+                                        )
+                                    }
+                                },
+                                leadingIcon = { Icon(Icons.Filled.FormatQuote, contentDescription = null) },
+                                onClick = { viewModel.setDownloadLyrics(!downloadLyrics) },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Open in File Manager") },
                                 leadingIcon = { Icon(Icons.Filled.FolderOpen, contentDescription = null) },

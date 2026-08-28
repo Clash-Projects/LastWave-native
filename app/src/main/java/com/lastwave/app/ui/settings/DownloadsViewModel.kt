@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -34,6 +35,7 @@ class DownloadsViewModel @Inject constructor(
     private val downloadedTrackDao: DownloadedTrackDao,
     private val downloadManager: TrackDownloadManager,
     private val musicPlayer: MusicPlayer,
+    private val settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
 ) : ViewModel() {
 
     val downloadedTracks: StateFlow<List<DownloadedTrackEntity>> =
@@ -53,9 +55,25 @@ class DownloadsViewModel @Inject constructor(
     val activeDownloads: StateFlow<Map<String, com.lastwave.app.data.download.DownloadProgress>> =
         downloadManager.downloads
 
+    val downloadLyrics: StateFlow<Boolean> =
+        settingsPreferences.settings
+            .map { it.downloadLyrics }
+            .withDownloadsFallback(true)
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                true,
+            )
+
     init {
         launchDownloadAction("sync downloads from storage") {
             downloadManager.syncDownloadsFromStorage()
+        }
+    }
+
+    fun setDownloadLyrics(enabled: Boolean) {
+        launchDownloadAction("toggle download lyrics") {
+            settingsPreferences.setDownloadLyrics(enabled)
         }
     }
 

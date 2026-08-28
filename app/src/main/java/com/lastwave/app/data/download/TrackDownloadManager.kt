@@ -391,19 +391,25 @@ class TrackDownloadManager @Inject constructor(
                         runCatching { durationRetriever.release() }
                     }
 
-                    val lyricsRecord = runCatching {
-                        lrclibLyricsApi.fetchLyrics(
-                            title = title,
-                            artist = artist,
-                            album = resolvedAlbum,
-                            durationSeconds = if (durationMs > 0) (durationMs / 1000).toInt() else null,
-                        )
-                    }.getOrNull()
+                    val shouldDownloadLyrics = runCatching {
+                        settingsPreferences.settings.first().downloadLyrics
+                    }.getOrDefault(true)
 
-                    if (lyricsRecord != null) {
-                        syncedLyrics = lyricsRecord.syncedLyrics
-                        plainLyrics = lyricsRecord.plainLyrics
-                        hasLyrics = !(syncedLyrics.isNullOrBlank() && plainLyrics.isNullOrBlank())
+                    if (shouldDownloadLyrics) {
+                        val lyricsRecord = runCatching {
+                            lrclibLyricsApi.fetchLyrics(
+                                title = title,
+                                artist = artist,
+                                album = resolvedAlbum,
+                                durationSeconds = if (durationMs > 0) (durationMs / 1000).toInt() else null,
+                            )
+                        }.getOrNull()
+
+                        if (lyricsRecord != null) {
+                            syncedLyrics = lyricsRecord.syncedLyrics
+                            plainLyrics = lyricsRecord.plainLyrics
+                            hasLyrics = !(syncedLyrics.isNullOrBlank() && plainLyrics.isNullOrBlank())
+                        }
                     }
 
                     // 4. Embed metadata, cover art AND lyrics directly into the
@@ -416,7 +422,7 @@ class TrackDownloadManager @Inject constructor(
                         artist = artist,
                         album = resolvedAlbum,
                         artworkUrl = resolvedArtworkUrl,
-                        lyrics = syncedLyrics ?: plainLyrics,
+                        lyrics = if (shouldDownloadLyrics) (syncedLyrics ?: plainLyrics) else null,
                         year = year,
                     )
                     if (!metadataEmbedded) {
@@ -460,10 +466,12 @@ class TrackDownloadManager @Inject constructor(
 
 
                 // 7. Also write the sidecar .lrc companion file for players that read them
-                val lyricsText = syncedLyrics ?: plainLyrics
-                if (!lyricsText.isNullOrBlank()) {
-                    val lrcFilename = sanitizeFilename("$artist - $title") + ".lrc"
-                    lrcPath = writePublicCompanionFile(lrcFilename, lyricsText, "text/plain")
+                if (shouldDownloadLyrics) {
+                    val lyricsText = syncedLyrics ?: plainLyrics
+                    if (!lyricsText.isNullOrBlank()) {
+                        val lrcFilename = sanitizeFilename("$artist - $title") + ".lrc"
+                        lrcPath = writePublicCompanionFile(lrcFilename, lyricsText, "text/plain")
+                    }
                 }
 
                 // 6. Persist to Room database
