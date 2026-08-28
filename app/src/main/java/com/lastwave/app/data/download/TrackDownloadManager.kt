@@ -378,6 +378,17 @@ class TrackDownloadManager @Inject constructor(
                     var plainLyrics: String? = null
                     var lrcPath: String? = null
 
+                    // 3. Extract exact audio duration from downloaded file
+                    val durationRetriever = android.media.MediaMetadataRetriever()
+                    try {
+                        durationRetriever.setDataSource(tempDownloadFile.absolutePath)
+                        val durStr = durationRetriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        durStr?.toLongOrNull()?.takeIf { it > 0 }?.let { durationMs = it }
+                    } catch (_: Exception) {
+                    } finally {
+                        runCatching { durationRetriever.release() }
+                    }
+
                     val lyricsRecord = runCatching {
                         lrclibLyricsApi.fetchLyrics(
                             title = title,
@@ -788,6 +799,157 @@ class TrackDownloadManager @Inject constructor(
             }
         }
         downloadedTrackDao.clearAll()
+    }
+
+    suspend fun syncDownloadsFromStorage() = withContext(Dispatchers.IO) {
+        val existingEntities = downloadedTrackDao.getAllList().toMutableList()
+        val existingPaths = existingEntities.map { it.filePath }.toMutableSet()
+        val existingUris = existingEntities.mapNotNull { it.mediaStoreUri }.toMutableSet()
+
+        // 1. Scan Public Music/LastWave directory on device
+        val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
+        if (musicDir.exists() && musicDir.isDirectory) {
+            val audioFiles = musicDir.listFiles { file ->
+                file.isFile && (file.extension.equals("flac", true) ||
+                                file.extension.equals("m4a", true) ||
+                                file.extension.equals("mp3", true) ||
+                                file.extension.equals("opus", true) ||
+                                file.extension.equals("ogg", true) ||
+                                file.extension.equals("webm", true))
+            }.orEmpty()
+
+            for (file in audioFiles) {
+                if (file.absolutePath in existingPaths) continue
+
+                val retriever = android.media.MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(file.absolutePath)
+                    val title = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE)
+                        ?.ifBlank { null } ?: file.nameWithoutExtension.substringAfter(" - ").ifBlank { file.nameWithoutExtension }
+                    val artist = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST)
+                        ?.ifBlank { null } ?: file.nameWithoutExtension.substringBefore(" - ").ifBlank { "Unknown Artist" }
+                    val album = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM).orEmpty()
+                    val durStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    val durMs = durStr?.toLongOrNull() ?: 0L
+                    val bitRateStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)
+                    val bitrateKbps = bitRateStr?.toIntOrNull()?.let { it / 1000 }
+
+                    val ext = file.extension.lowercase()
+                    val badge = when (ext) {
+                        "flac" -> "FLAC"
+                        "m4a", "mp4", "aac" -> "M4A AAC"
+                        "mp3" -> "320k MP3"
+                        "opus", "ogg" -> "OPUS"
+                        else -> "AUDIO"
+                    }
+
+                    val lrcFile = File(musicDir, file.nameWithoutExtension + ".lrc")
+                    val hasLyrics = lrcFile.exists() && lrcFile.length() > 0
+                    val lrcText = if (hasLyrics) runCatching { lrcFile.readText() }.getOrNull() else null
+
+                    val entity = DownloadedTrackEntity(
+                        title = title,
+                        artist = artist,
+                        album = album,
+                        filePath = file.absolutePath,
+                        fileSizeBytes = file.length(),
+                        formatBadge = badge,
+                        durationMs = durMs,
+                        bitrateKbps = bitrateKbps,
+                        isQobuz = ext == "flac",
+                        hasLyrics = hasLyrics,
+                        syncedLyrics = if (lrcText?.contains("[") == true) lrcText else null,
+                        plainLyrics = if (lrcText?.contains("[") != true) lrcText else null,
+                        lrcFilePath = if (hasLyrics) lrcFile.absolutePath else null,
+                        downloadedAtMillis = file.lastModified(),
+                    )
+                    downloadedTrackDao.insert(entity)
+                    existingPaths.add(file.absolutePath)
+                } catch (e: Exception) {
+                    android.util.Log.e("TrackDownloadManager", "Failed to import file: ${file.name}", e)
+                } finally {
+                    runCatching { retriever.release() }
+                }
+            }
+        }
+
+        // 2. Query MediaStore for any items in Music/LastWave
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val projection = arrayOf(
+                MediaStore.Audio.Media._ID,
+                MediaStore.Audio.Media.TITLE,
+                MediaStore.Audio.Media.ARTIST,
+                MediaStore.Audio.Media.ALBUM,
+                MediaStore.Audio.Media.DURATION,
+                MediaStore.Audio.Media.SIZE,
+                MediaStore.Audio.Media.MIME_TYPE,
+                MediaStore.Audio.Media.RELATIVE_PATH,
+                MediaStore.Audio.Media.DATE_ADDED,
+            )
+            val selection = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
+            val selectionArgs = arrayOf("Music/$PUBLIC_DIR_NAME%")
+
+            runCatching {
+                context.contentResolver.query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    null,
+                )?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                    val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                    val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                    val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                    val durCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                    val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                    val mimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
+                    val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idCol)
+                        val uri = Uri.withAppendedPath(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id.toString())
+                        if (uri.toString() in existingUris) continue
+
+                        val title = cursor.getString(titleCol) ?: "Unknown Track"
+                        val artist = cursor.getString(artistCol) ?: "Unknown Artist"
+                        val album = cursor.getString(albumCol).orEmpty()
+                        val durMs = cursor.getLong(durCol)
+                        val size = cursor.getLong(sizeCol)
+                        val mime = cursor.getString(mimeCol).orEmpty().lowercase()
+                        val date = cursor.getLong(dateCol) * 1000L
+
+                        val isFlac = mime.contains("flac")
+                        val isM4a = mime.contains("mp4") || mime.contains("m4a") || mime.contains("aac")
+                        val isMp3 = mime.contains("mp3") || mime.contains("mpeg")
+                        val isOpus = mime.contains("opus") || mime.contains("ogg")
+
+                        val badge = when {
+                            isFlac -> "FLAC"
+                            isM4a -> "M4A AAC"
+                            isMp3 -> "320k MP3"
+                            isOpus -> "OPUS"
+                            else -> "AUDIO"
+                        }
+
+                        val entity = DownloadedTrackEntity(
+                            title = title,
+                            artist = artist,
+                            album = album,
+                            filePath = uri.toString(),
+                            mediaStoreUri = uri.toString(),
+                            fileSizeBytes = size,
+                            formatBadge = badge,
+                            durationMs = durMs,
+                            isQobuz = isFlac,
+                            downloadedAtMillis = if (date > 0) date else System.currentTimeMillis(),
+                        )
+                        downloadedTrackDao.insert(entity)
+                        existingUris.add(uri.toString())
+                    }
+                }
+            }
+        }
     }
 
     private fun sanitizeFilename(title: String): String =

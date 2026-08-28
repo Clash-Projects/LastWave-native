@@ -53,6 +53,12 @@ class DownloadsViewModel @Inject constructor(
     val activeDownloads: StateFlow<Map<String, com.lastwave.app.data.download.DownloadProgress>> =
         downloadManager.downloads
 
+    init {
+        launchDownloadAction("sync downloads from storage") {
+            downloadManager.syncDownloadsFromStorage()
+        }
+    }
+
     private fun launchDownloadAction(action: String, block: suspend () -> Unit) =
         viewModelScope.launch {
             try {

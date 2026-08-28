@@ -213,14 +213,15 @@ class MusicPlayer @Inject constructor(
     }
 
     private val cacheDataSourceFactory: CacheDataSource.Factory by lazy {
-        val upstream = DefaultHttpDataSource.Factory()
+        val httpUpstream = DefaultHttpDataSource.Factory()
             .setUserAgent(YOUTUBE_WEB_USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(20_000)
             .setReadTimeoutMs(20_000)
+        val defaultDataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(appContext, httpUpstream)
         CacheDataSource.Factory()
             .setCache(mediaCache)
-            .setUpstreamDataSourceFactory(upstream)
+            .setUpstreamDataSourceFactory(defaultDataSourceFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 
@@ -259,6 +260,11 @@ class MusicPlayer @Inject constructor(
                 if (crossfadeEnabled && crossfadeDurationMs > 0L) {
                     player.volume = 0f
                 }
+                if (currentTrack.playbackUrl != null) {
+                    applicationScope.launch(Dispatchers.IO) {
+                        publishLocalTrackQuality(currentTrack)
+                    }
+                }
                 enrichUpcomingQueue(currentIndex)
                 extendDiscoverQueueIfNeeded(currentIndex)
                 val nextIndex = if (player.shuffleModeEnabled) {
@@ -278,6 +284,11 @@ class MusicPlayer @Inject constructor(
             val videoId = currentTrack?.videoId
             val failedIndex = player.currentMediaItemIndex
             val failedMediaId = player.currentMediaItem?.mediaId
+
+            if (currentTrack?.playbackUrl != null) {
+                _state.update { it.copy(error = error.message ?: "Local file playback error (${error.errorCodeName})", isBuffering = false) }
+                return
+            }
 
             // Invalidate stale cache on 403 or network failure
             if (!videoId.isNullOrBlank()) {
@@ -583,6 +594,11 @@ class MusicPlayer @Inject constructor(
                 isPlaying = true,
             )
             persistPlaybackSession()
+            if (track.playbackUrl != null) {
+                applicationScope.launch(Dispatchers.IO) {
+                    publishLocalTrackQuality(track)
+                }
+            }
             player.setMediaItem(track.toMediaItem())
             player.prepare()
             player.play()
@@ -1152,6 +1168,64 @@ class MusicPlayer @Inject constructor(
         }
     }
 
+    private fun publishLocalTrackQuality(track: PlayableTrack) {
+        val url = track.playbackUrl ?: return
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            if (url.startsWith("content://")) {
+                retriever.setDataSource(appContext, Uri.parse(url))
+            } else {
+                retriever.setDataSource(url.removePrefix("file://"))
+            }
+            val mime = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_MIMETYPE)?.lowercase().orEmpty()
+            val bitrateStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)
+            val bitrateKbps = bitrateStr?.toIntOrNull()?.let { it / 1000 }
+            val sampleRateStr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)
+            } else null
+            val sampleRateKHz = sampleRateStr?.toDoubleOrNull()?.let { it / 1000.0 }
+            val bitDepthStr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITS_PER_SAMPLE)
+            } else null
+            val bitDepth = bitDepthStr?.toIntOrNull()
+
+            val isFlac = mime.contains("flac") || url.endsWith(".flac", ignoreCase = true)
+            val isM4a = mime.contains("mp4") || mime.contains("m4a") || mime.contains("aac") || url.endsWith(".m4a", ignoreCase = true)
+            val isOpus = mime.contains("opus") || mime.contains("ogg") || url.endsWith(".opus", ignoreCase = true)
+            val isMp3 = mime.contains("mp3") || mime.contains("mpeg") || url.endsWith(".mp3", ignoreCase = true)
+
+            val codec = when {
+                isFlac && ((bitDepth ?: 0) > 16 || (sampleRateKHz ?: 0.0) > 48.0) -> "HI-RES FLAC"
+                isFlac -> "FLAC"
+                isM4a -> "AAC"
+                isOpus -> "OPUS"
+                isMp3 -> "MP3"
+                else -> "LOCAL AUDIO"
+            }
+
+            _state.update {
+                it.copy(
+                    audioCodec = codec,
+                    bitrateKbps = bitrateKbps,
+                    bitDepth = bitDepth ?: if (isFlac) 16 else null,
+                    samplingRateKHz = sampleRateKHz ?: if (isFlac) 44.1 else null,
+                    isQobuz = isFlac && (bitDepth ?: 0) > 16,
+                )
+            }
+        } catch (_: Exception) {
+            val isFlac = url.endsWith(".flac", ignoreCase = true)
+            _state.update {
+                it.copy(
+                    audioCodec = if (isFlac) "FLAC" else "AUDIO",
+                    bitDepth = if (isFlac) 16 else null,
+                    samplingRateKHz = if (isFlac) 44.1 else null,
+                )
+            }
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
     private fun ensureForegroundService() {
         val intent = Intent(appContext, MusicPlaybackService::class.java)
         // Background-start restrictions (Android 12+) can reject this when
@@ -1360,7 +1434,11 @@ class MusicPlayer @Inject constructor(
 
 private fun PlayableTrack.toMediaItem(): MediaItem {
     val playbackUri = if (playbackUrl?.isNotBlank() == true) {
-        Uri.parse(playbackUrl)
+        if (playbackUrl.startsWith("/")) {
+            Uri.fromFile(java.io.File(playbackUrl))
+        } else {
+            Uri.parse(playbackUrl)
+        }
     } else if (!videoId.isNullOrBlank()) {
         Uri.Builder().scheme("lastwave").authority("youtube").appendPath(videoId)
             .appendQueryParameter("title", title)
@@ -1372,8 +1450,13 @@ private fun PlayableTrack.toMediaItem(): MediaItem {
             .appendQueryParameter("artist", artist)
             .build()
     }
+    val mediaIdKey = when {
+        !playbackUrl.isNullOrBlank() -> "local:${playbackUrl}"
+        !videoId.isNullOrBlank() -> videoId
+        else -> "query:${artist.lowercase()}|${title.lowercase()}"
+    }
     return MediaItem.Builder()
-        .setMediaId(videoId ?: "query:${artist.lowercase()}|${title.lowercase()}")
+        .setMediaId(mediaIdKey)
         .setUri(playbackUri)
         .apply { playbackMimeType?.takeIf(String::isNotBlank)?.let(::setMimeType) }
         .setMediaMetadata(
@@ -1388,13 +1471,19 @@ private fun PlayableTrack.toMediaItem(): MediaItem {
         .build()
 }
 
-private fun MediaItem.toPlayableTrack(): PlayableTrack = PlayableTrack(
-    title = mediaMetadata.title?.toString().orEmpty().ifBlank { "Unknown track" },
-    artist = mediaMetadata.artist?.toString().orEmpty().ifBlank { "Unknown artist" },
-    album = mediaMetadata.albumTitle?.toString(),
-    artworkUrl = mediaMetadata.artworkUri?.toString(),
-    videoId = mediaId.takeUnless { it.startsWith("query:") },
-)
+private fun MediaItem.toPlayableTrack(): PlayableTrack {
+    val uriStr = localConfiguration?.uri?.toString()
+    val isLocal = uriStr?.startsWith("content://") == true || uriStr?.startsWith("file://") == true || mediaId.startsWith("local:")
+    return PlayableTrack(
+        title = mediaMetadata.title?.toString().orEmpty().ifBlank { "Unknown track" },
+        artist = mediaMetadata.artist?.toString().orEmpty().ifBlank { "Unknown artist" },
+        album = mediaMetadata.albumTitle?.toString(),
+        artworkUrl = mediaMetadata.artworkUri?.toString(),
+        videoId = mediaId.takeUnless { it.startsWith("query:") || it.startsWith("local:") },
+        playbackUrl = if (isLocal) uriStr else null,
+        playbackMimeType = localConfiguration?.mimeType,
+    )
+}
 
 fun GeneratedTrack.toPlayableTrack() = PlayableTrack(
     title = name,

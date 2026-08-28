@@ -206,7 +206,7 @@ fun DownloadsScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            "Tap the 3-dot menu on any song and select \"Download (Max Quality)\". Qobuz FLAC tracks and YouTube Opus audio are saved directly to your device's Music/LastWave folder with embedded metadata & synchronized LRCLIB lyrics.",
+                            "Tap the 3-dot menu on any song and select \"Download (Max Quality)\". Qobuz FLAC tracks and YouTube audio are saved directly to your device's Music/LastWave folder with embedded metadata & synchronized LRCLIB lyrics.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
