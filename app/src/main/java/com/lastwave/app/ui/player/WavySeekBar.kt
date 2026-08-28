@@ -79,6 +79,7 @@ fun WavySeekBar(
     modifier: Modifier = Modifier,
     isTranslucent: Boolean = false,
     trackKey: String? = null,
+    showTimeLabels: Boolean = true,
 ) {
     val interactionSource = remember(trackKey) { MutableInteractionSource() }
     val dragging by interactionSource.collectIsDraggedAsState()
@@ -389,25 +390,27 @@ fun WavySeekBar(
             )
         }
 
-        Spacer(Modifier.height(2.dp))
+        if (showTimeLabels) {
+            Spacer(Modifier.height(2.dp))
 
-        // Time labels
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = formatTime(shownMs),
-                style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
-                color = textColor,
-            )
-            Text(
-                text = "−${formatTime((boundedDurationMs - shownMs).coerceAtLeast(0))}",
-                style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
-                color = textColor,
-            )
+            // Time labels
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = formatTime(shownMs),
+                    style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
+                    color = textColor,
+                )
+                Text(
+                    text = "−${formatTime((boundedDurationMs - shownMs).coerceAtLeast(0))}",
+                    style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
+                    color = textColor,
+                )
+            }
         }
     }
 }

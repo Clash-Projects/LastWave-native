@@ -100,6 +100,7 @@ fun LyricsPanel(
     lyricsState: LyricsUiState,
     progressState: StateFlow<PlaybackProgressState>? = null,
     lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
+    wavySeekbarEnabled: Boolean = true,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -222,6 +223,7 @@ fun LyricsPanel(
             currentPositionMs = smoothedPositionMs,
             totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
             player = player,
+            wavySeekbarEnabled = wavySeekbarEnabled,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
@@ -791,6 +793,7 @@ private fun LyricsPlaybackControls(
     currentPositionMs: Long,
     totalDurationMs: Long,
     player: MusicPlayer,
+    wavySeekbarEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     // This Column performs layout only. It intentionally draws no container.
@@ -805,14 +808,27 @@ private fun LyricsPlaybackControls(
         val end = totalDurationMs.coerceAtLeast(1).toFloat()
         val shown = if (dragging) dragValue else currentPositionMs.coerceIn(0, totalDurationMs.coerceAtLeast(0)).toFloat()
 
-        PlayerProgressSlider(
-            value = shown.coerceIn(0f, end),
-            onValueChange = { dragging = true; dragValue = it },
-            onValueChangeFinished = { player.seekTo(dragValue.toLong()); dragging = false },
-            valueRange = 0f..end,
-            enabled = totalDurationMs > 0,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (wavySeekbarEnabled) {
+            WavySeekBar(
+                positionMs = currentPositionMs,
+                durationMs = totalDurationMs,
+                isPlaying = state.isPlaying,
+                onSeek = player::seekTo,
+                isTranslucent = false,
+                trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" },
+                showTimeLabels = false,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            PlayerProgressSlider(
+                value = shown.coerceIn(0f, end),
+                onValueChange = { dragging = true; dragValue = it },
+                onValueChangeFinished = { player.seekTo(dragValue.toLong()); dragging = false },
+                valueRange = 0f..end,
+                enabled = totalDurationMs > 0,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
         Row(
             modifier = Modifier
