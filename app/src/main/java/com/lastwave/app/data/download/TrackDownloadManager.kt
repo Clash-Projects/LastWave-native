@@ -102,6 +102,7 @@ class TrackDownloadManager @Inject constructor(
             context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         }.getOrNull()
     }
+    private val activeKeys = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val activeUris = ConcurrentHashMap<String, Uri>()
     private val activeFiles = ConcurrentHashMap<String, File>()
@@ -137,10 +138,11 @@ class TrackDownloadManager @Inject constructor(
     fun isDownloading(title: String, artist: String): Boolean {
         val key = makeDownloadKey(title, artist)
         val progress = _downloads.value[key]
-        return progress != null && !progress.isFinished && progress.error == null
+        return activeKeys.contains(key) || (progress != null && !progress.isFinished && progress.error == null)
     }
 
     fun cancelDownload(key: String) {
+        activeKeys.remove(key)
         val job = activeJobs.remove(key)
         job?.cancel()
 
@@ -164,7 +166,7 @@ class TrackDownloadManager @Inject constructor(
         year: String? = null,
     ) {
         val key = makeDownloadKey(title, artist)
-        if (activeJobs.containsKey(key)) return
+        if (!activeKeys.add(key)) return
 
         val job = applicationScope.launch(Dispatchers.IO) {
             val notifId = key.hashCode()
@@ -517,6 +519,7 @@ class TrackDownloadManager @Inject constructor(
                 )
                 showErrorNotification(notifId, title, artist, error.localizedMessage ?: "Failed")
             } finally {
+                activeKeys.remove(key)
                 activeJobs.remove(key)
                 activeUris.remove(key)
                 activeFiles.remove(key)
@@ -552,6 +555,24 @@ class TrackDownloadManager @Inject constructor(
                 mimeType.contains("ogg") || mimeType.contains("opus") -> "audio/ogg"
                 mimeType.contains("wav") -> "audio/x-wav"
                 else -> "audio/mp4"
+            }
+
+            // Remove any pre-existing entry with the same filename to avoid Android appending (1), (2), etc.
+            runCatching {
+                resolver.query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.Audio.Media._ID),
+                    "${MediaStore.Audio.Media.DISPLAY_NAME} = ?",
+                    arrayOf(filename),
+                    null,
+                )?.use { cursor ->
+                    val idCol = cursor.getColumnIndex(MediaStore.Audio.Media._ID)
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idCol)
+                        val oldUri = Uri.withAppendedPath(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id.toString())
+                        runCatching { resolver.delete(oldUri, null, null) }
+                    }
+                }
             }
 
             val audioContentValues = ContentValues().apply {
@@ -716,6 +737,25 @@ class TrackDownloadManager @Inject constructor(
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val resolver = context.contentResolver
+
+                // Remove pre-existing companion file with the same name to prevent (1).lrc duplicates
+                runCatching {
+                    resolver.query(
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        arrayOf(MediaStore.Downloads._ID),
+                        "${MediaStore.Downloads.DISPLAY_NAME} = ?",
+                        arrayOf(filename),
+                        null,
+                    )?.use { cursor ->
+                        val idCol = cursor.getColumnIndex(MediaStore.Downloads._ID)
+                        while (cursor.moveToNext()) {
+                            val id = cursor.getLong(idCol)
+                            val oldUri = Uri.withAppendedPath(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id.toString())
+                            runCatching { resolver.delete(oldUri, null, null) }
+                        }
+                    }
+                }
+
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, filename)
                     put(MediaStore.Downloads.MIME_TYPE, mimeType)
@@ -805,6 +845,7 @@ class TrackDownloadManager @Inject constructor(
         val existingEntities = downloadedTrackDao.getAllList().toMutableList()
         val existingPaths = existingEntities.map { it.filePath }.toMutableSet()
         val existingUris = existingEntities.mapNotNull { it.mediaStoreUri }.toMutableSet()
+        val existingKeys = existingEntities.map { makeDownloadKey(it.title, it.artist) }.toMutableSet()
 
         // 1. Scan Public Music/LastWave directory on device
         val musicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
@@ -828,6 +869,9 @@ class TrackDownloadManager @Inject constructor(
                         ?.ifBlank { null } ?: file.nameWithoutExtension.substringAfter(" - ").ifBlank { file.nameWithoutExtension }
                     val artist = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST)
                         ?.ifBlank { null } ?: file.nameWithoutExtension.substringBefore(" - ").ifBlank { "Unknown Artist" }
+                    val trackKey = makeDownloadKey(title, artist)
+                    if (trackKey in existingKeys) continue
+
                     val album = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM).orEmpty()
                     val durStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
                     val durMs = durStr?.toLongOrNull() ?: 0L
@@ -865,6 +909,7 @@ class TrackDownloadManager @Inject constructor(
                     )
                     downloadedTrackDao.insert(entity)
                     existingPaths.add(file.absolutePath)
+                    existingKeys.add(trackKey)
                 } catch (e: Exception) {
                     android.util.Log.e("TrackDownloadManager", "Failed to import file: ${file.name}", e)
                 } finally {
@@ -913,6 +958,9 @@ class TrackDownloadManager @Inject constructor(
 
                         val title = cursor.getString(titleCol) ?: "Unknown Track"
                         val artist = cursor.getString(artistCol) ?: "Unknown Artist"
+                        val trackKey = makeDownloadKey(title, artist)
+                        if (trackKey in existingKeys) continue
+
                         val album = cursor.getString(albumCol).orEmpty()
                         val durMs = cursor.getLong(durCol)
                         val size = cursor.getLong(sizeCol)
@@ -946,6 +994,7 @@ class TrackDownloadManager @Inject constructor(
                         )
                         downloadedTrackDao.insert(entity)
                         existingUris.add(uri.toString())
+                        existingKeys.add(trackKey)
                     }
                 }
             }
