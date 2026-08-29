@@ -406,7 +406,7 @@ fun PlayerHost(
                     onPrevious = viewModel.player::previous,
                     onNext = viewModel.player::next,
                     onClose = viewModel.player::stopAndClear,
-                    bottomPadding = if (hasBottomNavigation) 66.dp else 10.dp,
+                    bottomPadding = if (hasBottomNavigation) 58.dp else 10.dp,
                     edgeToEdge = !hasBottomNavigation,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
@@ -647,9 +647,9 @@ private fun MiniPlayer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Album art with equal space above, below, and on the left
-                Box(Modifier.size(58.dp)) {
+                Box(Modifier.size(64.dp)) {
                     Surface(
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(18.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         tonalElevation = 2.dp,
                         modifier = Modifier.fillMaxSize(),
@@ -657,7 +657,7 @@ private fun MiniPlayer(
                         PlayerArtwork(
                             track = track,
                             modifier = Modifier.fillMaxSize(),
-                            corner = 16.dp,
+                            corner = 18.dp,
                         )
                     }
                 }
@@ -681,7 +681,7 @@ private fun MiniPlayer(
                                 track.title,
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.SemiBold,
-                                    fontSize = androidx.compose.ui.unit.TextUnit(15f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                    fontSize = androidx.compose.ui.unit.TextUnit(15.5f, androidx.compose.ui.unit.TextUnitType.Sp),
                                 ),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -690,7 +690,7 @@ private fun MiniPlayer(
                             Text(
                                 track.artist,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    fontSize = androidx.compose.ui.unit.TextUnit(12.5f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                    fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp),
                                 ),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                 maxLines = 1,
@@ -707,13 +707,13 @@ private fun MiniPlayer(
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onToggleFavorite()
                                 },
-                                modifier = Modifier.size(42.dp),
+                                modifier = Modifier.size(44.dp),
                             ) {
                                 Icon(
                                     if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                                     contentDescription = "Favorite",
                                     tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                                    modifier = Modifier.size(22.dp),
+                                    modifier = Modifier.size(24.dp),
                                 )
                             }
 
@@ -722,17 +722,17 @@ private fun MiniPlayer(
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(44.dp),
+                                modifier = Modifier.size(48.dp),
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     if (state.isBuffering) {
                                         ExpressiveInlineLoadingIndicator(
-                                            size = 18.dp,
+                                            size = 20.dp,
                                             color = MaterialTheme.colorScheme.onPrimary,
                                             strokeWidth = 2.dp,
                                         )
                                     } else {
-                                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(24.dp))
+                                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(26.dp))
                                     }
                                 }
                             }

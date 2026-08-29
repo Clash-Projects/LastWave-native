@@ -270,7 +270,7 @@ private fun FloatingNavItem(
                 imageVector = icon,
                 contentDescription = label,
                 tint = contentColor,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
             )
             AnimatedVisibility(
                 visible = selected,
@@ -290,8 +290,8 @@ private fun FloatingNavItem(
                     Text(
                         text = label,
                         style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Medium,
-                            fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp),
+                            fontWeight = FontWeight.Normal,
+                            fontSize = androidx.compose.ui.unit.TextUnit(11f, androidx.compose.ui.unit.TextUnitType.Sp),
                         ),
                         color = contentColor,
                         maxLines = 1,

@@ -241,30 +241,28 @@ fun HomeScreen(
                 }
                 val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
                 val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
+                val quickTracks = remember(uiState.allTracks) {
+                    uiState.allTracks.distinctBy { "${it.name}|${it.artist}" }
+                }
 
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp)
-                        .clip(ListContainerShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainer),
+                LazyColumn(
+                    state = listState,
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 2.dp,
+                        bottom = FloatingNavDefaults.contentBottomPadding(),
+                    ),
+                    modifier = Modifier.fillMaxSize(),
                 ) {
-                    val quickTracks = remember(uiState.allTracks) {
-                        uiState.allTracks.distinctBy { "${it.name}|${it.artist}" }
-                    }
-
-                    LazyColumn(
-                        state = listState,
-                        contentPadding = PaddingValues(
-                            start = 8.dp,
-                            end = 8.dp,
-                            top = 8.dp,
-                            bottom = FloatingNavDefaults.contentBottomPadding(),
-                        ),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        if (quickTracks.isNotEmpty()) {
-                            item(key = "quick_play_grid", contentType = "quick_play") {
+                    if (quickTracks.isNotEmpty()) {
+                        item(key = "quick_play_container", contentType = "quick_play") {
+                            Surface(
+                                shape = RoundedCornerShape(22.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                tonalElevation = 1.dp,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
                                 QuickPlayGrid(
                                     tracks = quickTracks,
                                     onTrackClick = { track ->
@@ -279,46 +277,55 @@ fun HomeScreen(
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
                                 )
-                                Spacer(Modifier.height(14.dp))
                             }
+                            Spacer(Modifier.height(14.dp))
                         }
+                    }
 
-                        item(key = "list_header", contentType = "header") {
-                            Column(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
+                    item(key = "list_header", contentType = "header") {
+                        Surface(
+                            shape = if (rows.isEmpty()) RoundedCornerShape(22.dp) else RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            tonalElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 4.dp)) {
                                 MixHeader(
                                     sortMode = uiState.sortMode,
                                     onSortModeChange = viewModel::setSortMode,
                                 )
                             }
-                            Spacer(Modifier.height(4.dp))
                         }
+                    }
 
-                        itemsIndexed(
-                            rows,
-                            key = { _, row ->
-                                when (row) {
-                                    is HomeRow.DateHeader -> "date_${row.label}"
-                                    is HomeRow.Track -> if (row.track.isNowPlaying) {
-                                        "nowplaying_${row.track.key}"
-                                    } else {
-                                        "track_${row.track.key}_${row.track.timestampMillis}"
-                                    }
+                    itemsIndexed(
+                        rows,
+                        key = { _, row ->
+                            when (row) {
+                                is HomeRow.DateHeader -> "date_${row.label}"
+                                is HomeRow.Track -> if (row.track.isNowPlaying) {
+                                    "nowplaying_${row.track.key}"
+                                } else {
+                                    "track_${row.track.key}_${row.track.timestampMillis}"
                                 }
-                            },
-                            contentType = { _, row ->
-                                when (row) {
-                                    is HomeRow.DateHeader -> "date"
-                                    is HomeRow.Track -> "track"
-                                }
-                            },
-                        ) { rowIndex, row ->
-                            Box {
+                            }
+                        },
+                        contentType = { _, row ->
+                            when (row) {
+                                is HomeRow.DateHeader -> "date"
+                                is HomeRow.Track -> "track"
+                            }
+                        },
+                    ) { rowIndex, row ->
+                        Surface(
+                            shape = if (rowIndex == rows.lastIndex) RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp) else androidx.compose.ui.graphics.RectangleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            tonalElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Box(Modifier.padding(horizontal = 8.dp)) {
                                 when (row) {
                                     is HomeRow.DateHeader -> DateHeaderRow(row.label)
                                     is HomeRow.Track -> TrackRow(
@@ -328,9 +335,10 @@ fun HomeScreen(
                                             musicPlayer.playQueue(
                                                 tracks = playbackQueue,
                                                 startIndex = playbackIndexByRow[rowIndex],
-                                                sourceLabel = "Home",
+                                                sourceLabel = "Recent Scrobbles",
                                             )
                                         },
+                                        onMenuClick = { menuTrack = row.track },
                                         onLongClick = {
                                             addToPlaylist(
                                                 com.lastwave.app.playback.PlayableTrack(
@@ -340,16 +348,22 @@ fun HomeScreen(
                                                 ),
                                             )
                                         },
-                                        onMenuClick = { menuTrack = row.track },
                                     )
                                 }
                             }
                         }
+                    }
 
-                        if (rows.isEmpty()) {
-                            item(key = "empty", contentType = "empty") {
+                    if (rows.isEmpty()) {
+                        item(key = "empty", contentType = "empty") {
+                            Surface(
+                                shape = RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                tonalElevation = 1.dp,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
                                 Box(
-                                    Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text("No tracks yet", color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -220,7 +220,9 @@ class MusicPlayer @Inject constructor(
     private val mediaCache: Cache by lazy {
         val cacheDir = java.io.File(appContext.cacheDir, "media_stream_cache")
         val dbProvider = StandaloneDatabaseProvider(appContext)
-        SimpleCache(cacheDir, cacheEvictor, dbProvider)
+        SimpleCache(cacheDir, cacheEvictor, dbProvider).also {
+            android.util.Log.i("SongCache", "Stream cache active at ${cacheDir.absolutePath} (cached: ${it.cacheSpace / 1024} KB)")
+        }
     }
 
     private val cacheDataSourceFactory: CacheDataSource.Factory by lazy {
@@ -236,10 +238,10 @@ class MusicPlayer @Inject constructor(
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
             .setEventListener(object : CacheDataSource.EventListener {
                 override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) {
-                    android.util.Log.d("SongCache", "Read $cachedBytesRead bytes from stream cache (total cached: ${cacheSizeBytes / 1024} KB)")
+                    android.util.Log.i("SongCache", "Read $cachedBytesRead bytes from stream cache (total cached: ${cacheSizeBytes / 1024} KB)")
                 }
                 override fun onCacheIgnored(reason: Int) {
-                    android.util.Log.d("SongCache", "Cache bypassed/ignored (reason: $reason)")
+                    android.util.Log.i("SongCache", "Cache bypassed/ignored (reason: $reason)")
                 }
             })
     }
