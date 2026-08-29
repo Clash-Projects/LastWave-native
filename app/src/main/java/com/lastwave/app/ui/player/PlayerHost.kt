@@ -646,23 +646,23 @@ private fun MiniPlayer(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 4.dp),
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(42.dp)) {
+                    Box(Modifier.size(44.dp)) {
                         Surface(
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHighest,
                             tonalElevation = 2.dp,
                             modifier = Modifier.fillMaxSize(),
                         ) {
-                            PlayerArtwork(track, Modifier.fillMaxSize(), 10.dp)
+                            PlayerArtwork(track, Modifier.fillMaxSize(), 12.dp)
                         }
                     }
                     Column(
                         Modifier
                             .weight(1f)
-                            .padding(start = 12.dp, end = 8.dp),
+                            .padding(start = 12.dp, end = 10.dp),
                     ) {
                         Text(
                             track.title,
@@ -675,7 +675,7 @@ private fun MiniPlayer(
                         Text(
                             track.artist,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.88f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -683,7 +683,7 @@ private fun MiniPlayer(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         IconButton(
                             onClick = {
@@ -705,17 +705,17 @@ private fun MiniPlayer(
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primary,
                             contentColor = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(40.dp),
+                            modifier = Modifier.size(38.dp),
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 if (state.isBuffering) {
                                     ExpressiveInlineLoadingIndicator(
-                                        size = 18.dp,
+                                        size = 16.dp,
                                         color = MaterialTheme.colorScheme.onPrimary,
                                         strokeWidth = 2.dp,
                                     )
                                 } else {
-                                    AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(22.dp))
+                                    AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(20.dp))
                                 }
                             }
                         }
@@ -725,7 +725,10 @@ private fun MiniPlayer(
                     progressState = progressState,
                     isPlaying = state.isPlaying,
                     onSeek = onSeek,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 0.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp)
+                        .padding(bottom = 3.dp),
                 )
             }
         }

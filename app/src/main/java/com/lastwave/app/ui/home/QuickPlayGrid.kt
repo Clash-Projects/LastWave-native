@@ -31,14 +31,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.dp
 import com.lastwave.app.data.repository.HomeTrack
 import com.lastwave.app.ui.common.ArtworkImage
 
 /**
- * 3x3 Horizontally Scrollable Quick Play Grid.
- * Displays 3 rows x 3 columns on screen, and scrolls horizontally for more songs.
+ * 3x3 Symmetrical, Horizontally Scrollable Quick Play Grid.
+ * Displays 3 rows x 3 columns with square album art, centered title/artist,
+ * and a subtle play overlay.
  */
 @Composable
 fun QuickPlayGrid(
@@ -69,16 +73,16 @@ fun QuickPlayGrid(
             rows = GridCells.Fixed(3),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(330.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+                .height(415.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 2.dp),
         ) {
             items(tracks, key = { "${it.name}|${it.artist}" }) { track ->
-                QuickPlayCompactTile(
+                QuickPlaySymmetricalTile(
                     track = track,
                     onClick = { onTrackClick(track) },
-                    modifier = Modifier.width(102.dp),
+                    modifier = Modifier.width(106.dp),
                 )
             }
         }
@@ -86,14 +90,14 @@ fun QuickPlayGrid(
 }
 
 @Composable
-private fun QuickPlayCompactTile(
+private fun QuickPlaySymmetricalTile(
     track: HomeTrack,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
         tonalElevation = 0.dp,
         modifier = modifier,
@@ -101,13 +105,15 @@ private fun QuickPlayCompactTile(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(5.dp),
+                .padding(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // Perfect 1:1 Square Artwork Container
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .aspectRatio(1f)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)),
             ) {
                 ArtworkImage(
@@ -117,49 +123,55 @@ private fun QuickPlayCompactTile(
                     fallbackIcon = Icons.Filled.MusicNote,
                     modifier = Modifier.fillMaxSize(),
                 )
-                // Subtle mini play overlay badge
+                // Symmetrical Play Badge on Bottom Right
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(3.dp)
-                        .size(18.dp),
+                        .padding(4.dp)
+                        .size(22.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Filled.PlayArrow,
                             contentDescription = "Play",
                             tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(11.dp),
+                            modifier = Modifier.size(13.dp),
                         )
                     }
                 }
             }
 
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(5.dp))
 
             Text(
                 text = track.name,
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = androidx.compose.ui.unit.TextUnit(11f, androidx.compose.ui.unit.TextUnitType.Sp),
-                    lineHeight = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp),
+                    fontSize = TextUnit(11.5f, TextUnitType.Sp),
+                    lineHeight = TextUnit(13.5f, TextUnitType.Sp),
                 ),
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
+
+            Spacer(Modifier.height(1.dp))
 
             Text(
                 text = track.artist,
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = androidx.compose.ui.unit.TextUnit(10f, androidx.compose.ui.unit.TextUnitType.Sp),
-                    lineHeight = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp),
+                    fontSize = TextUnit(10f, TextUnitType.Sp),
+                    lineHeight = TextUnit(12f, TextUnitType.Sp),
                 ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
