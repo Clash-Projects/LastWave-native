@@ -211,18 +211,22 @@ private fun FloatingNavBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 tabs.forEachIndexed { index, tab ->
                     val onClick = remember(index) { { onSelect(index) } }
-                    FloatingNavItem(
-                        label = tab.label,
-                        icon = tab.icon(),
-                        selected = selectedIndex == index,
-                        onClick = onClick,
-                    )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        FloatingNavItem(
+                            label = tab.label,
+                            icon = tab.icon(),
+                            selected = selectedIndex == index,
+                            onClick = onClick,
+                        )
+                    }
                 }
             }
         }

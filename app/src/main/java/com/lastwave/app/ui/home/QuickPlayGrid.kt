@@ -41,8 +41,8 @@ import com.lastwave.app.ui.common.ArtworkImage
 
 /**
  * 3x3 Symmetrical, Horizontally Scrollable Quick Play Grid.
- * Displays 3 rows x 3 columns with large square album art, single-line thin song title,
- * and a subtle play badge overlay.
+ * Displays 3 rows x 3 columns on screen with prominent square album art,
+ * fully visible song titles, and sleek compact play icons.
  */
 @Composable
 fun QuickPlayGrid(
@@ -73,16 +73,16 @@ fun QuickPlayGrid(
             rows = GridCells.Fixed(3),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(365.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+                .height(390.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
             contentPadding = PaddingValues(horizontal = 2.dp),
         ) {
             items(tracks, key = { "${it.name}|${it.artist}" }) { track ->
                 QuickPlaySymmetricalTile(
                     track = track,
                     onClick = { onTrackClick(track) },
-                    modifier = Modifier.width(104.dp),
+                    modifier = Modifier.width(98.dp),
                 )
             }
         }
@@ -97,7 +97,7 @@ private fun QuickPlaySymmetricalTile(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
         tonalElevation = 0.dp,
         modifier = modifier,
@@ -108,12 +108,12 @@ private fun QuickPlaySymmetricalTile(
                 .padding(4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Large Prominent 1:1 Square Artwork Container
+            // Square Artwork Container
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(8.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)),
             ) {
                 ArtworkImage(
@@ -129,15 +129,15 @@ private fun QuickPlaySymmetricalTile(
                     color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(3.dp)
-                        .size(18.dp),
+                        .padding(2.5.dp)
+                        .size(16.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Filled.PlayArrow,
                             contentDescription = "Play",
                             tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(10.dp),
+                            modifier = Modifier.size(9.dp),
                         )
                     }
                 }
@@ -145,15 +145,15 @@ private fun QuickPlaySymmetricalTile(
 
             Spacer(Modifier.height(3.dp))
 
-            // Thin, small, single-line title only (no artist)
+            // Clearly visible song title
             Text(
                 text = track.name,
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Normal,
-                    fontSize = TextUnit(8.5f, TextUnitType.Sp),
-                    lineHeight = TextUnit(10.5f, TextUnitType.Sp),
+                    fontWeight = FontWeight.Medium,
+                    fontSize = TextUnit(9.5f, TextUnitType.Sp),
+                    lineHeight = TextUnit(11.5f, TextUnitType.Sp),
                 ),
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
