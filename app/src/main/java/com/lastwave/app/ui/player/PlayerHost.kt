@@ -643,10 +643,10 @@ private fun MiniPlayer(
                     Modifier
                 })
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Album art with equal space above, below, and on the left
+                // Album art with equal space on left and top/bottom
                 Box(Modifier.size(52.dp)) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -662,83 +662,33 @@ private fun MiniPlayer(
                     }
                 }
 
-                // Track Info & Controls + Seekbar starting after album art
+                // Middle: Track Info + Seekbar below
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(start = 10.dp, end = 2.dp),
+                        .padding(horizontal = 10.dp),
+                    verticalArrangement = Arrangement.Center,
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 4.dp),
-                        ) {
-                            Text(
-                                track.title,
-                                style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.Normal,
-                                    fontSize = androidx.compose.ui.unit.TextUnit(12.5f, androidx.compose.ui.unit.TextUnitType.Sp),
-                                ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Spacer(Modifier.height(1.dp))
-                            Text(
-                                track.artist,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontWeight = FontWeight.Light,
-                                    fontSize = androidx.compose.ui.unit.TextUnit(10.5f, androidx.compose.ui.unit.TextUnitType.Sp),
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onToggleFavorite()
-                                },
-                                modifier = Modifier.size(36.dp),
-                            ) {
-                                Icon(
-                                    if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                                    contentDescription = "Favorite",
-                                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-
-                            Surface(
-                                onClick = onToggle,
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.primary,
-                                contentColor = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(38.dp),
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    if (state.isBuffering) {
-                                        ExpressiveInlineLoadingIndicator(
-                                            size = 16.dp,
-                                            color = MaterialTheme.colorScheme.onPrimary,
-                                            strokeWidth = 2.dp,
-                                        )
-                                    } else {
-                                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(20.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    Text(
+                        track.title,
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.Normal,
+                            fontSize = androidx.compose.ui.unit.TextUnit(12.5f, androidx.compose.ui.unit.TextUnitType.Sp),
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(1.dp))
+                    Text(
+                        track.artist,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontWeight = FontWeight.Light,
+                            fontSize = androidx.compose.ui.unit.TextUnit(10.5f, androidx.compose.ui.unit.TextUnitType.Sp),
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
 
                     // Seekbar starts after album art
                     MiniWavyProgress(
@@ -747,8 +697,49 @@ private fun MiniPlayer(
                         onSeek = onSeek,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 2.dp),
+                            .padding(top = 4.dp),
                     )
+                }
+
+                // Right controls: Heart + Play button aligned vertically with Album Art
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    IconButton(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggleFavorite()
+                        },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = "Favorite",
+                            tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+
+                    Surface(
+                        onClick = onToggle,
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(42.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (state.isBuffering) {
+                                ExpressiveInlineLoadingIndicator(
+                                    size = 18.dp,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(22.dp))
+                            }
+                        }
+                    }
                 }
             }
         }
