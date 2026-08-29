@@ -99,14 +99,14 @@ class QobuzMusicApi @Inject constructor(
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
-
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
     }
 
     companion object {
-        const val BACKEND_BASE_URL = "https://qobuz-backend.clashgram.workers.dev"
+        val BACKEND_BASE_URL: String
+            get() = com.lastwave.app.BuildConfig.QOBUZ_BACKEND_URL
 
         val BACKEND_API_KEY: String
             get() = com.lastwave.app.BuildConfig.QOBUZ_API_KEY

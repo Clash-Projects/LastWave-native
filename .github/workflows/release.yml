@@ -44,6 +44,7 @@ jobs:
 
       - name: Build Release APKs (compressed + raw)
         env:
+          QOBUZ_BACKEND_URL: ${{ secrets.QOBUZ_BACKEND_URL }}
           QOBUZ_API_KEY: ${{ secrets.QOBUZ_API_KEY }}
           LYRICS_API_KEY: ${{ secrets.LYRICS_API_KEY }}
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}

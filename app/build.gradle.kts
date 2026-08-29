@@ -50,6 +50,9 @@ android {
         versionCode = 13
         versionName = "3.3.1"
 
+        val qobuzBackendUrl = resolveSecret("QOBUZ_BACKEND_URL", "QOBUZ_BASE_URL", "BACKEND_BASE_URL")
+        buildConfigField("String", "QOBUZ_BACKEND_URL", "\"$qobuzBackendUrl\"")
+
         val qobuzApiKey = resolveSecret("QOBUZ_API_KEY", "QOBUZ_AUTH_KEY", "API_AUTH_KEY")
         buildConfigField("String", "QOBUZ_API_KEY", "\"$qobuzApiKey\"")
 
