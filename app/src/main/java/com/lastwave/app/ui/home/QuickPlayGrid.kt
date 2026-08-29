@@ -173,44 +173,21 @@ private fun QuickPlaySymmetricalTile(
                 ),
         )
 
-        // Fused song title & sleek play badge directly on top of the gradient
-        Row(
+        // Fused song title directly on top of the gradient
+        Text(
+            text = track.name,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Medium,
+                fontSize = TextUnit(9.5f, TextUnitType.Sp),
+                lineHeight = TextUnit(11.5f, TextUnitType.Sp),
+            ),
+            color = Color.White,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = 6.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = track.name,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Medium,
-                    fontSize = TextUnit(9.5f, TextUnitType.Sp),
-                    lineHeight = TextUnit(11.5f, TextUnitType.Sp),
-                ),
-                color = Color.White,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-
-            Spacer(Modifier.width(4.dp))
-
-            Surface(
-                shape = CircleShape,
-                color = Color.White.copy(alpha = 0.92f),
-                modifier = Modifier.size(15.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Filled.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color.Black,
-                        modifier = Modifier.size(8.5.dp),
-                    )
-                }
-            }
-        }
+        )
     }
 }
