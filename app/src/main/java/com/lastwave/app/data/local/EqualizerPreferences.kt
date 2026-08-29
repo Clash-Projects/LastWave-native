@@ -14,6 +14,7 @@ import javax.inject.Singleton
  *  band sliders map onto. Low end is bass body, mid range carries vocals,
  *  the top end is air and sparkle. */
 val EQ_BAND_FREQS_HZ = intArrayOf(25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000, 16000)
+const val EQ_MAX_GAIN_DB = 8f
 
 /** Compact frequency label under each band slider ("63", "1K", "16K"...). */
 fun eqBandLabel(hz: Int): String = if (hz >= 1000) "${hz / 1000}K" else "$hz"
@@ -43,9 +44,9 @@ object EqualizerPresets {
     val STUDIO_MASTER = EqPreset(
         "Studio Master",
         listOf(
-            1.5f, 1.2f, 0.8f, 0.3f, -0.2f,
-            -0.8f, -0.5f, 0.0f, 0.6f, 1.2f,
-            1.8f, 2.2f, 2.6f, 3.2f, 3.5f,
+            2.6f, 2.8f, 2.2f, 0.6f, -1.8f,
+            -2.6f, -1.2f, 0.0f, 1.2f, 2.4f,
+            3.6f, 4.0f, 4.2f, 4.5f, 4.8f,
         ),
     )
 
@@ -89,7 +90,7 @@ class EqualizerPreferences @Inject constructor(
         .map { p ->
             val storedGains = p.readSafely(Keys.GAINS_DB)?.split(',')?.mapNotNull(String::toFloatOrNull)
                 ?.takeIf { it.size == EQ_BAND_FREQS_HZ.size }
-                ?.map { gain -> if (gain.isFinite()) gain.coerceIn(-8f, 8f) else 0f }
+                ?.map { gain -> if (gain.isFinite()) gain.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f }
             // The stored name is trusted as-is: every writer of GAINS_DB also
             // updates PRESET_NAME (Custom on manual band edits), so the pair can't
             // drift apart. Unknown names fall back to Default.
@@ -126,7 +127,8 @@ class EqualizerPreferences @Inject constructor(
             val current = it.readSafely(Keys.GAINS_DB)?.split(',')?.mapNotNull { v -> v.toFloatOrNull() }
                 ?.takeIf { v -> v.size == EQ_BAND_FREQS_HZ.size }
                 ?: EqualizerPresets.FLAT.gainsDb
-            val next = current.toMutableList().also { list -> list[bandIndex] = gainDb }
+            val safeGain = if (gainDb.isFinite()) gainDb.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f
+            val next = current.toMutableList().also { list -> list[bandIndex] = safeGain }
             it[Keys.PRESET_NAME] = EqualizerPresets.CUSTOM_NAME
             it[Keys.GAINS_DB] = encodeGains(next)
         }
@@ -138,6 +140,6 @@ class EqualizerPreferences @Inject constructor(
 
     private fun encodeGains(gains: List<Float>): String =
         gains.joinToString(",") { gain ->
-            "%.1f".format(if (gain.isFinite()) gain.coerceIn(-8f, 8f) else 0f)
+            "%.1f".format(if (gain.isFinite()) gain.coerceIn(-EQ_MAX_GAIN_DB, EQ_MAX_GAIN_DB) else 0f)
         }
 }

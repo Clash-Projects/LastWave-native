@@ -1,0 +1,106 @@
+name: Publish Selected Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Git Tag (e.g., 3.3.1)'
+        required: true
+        default: '3.3.1'
+      release_name:
+        description: 'Release Title (e.g., LastWave 3.3.1)'
+        required: true
+        default: 'LastWave 3.3.1'
+      release_notes:
+        description: 'Changelog / Release Notes'
+        required: false
+        default: ''
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag_name }}
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant Gradle execute permission
+        run: chmod +x gradlew
+
+      - name: Build Release APKs (compressed + raw)
+        env:
+          QOBUZ_API_KEY: ${{ secrets.QOBUZ_API_KEY }}
+          LYRICS_API_KEY: ${{ secrets.LYRICS_API_KEY }}
+        run: ./gradlew assembleRelease assembleRawRelease --stacktrace
+
+      - name: Sign Release APK with Custom Key (Optional)
+        if: env.SIGNING_KEY != ''
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: "34.0.0"
+
+      - name: Sign Raw APK with Custom Key (Optional)
+        if: env.SIGNING_KEY != ''
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app_raw
+        with:
+          releaseDirectory: app/build/outputs/apk/rawRelease
+          signingKeyBase64: ${{ secrets.SIGNING_KEY }}
+          alias: ${{ secrets.ALIAS }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: "34.0.0"
+
+      - name: Prepare Final APKs
+        id: prep_apk
+        run: |
+          mkdir -p final_apk
+          TAG="${{ inputs.tag_name }}"
+          # Compressed release (R8 + ProGuard + shrinkResources)
+          if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
+            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v${TAG}-release.apk
+          else
+            cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v${TAG}-release.apk
+          fi
+          # Raw release (no minify, no shrink, no ProGuard)
+          if [ -f "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" ]; then
+            cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/LastWave-v${TAG}-raw.apk
+          else
+            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/LastWave-v${TAG}-raw.apk
+          fi
+          ls -lh final_apk/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          name: ${{ inputs.release_name }}
+          body: ${{ inputs.release_notes }}
+          files: final_apk/*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

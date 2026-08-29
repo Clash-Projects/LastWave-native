@@ -1,5 +1,6 @@
 package com.lastwave.app.data.qobuz
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -8,6 +9,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -115,8 +117,36 @@ class QobuzMusicApi @Inject constructor(
         const val QUALITY_CD_LOSSLESS = 6 // 16-bit / 44.1 kHz FLAC
         const val QUALITY_MP3_320 = 5     // 320 kbps MP3
 
-        val EXCLUDED_VARIANTS = listOf(
-            "live", "acoustic", "karaoke", "instrumental", "tribute", "cover", "remix", "demo", "slowed", "reverb", "sped up", "nightcore"
+        private const val TAG = "QobuzMusicApi"
+        private const val MAX_DURATION_DIFFERENCE_SECONDS = 8
+        private val DIACRITICS = Regex("\\p{M}+")
+        private val NON_ALPHANUMERIC = Regex("[^a-z0-9]+")
+        private val MULTI_SPACE = Regex("\\s+")
+        private val FEATURING_CLAUSE = Regex("""(?i)(?:\s*[\[(])?\s*(feat\.?|ft\.?|featuring)\s+.*$""")
+        private val BRACKETED_DISPLAY_NOISE = Regex(
+            """(?i)[\[(]\s*(?:official\s+)?(?:music\s+)?(?:audio|video|lyrics?|lyric\s+video|visualizer|hd|4k)\s*(?:\]|\))""",
+        )
+        private val TRAILING_DISPLAY_NOISE = Regex("""(?i)\s*[-–—]\s*(?:official\s+)?(?:music\s+)?(?:audio|video|lyrics?|visualizer)\s*$""")
+        private val ARTIST_NOISE_WORDS = setOf("the", "and", "feat", "ft", "featuring", "with", "x")
+        private val PERFORMING_ROLE_WORDS = setOf(
+            "mainartist", "featuredartist", "performer", "vocal", "vocals", "vocalist", "singer",
+        )
+        private val IDENTITY_VARIANT_PATTERNS = listOf(
+            "live" to Regex("\\blive\\b"),
+            "acoustic" to Regex("\\bacoustic\\b"),
+            "karaoke" to Regex("\\bkaraoke\\b"),
+            "instrumental" to Regex("\\binstrumental\\b"),
+            "tribute" to Regex("\\btribute\\b"),
+            "cover" to Regex("\\bcover\\b"),
+            "remix" to Regex("\\bremix(?:ed)?\\b"),
+            "mashup" to Regex("""\bmash[ -]?up\b|\b[a-z0-9]+\s+x\s+[a-z0-9]+\b"""),
+            "demo" to Regex("\\bdemo\\b"),
+            "slowed" to Regex("\\bslowed\\b"),
+            "reverb" to Regex("\\breverb\\b"),
+            "sped-up" to Regex("\\bsped up\\b"),
+            "nightcore" to Regex("\\bnightcore\\b"),
+            "radio-edit" to Regex("\\bradio edit\\b"),
+            "extended" to Regex("\\bextended(?: version| mix)?\\b"),
         )
     }
 
@@ -128,13 +158,19 @@ class QobuzMusicApi @Inject constructor(
         title: String,
         artist: String,
         expectedDurationSeconds: Int? = null,
+        expectedAlbum: String? = null,
         preferredQuality: Int = QUALITY_MAX_HI_RES,
     ): QobuzAudioStream? = withContext(Dispatchers.IO) {
         if (title.isBlank() || artist.isBlank()) return@withContext null
 
         try {
             // 1. Search Qobuz catalog via backend
-            val candidate = findBestVerifiedMatch(title, artist, expectedDurationSeconds) ?: return@withContext null
+            val candidate = findBestVerifiedMatch(
+                title = title,
+                artist = artist,
+                expectedDurationSeconds = expectedDurationSeconds,
+                expectedAlbum = expectedAlbum,
+            ) ?: return@withContext null
 
             // 2. Fetch direct CDN streaming URL
             val urlBuilder = "$BACKEND_BASE_URL/api/track/${candidate.id}/url".toHttpUrlOrNull()?.newBuilder()
@@ -142,16 +178,20 @@ class QobuzMusicApi @Inject constructor(
             urlBuilder.addQueryParameter("quality", preferredQuality.toString())
             urlBuilder.addQueryParameter("fallback", "true")
 
-            val request = Request.Builder()
-                .url(urlBuilder.build())
-                .addHeader("X-API-Key", BACKEND_API_KEY)
-                .get()
-                .build()
+            val requestBuilder = Request.Builder().url(urlBuilder.build()).get()
+            if (BACKEND_API_KEY.isNotBlank()) requestBuilder.addHeader("X-API-Key", BACKEND_API_KEY)
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return@withContext null
+            client.newCall(requestBuilder.build()).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "Qobuz stream request failed with HTTP ${response.code}")
+                    return@withContext null
+                }
                 val body = response.body?.string() ?: return@withContext null
                 val parsed = json.decodeFromString<QobuzTrackUrlResponse>(body)
+                if (!parsed.success) {
+                    Log.w(TAG, "Qobuz stream response rejected: ${parsed.error.orEmpty()}")
+                    return@withContext null
+                }
                 val data = parsed.data ?: return@withContext null
                 val streamUrl = data.url ?: return@withContext null
 
@@ -174,7 +214,7 @@ class QobuzMusicApi @Inject constructor(
                 )
             }
         } catch (e: Exception) {
-            android.util.Log.d("QobuzMusicApi", "Qobuz resolution failed gracefully: ${e.message}")
+            Log.d(TAG, "Qobuz resolution failed gracefully: ${e.message}")
             null
         }
     }
@@ -183,108 +223,164 @@ class QobuzMusicApi @Inject constructor(
         title: String,
         artist: String,
         expectedDurationSeconds: Int?,
+        expectedAlbum: String?,
     ): QobuzTrackItem? {
-        val query = "$artist $title".trim()
-        val urlBuilder = "$BACKEND_BASE_URL/api/search".toHttpUrlOrNull()?.newBuilder() ?: return null
-        urlBuilder.addQueryParameter("q", query)
-        urlBuilder.addQueryParameter("type", "track")
-        urlBuilder.addQueryParameter("limit", "10")
+        val cleanTitle = cleanForSearch(title)
+        val cleanArtist = cleanForSearch(artist)
 
-        val request = Request.Builder()
-            .url(urlBuilder.build())
-            .addHeader("X-API-Key", BACKEND_API_KEY)
-            .get()
-            .build()
+        // Qobuz search ranking varies by catalog/locale. Try precise metadata
+        // first, then progressively broader queries, but never relax identity
+        // verification for the returned track.
+        val queries = listOfNotNull(
+            "$cleanTitle $cleanArtist".trim().takeIf { it.isNotBlank() },
+            "$cleanArtist $cleanTitle".trim().takeIf { it.isNotBlank() },
+            cleanTitle.takeIf { it.isNotBlank() },
+            title.trim().takeIf { it.isNotBlank() },
+        ).distinct()
 
-        val items = try {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val body = response.body?.string() ?: return null
-                val searchRes = json.decodeFromString<QobuzSearchResponse>(body)
-                searchRes.results?.tracks?.items.orEmpty()
-            }
-        } catch (e: Exception) {
-            return null
-        }
+        for (query in queries) {
+            val urlBuilder = "$BACKEND_BASE_URL/api/search".toHttpUrlOrNull()?.newBuilder() ?: continue
+            urlBuilder.addQueryParameter("q", query)
+            urlBuilder.addQueryParameter("type", "track")
+            urlBuilder.addQueryParameter("limit", "15")
 
-        if (items.isEmpty()) return null
-
-        val rawTargetTitle = title.lowercase(Locale.ROOT)
-        val normTargetTitle = normalizeString(title)
-        val normTargetArtist = normalizeString(artist)
-
-        for (item in items) {
-            val rawCandidateTitle = "${item.title} ${item.version.orEmpty()}".lowercase(Locale.ROOT)
-            val itemTitle = normalizeString(item.title)
-            val itemArtist = normalizeString(item.performer?.name ?: item.album?.artist?.name.orEmpty())
-
-            // Anti-mismatch check: prevent live, acoustic, karaoke, cover, remix, instrumental if not requested
-            val hasUnrequestedVariant = EXCLUDED_VARIANTS.any { variant ->
-                rawCandidateTitle.contains(variant) && !rawTargetTitle.contains(variant)
-            }
-            if (hasUnrequestedVariant) continue
-
-            // Strict title verification
-            val titleMatches = isTitleMatch(normTargetTitle, itemTitle)
-            if (!titleMatches) continue
-
-            // Strict artist verification
-            val artistMatches = isArtistMatch(normTargetArtist, itemArtist, item.performers)
-            if (!artistMatches) continue
-
-            // Optional duration verification if expected duration is known
-            if (expectedDurationSeconds != null && expectedDurationSeconds > 0 && item.duration > 0) {
-                val diff = kotlin.math.abs(item.duration - expectedDurationSeconds)
-                // Allow max 8 seconds difference for radio edits / intro silence
-                if (diff > 8) continue
+            val reqBuilder = Request.Builder().url(urlBuilder.build()).get()
+            if (BACKEND_API_KEY.isNotBlank()) {
+                reqBuilder.addHeader("X-API-Key", BACKEND_API_KEY)
             }
 
-            return item
+            val items = try {
+                client.newCall(reqBuilder.build()).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.w(TAG, "Qobuz search failed with HTTP ${response.code}")
+                        return@use emptyList<QobuzTrackItem>()
+                    }
+                    val body = response.body?.string() ?: return@use emptyList<QobuzTrackItem>()
+                    val searchRes = json.decodeFromString<QobuzSearchResponse>(body)
+                    if (searchRes.success) searchRes.results?.tracks?.items.orEmpty() else emptyList()
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "Qobuz search failed gracefully: ${e.message}")
+                emptyList()
+            }
+
+            if (items.isEmpty()) continue
+
+            items.asSequence()
+                .mapNotNull { item ->
+                    verifiedMatchScore(
+                        item = item,
+                        title = title,
+                        artist = artist,
+                        expectedDurationSeconds = expectedDurationSeconds,
+                        expectedAlbum = expectedAlbum,
+                    )?.let { score -> item to score }
+                }
+                .maxByOrNull { it.second }
+                ?.first
+                ?.let { return it }
         }
 
         return null
     }
 
-    private fun normalizeString(raw: String): String {
-        return raw.lowercase(Locale.ROOT)
-            .replace(Regex("""\((feat\.|ft\.|featuring|remastered|remaster|deluxe|version|edit|bonus track|official|audio|video|explicit)[^)]*\)"""), "")
-            .replace(Regex("""\[(feat\.|ft\.|featuring|remastered|remaster|deluxe|version|edit|bonus track|official|audio|video|explicit)[^\]]*]"""), "")
-            .replace(Regex("""[-–—/].*"""), "") // Strip suffixes like "- Remastered 2011"
-            .replace(Regex("""[^a-z0-9\s]"""), " ")
+    private fun verifiedMatchScore(
+        item: QobuzTrackItem,
+        title: String,
+        artist: String,
+        expectedDurationSeconds: Int?,
+        expectedAlbum: String?,
+    ): Int? {
+        val targetTitle = normalizeTitle(title, artist)
+        val candidateTitle = normalizeTitle(item.title, artist)
+        if (targetTitle.isBlank() || targetTitle != candidateTitle) return null
+
+        val targetVariants = identityVariants(title, artist)
+        val candidateVariants = identityVariants("${item.title} ${item.version.orEmpty()}", artist)
+        if (targetVariants != candidateVariants) return null
+
+        val performer = item.performer?.name.orEmpty()
+        val albumArtist = item.album?.artist?.name.orEmpty()
+        if (!isVerifiedArtistMatch(artist, performer, albumArtist, item.performers)) return null
+
+        val durationDifference = if (expectedDurationSeconds != null && expectedDurationSeconds > 0) {
+            if (item.duration <= 0) return null
+            kotlin.math.abs(item.duration - expectedDurationSeconds).also { if (it > MAX_DURATION_DIFFERENCE_SECONDS) return null }
+        } else null
+
+        var score = 1_000
+        val normalizedArtist = normalizeText(artist)
+        if (listOf(performer, albumArtist).any { normalizeText(it) == normalizedArtist }) score += 300
+        expectedAlbum?.takeIf(String::isNotBlank)?.let { album ->
+            if (normalizeTitle(album, "") == normalizeTitle(item.album?.title.orEmpty(), "")) score += 120
+        }
+        durationDifference?.let { score += (MAX_DURATION_DIFFERENCE_SECONDS - it) * 10 }
+        return score
+    }
+
+    private fun cleanForSearch(raw: String): String {
+        return raw
+            .replace(FEATURING_CLAUSE, " ")
+            .replace(BRACKETED_DISPLAY_NOISE, " ")
+            .replace(TRAILING_DISPLAY_NOISE, " ")
             .replace(Regex("""\s+"""), " ")
             .trim()
     }
 
-    private fun isTitleMatch(target: String, candidate: String): Boolean {
-        if (target.isBlank() || candidate.isBlank()) return false
-        if (target == candidate) return true
-
-        // Token overlap check (must have strict word match)
-        val targetWords = target.split(" ").filter { it.isNotBlank() }
-        val candWords = candidate.split(" ").filter { it.isNotBlank() }
-        if (targetWords.isEmpty() || candWords.isEmpty()) return false
-
-        val common = targetWords.count { candWords.contains(it) }
-        val targetRatio = common.toFloat() / targetWords.size
-        val candRatio = common.toFloat() / candWords.size
-
-        return targetRatio >= 0.85f && candRatio >= 0.85f
+    private fun normalizeTitle(raw: String, artist: String): String {
+        val withoutArtistPrefix = if (artist.isBlank()) raw else raw.replaceFirst(
+            Regex("""^\s*${Regex.escape(artist)}\s*[-–—:]\s*""", RegexOption.IGNORE_CASE),
+            "",
+        )
+        return normalizeText(cleanForSearch(withoutArtistPrefix))
     }
 
-    private fun isArtistMatch(targetArtist: String, candArtist: String, performersText: String?): Boolean {
-        if (targetArtist.isBlank()) return false
-        if (candArtist.isNotBlank()) {
-            if (targetArtist == candArtist) return true
-            val targetTokens = targetArtist.split(" ").filter { it.length > 2 }
-            val candTokens = candArtist.split(" ").filter { it.length > 2 }
-            if (targetTokens.isNotEmpty() && candTokens.isNotEmpty() && targetTokens.all { candTokens.contains(it) }) {
-                 return true
-            }
+    private fun normalizeText(raw: String): String = Normalizer.normalize(raw, Normalizer.Form.NFD)
+        .replace(DIACRITICS, "")
+        .lowercase(Locale.ROOT)
+        .replace(NON_ALPHANUMERIC, " ")
+        .replace(MULTI_SPACE, " ")
+        .trim()
+
+    private fun identityVariants(raw: String, artist: String): Set<String> {
+        val withoutArtistPrefix = if (artist.isBlank()) raw else raw.replaceFirst(
+            Regex("""^\s*${Regex.escape(artist)}\s*[-–—:]\s*""", RegexOption.IGNORE_CASE),
+            "",
+        )
+        val normalized = normalizeText(withoutArtistPrefix)
+        return IDENTITY_VARIANT_PATTERNS.mapNotNullTo(linkedSetOf()) { (name, pattern) ->
+            name.takeIf { pattern.containsMatchIn(normalized) }
         }
-        if (!performersText.isNullOrBlank()) {
-            val normPerformers = normalizeString(performersText)
-            if (normPerformers.contains(targetArtist)) return true
-        }
-        return false
     }
+
+    private fun isVerifiedArtistMatch(
+        targetArtist: String,
+        performer: String,
+        albumArtist: String,
+        performersText: String?,
+    ): Boolean {
+        val target = normalizeText(targetArtist)
+        if (target.isBlank()) return false
+        val primaryIdentities = listOf(performer, albumArtist)
+            .map(::normalizeText)
+            .filter(String::isNotBlank)
+        if (primaryIdentities.any { it == target }) return true
+
+        val targetTokens = target.split(' ').filter { it !in ARTIST_NOISE_WORDS }.toSet()
+        if (targetTokens.isEmpty()) return false
+        if (primaryIdentities.any { identity -> targetTokens.all(identity.split(' ').toSet()::contains) }) return true
+
+        // Qobuz's performers string also lists writers/producers. Only use
+        // credits explicitly labelled as a performing role; a songwriter's
+        // name must never make a cover look like the requested artist.
+        val performingCredits = performersText.orEmpty()
+            .split(Regex("""\s+-\s+"""))
+            .map(::normalizeText)
+            .filter { credit -> PERFORMING_ROLE_WORDS.any { role -> role in credit.split(' ') } }
+        val performingTokens = (primaryIdentities + performingCredits)
+            .flatMap { it.split(' ') }
+            .toSet()
+        return targetTokens.all(performingTokens::contains)
+    }
+
 }

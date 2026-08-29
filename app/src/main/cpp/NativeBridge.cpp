@@ -72,6 +72,45 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeStop(
     if (auto* engine = fromHandle(handle); engine != nullptr) engine->stop();
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeIsRunning(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    const auto* engine = fromHandle(handle);
+    return (engine != nullptr && engine->isRunning()) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeFlushOutput(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) engine->flushOutput();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetPlaying(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jboolean playing) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setPlaying(playing == JNI_TRUE);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetOutputVolume(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jfloat volume) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setOutputVolume(volume);
+    }
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetStudioMasterClarity(
     JNIEnv*,
@@ -83,17 +122,7 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetStudioMasterClarity(
     }
 }
 
-extern "C" JNIEXPORT void JNICALL
-Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetVolumeBoost(
-    JNIEnv*,
-    jobject,
-    jlong handle,
-    jboolean enabled,
-    jint percent) {
-    if (auto* engine = fromHandle(handle); engine != nullptr) {
-        engine->setVolumeBoost(enabled == JNI_TRUE, percent);
-    }
-}
+
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetEqualizer(
@@ -292,6 +321,48 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeWritePcm(
         static_cast<std::size_t>(std::numeric_limits<jint>::max())));
 }
 
+extern "C" JNIEXPORT jint JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeWriteProcessedPcm(
+    JNIEnv* env,
+    jobject,
+    jlong handle,
+    jobject directBuffer,
+    jint byteOffset,
+    jint frameCount,
+    jint inputSampleRate,
+    jint inputChannelCount) {
+    auto* engine = fromHandle(handle);
+    auto* base = static_cast<std::uint8_t*>(env->GetDirectBufferAddress(directBuffer));
+    const jlong capacity = env->GetDirectBufferCapacity(directBuffer);
+    if (engine == nullptr || base == nullptr || capacity < 0 || byteOffset < 0 ||
+        frameCount <= 0 || inputSampleRate <= 0 ||
+        (inputChannelCount != 1 && inputChannelCount != 2)) {
+        return 0;
+    }
+
+    const std::size_t offset = static_cast<std::size_t>(byteOffset);
+    if (offset % alignof(float) != 0U) return 0;
+    const std::size_t frames = static_cast<std::size_t>(frameCount);
+    const std::size_t channels = static_cast<std::size_t>(inputChannelCount);
+    if (frames > std::numeric_limits<std::size_t>::max() / channels / sizeof(float)) {
+        return 0;
+    }
+    const std::size_t requiredBytes = frames * channels * sizeof(float);
+    if (offset > static_cast<std::size_t>(capacity) ||
+        requiredBytes > static_cast<std::size_t>(capacity) - offset) {
+        return 0;
+    }
+
+    const std::size_t accepted = engine->writeProcessedPcm(
+        reinterpret_cast<const float*>(base + offset),
+        frames,
+        inputSampleRate,
+        inputChannelCount);
+    return static_cast<jint>(std::min<std::size_t>(
+        accepted,
+        static_cast<std::size_t>(std::numeric_limits<jint>::max())));
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_lastwave_app_playback_NativeAudioEngine_nativeFlushResampler(
     JNIEnv*,
@@ -316,4 +387,58 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeBufferedFrames(
     jlong handle) {
     const auto* engine = fromHandle(handle);
     return engine == nullptr ? 0 : static_cast<jlong>(engine->bufferedFrames());
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeUnderrunCount(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    const auto* engine = fromHandle(handle);
+    return engine == nullptr ? 0 : static_cast<jlong>(engine->underrunCount());
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeRenderedFrames(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    const auto* engine = fromHandle(handle);
+    return engine == nullptr ? 0 : static_cast<jlong>(engine->renderedFrames());
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeRequestedSampleRate(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    const auto* engine = fromHandle(handle);
+    return engine == nullptr ? 0 : engine->requestedSampleRate();
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeStreamOpenCount(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    const auto* engine = fromHandle(handle);
+    return engine == nullptr ? 0 : static_cast<jlong>(engine->streamOpenCount());
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeStreamRestartCount(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    const auto* engine = fromHandle(handle);
+    return engine == nullptr ? 0 : static_cast<jlong>(engine->streamRestartCount());
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeRateAdaptationCount(
+    JNIEnv*,
+    jobject,
+    jlong handle) {
+    const auto* engine = fromHandle(handle);
+    return engine == nullptr ? 0 : static_cast<jlong>(engine->rateAdaptationCount());
 }

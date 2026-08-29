@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.flow.Flow
@@ -49,22 +50,26 @@ data class MiscSettings(
     /** Preferred quality preset for Qobuz streaming (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k).
      *  If a track does not support the requested quality, the worker automatically selects the highest available. */
     val qobuzQuality: Int = 27,
-    /** Audiophile Studio Clarity — studio-grade clarity curve (vocal presence +
-     *  air sparkle + anti-clipping limiter) that delivers pristine sound out of the box.
-     *  Defaults to true on fresh install. */
-    val isStudioMasterClarityEnabled: Boolean = true,
+    /** Optional studio-clarity curve. Disabled by default because fixed tone
+     *  shaping cannot be neutral on every speaker, headset and OEM spatializer. */
+    val isStudioMasterClarityEnabled: Boolean = false,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
-    /** Experimental output gain. Disabled by default; when enabled the DSP
-     *  can raise track level from 100% up to a bounded 200%. */
-    val volumeBoostEnabled: Boolean = false,
-    val volumeBoostPercent: Int = 100,
-    /** Experimental full screen cover art mode with translucent glassmorphic controls. */
-    val fullScreenCoverArtEnabled: Boolean = false,
     /** Blend the end of one queued track into the beginning of the next. */
     val crossfadeEnabled: Boolean = false,
     /** Crossfade length in seconds; kept within the native settings slider range. */
     val crossfadeSeconds: Int = 5,
+    /** When true (default), uses the multi-layer dynamic wavy seekbar.
+     *  When false, uses the classic standard progress slider in the player tab. */
+    val wavySeekbarEnabled: Boolean = true,
+    /** When true (default), downloads fetch and save synced lyrics (.lrc companion files and embedded tags). */
+    val downloadLyrics: Boolean = true,
+    /** When true (default), caches streamed songs locally for instant playback and data savings. */
+    val streamCacheEnabled: Boolean = true,
+    /** Maximum number of streamed songs to retain in local LRU stream cache (25, 50, 100, 200, 500). */
+    val streamCacheSongLimit: Int = 50,
+    /** When true, automatically syncs liked/favorited songs to YouTube Music. */
+    val autoSyncLikedSongsToYouTube: Boolean = false,
 )
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
@@ -78,14 +83,16 @@ class SettingsPreferences @Inject constructor(
         val USE_CUSTOM_FONT = booleanPreferencesKey("lw_use_custom_font")
         val PINNED_FRIENDS = stringSetPreferencesKey("lw_pinned_friends")
         val PREFER_QOBUZ_STREAMING = booleanPreferencesKey("lw_prefer_qobuz_streaming")
-        val QOBUZ_QUALITY = androidx.datastore.preferences.core.intPreferencesKey("lw_qobuz_quality")
+        val QOBUZ_QUALITY = intPreferencesKey("lw_qobuz_quality")
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
         val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
-        val VOLUME_BOOST_ENABLED = booleanPreferencesKey("lw_volume_boost_enabled")
-        val VOLUME_BOOST_PERCENT = androidx.datastore.preferences.core.intPreferencesKey("lw_volume_boost_percent")
-        val FULL_SCREEN_COVER_ART = booleanPreferencesKey("lw_fullscreen_cover_art")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
-        val CROSSFADE_SECONDS = androidx.datastore.preferences.core.intPreferencesKey("lw_crossfade_seconds")
+        val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
+        val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
+        val DOWNLOAD_LYRICS = booleanPreferencesKey("lw_download_lyrics")
+        val STREAM_CACHE_ENABLED = booleanPreferencesKey("lw_stream_cache_enabled")
+        val STREAM_CACHE_SONG_LIMIT = intPreferencesKey("lw_stream_cache_song_limit")
+        val AUTO_SYNC_LIKED_TO_YOUTUBE = booleanPreferencesKey("lw_auto_sync_liked_to_youtube")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data
@@ -97,13 +104,15 @@ class SettingsPreferences @Inject constructor(
                 pinnedFriends = p.readSafely(Keys.PINNED_FRIENDS) ?: emptySet(),
                 preferQobuzStreaming = p.readSafely(Keys.PREFER_QOBUZ_STREAMING) ?: true,
                 qobuzQuality = p.readSafely(Keys.QOBUZ_QUALITY)?.takeIf { it in QOBUZ_QUALITIES } ?: 27,
-                isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: true,
+                isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: false,
                 lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
-                volumeBoostEnabled = p.readSafely(Keys.VOLUME_BOOST_ENABLED) ?: false,
-                volumeBoostPercent = (p.readSafely(Keys.VOLUME_BOOST_PERCENT) ?: 100).coerceIn(100, 200),
-                fullScreenCoverArtEnabled = p.readSafely(Keys.FULL_SCREEN_COVER_ART) ?: false,
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 10),
+                wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
+                downloadLyrics = p.readSafely(Keys.DOWNLOAD_LYRICS) ?: true,
+                streamCacheEnabled = p.readSafely(Keys.STREAM_CACHE_ENABLED) ?: true,
+                streamCacheSongLimit = p.readSafely(Keys.STREAM_CACHE_SONG_LIMIT) ?: 50,
+                autoSyncLikedSongsToYouTube = p.readSafely(Keys.AUTO_SYNC_LIKED_TO_YOUTUBE) ?: false,
             )
         }
 
@@ -131,24 +140,32 @@ class SettingsPreferences @Inject constructor(
         dataStore.edit { it[Keys.LYRICS_ANIMATION] = animation.id }
     }
 
-    suspend fun setVolumeBoostEnabled(enabled: Boolean) {
-        dataStore.edit { it[Keys.VOLUME_BOOST_ENABLED] = enabled }
-    }
-
-    suspend fun setVolumeBoostPercent(percent: Int) {
-        dataStore.edit { it[Keys.VOLUME_BOOST_PERCENT] = percent.coerceIn(100, 200) }
-    }
-
-    suspend fun setFullScreenCoverArt(enabled: Boolean) {
-        dataStore.edit { it[Keys.FULL_SCREEN_COVER_ART] = enabled }
-    }
-
     suspend fun setCrossfadeEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.CROSSFADE_ENABLED] = enabled }
     }
 
     suspend fun setCrossfadeSeconds(seconds: Int) {
         dataStore.edit { it[Keys.CROSSFADE_SECONDS] = seconds.coerceIn(1, 10) }
+    }
+
+    suspend fun setWavySeekbarEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.WAVY_SEEKBAR_ENABLED] = enabled }
+    }
+
+    suspend fun setDownloadLyrics(enabled: Boolean) {
+        dataStore.edit { it[Keys.DOWNLOAD_LYRICS] = enabled }
+    }
+
+    suspend fun setStreamCacheEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.STREAM_CACHE_ENABLED] = enabled }
+    }
+
+    suspend fun setStreamCacheSongLimit(limit: Int) {
+        dataStore.edit { it[Keys.STREAM_CACHE_SONG_LIMIT] = limit.coerceIn(10, 1000) }
+    }
+
+    suspend fun setAutoSyncLikedSongsToYouTube(enabled: Boolean) {
+        dataStore.edit { it[Keys.AUTO_SYNC_LIKED_TO_YOUTUBE] = enabled }
     }
 
     suspend fun toggleFriendPinned(username: String) {

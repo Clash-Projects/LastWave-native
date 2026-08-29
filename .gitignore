@@ -41,9 +41,15 @@ local.properties
 Thumbs.db
 .acside/
 .codex/
+.codex*
 *.codex
+*.codex*
+*.pid
+.worktrees/
+.scratch/
+.claude/
 
-# Screenshots
+# Credentials & Environment
 Screenshot/release.jks
 keystore_credentials.txt
 .env

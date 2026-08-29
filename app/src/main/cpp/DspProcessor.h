@@ -1,7 +1,9 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -16,7 +18,7 @@ public:
     void configure(double sampleRate) noexcept;
     void reset() noexcept;
     void setStudioMasterClarity(bool enabled) noexcept;
-    void setVolumeBoost(bool enabled, std::int32_t percent) noexcept;
+    void setPeakProtectionEnabled(bool enabled) noexcept;
     void setEqualizer(
         bool enabled,
         const float* gainsDb,
@@ -46,14 +48,36 @@ private:
             double frequency,
             double q,
             double gainDb) noexcept;
+        static Biquad highShelf(
+            double sampleRate,
+            double frequency,
+            double slope,
+            double gainDb) noexcept;
         void setPeaking(
             double sampleRate,
             double frequency,
             double q,
             double gainDb) noexcept;
-        float tick(float input, std::size_t channel) noexcept;
+
+        [[nodiscard]] inline float tick(float input, std::size_t channel) noexcept {
+            const double value = static_cast<double>(input);
+            const double output = b0 * value + z1[channel];
+            z1[channel] = b1 * value - a1 * output + z2[channel];
+            z2[channel] = b2 * value - a2 * output;
+            if (!std::isfinite(output) || !std::isfinite(z1[channel]) || !std::isfinite(z2[channel])) {
+                z1[channel] = 0.0;
+                z2[channel] = 0.0;
+                return 0.0F;
+            }
+            return static_cast<float>(output);
+        }
+
         [[nodiscard]] double magnitude(double sampleRate, double frequency) const noexcept;
-        void clear() noexcept;
+
+        inline void clear() noexcept {
+            z1.fill(0.0);
+            z2.fill(0.0);
+        }
     };
 
     struct Crossfeed final {
@@ -68,16 +92,33 @@ private:
         std::array<double, 2> previousInput{};
 
         void configure(double sampleRate, double cutoffHz, double levelDb) noexcept;
-        void process(float& left, float& right) noexcept;
-        void clear() noexcept;
+
+        inline void process(float& left, float& right) noexcept {
+            const double inputLeft = left;
+            const double inputRight = right;
+            low[0] = a0Low * inputLeft + b1Low * low[0];
+            low[1] = a0Low * inputRight + b1Low * low[1];
+            high[0] = a0High * inputLeft + a1High * previousInput[0] + b1High * high[0];
+            high[1] = a0High * inputRight + a1High * previousInput[1] + b1High * high[1];
+            previousInput[0] = inputLeft;
+            previousInput[1] = inputRight;
+            left = static_cast<float>((high[0] + low[1]) * gain);
+            right = static_cast<float>((high[1] + low[0]) * gain);
+        }
+
+        inline void clear() noexcept {
+            low.fill(0.0);
+            high.fill(0.0);
+            previousInput.fill(0.0);
+        }
     };
 
     double sampleRate_{48000.0};
-    float currentWet_{1.0F};
+    float currentWet_{0.0F};
     float rampPerFrame_{1.0F / 2400.0F};
-    std::atomic<bool> targetEnabled_{true};
+    std::atomic<bool> targetEnabled_{false};
+    std::atomic<bool> peakProtectionEnabled_{false};
     std::atomic<bool> targetEqualizerEnabled_{false};
-    std::atomic<float> targetOutputGain_{1.0F};
     std::atomic<std::uint32_t> targetEqualizerRevision_{0};
     std::array<std::atomic<float>, kEqualizerBandCount> targetEqGainsDb_{};
     std::array<float, kEqualizerBandCount> currentEqGainsDb_{};
@@ -86,19 +127,25 @@ private:
     std::int32_t equalizerHeadroomCountdown_{0};
     std::uint32_t appliedEqualizerRevision_{0};
     std::uint16_t activeEqualizerBands_{0};
-    float currentPreampDb_{-1.0F};
-    float currentPreampGain_{0.891250938F};
+    float currentPreampDb_{0.0F};
+    float currentPreampGain_{1.0F};
     float equalizerMaximumBoostDb_{0.0F};
     float limiterGain_{1.0F};
-    float currentOutputGain_{1.0F};
-    float outputGainSmoothing_{0.001F};
     float equalizerGainSmoothing_{0.1F};
     float limiterRelease_{0.001F};
+    // One-pole DC blocker (10 Hz). Removes stream DC offset so peaks keep the
+    // full symmetric headroom; transparent for DC-free program material.
+    float dcBlockerR_{0.999F};
+    std::array<double, 2> dcXPrev_{};
+    std::array<double, 2> dcYPrev_{};
     std::int32_t microFadeFrameCount_{96};
     std::int32_t microFadePosition_{0};
-    bool clarityChainActive_{true};
+    bool clarityChainActive_{false};
     Biquad subBassHighPass_{};
+    Biquad bassFoundation_{};
     Biquad lowMidSeparation_{};
+    Biquad boxinessControl_{};
+    Biquad presenceDetail_{};
     Biquad airDetail_{};
     Crossfeed crossfeed_{};
 };
