@@ -79,6 +79,7 @@ fun WavySeekBar(
     modifier: Modifier = Modifier,
     isTranslucent: Boolean = false,
     trackKey: String? = null,
+    showTimeLabels: Boolean = true,
 ) {
     val interactionSource = remember(trackKey) { MutableInteractionSource() }
     val dragging by interactionSource.collectIsDraggedAsState()
@@ -194,8 +195,8 @@ fun WavySeekBar(
 
     val baseTrackThicknessPx = with(density) { 4.5.dp.toPx() }
     val thumbRadiusPx = with(density) { 7.5.dp.toPx() }
-    val transitionLengthPx = with(density) { 28.dp.toPx() }
-    val waveSampleStepPx = with(density) { 3.5.dp.toPx() }
+    val transitionLengthPx = with(density) { 44.dp.toPx() }
+    val waveSampleStepPx = with(density) { 1.5.dp.toPx() }
 
     // Reusable Path caches to eliminate garbage collector allocations during frame drawing
     val pathFilled1 = remember { Path() }
@@ -221,16 +222,14 @@ fun WavySeekBar(
                 val bottomY = centerY + halfThickness
                 val topBaselineY = centerY - halfThickness
 
-                // 1. Inactive background track: Straight horizontal capsule bar from thumbX to end
-                if (thumbX < width) {
-                    drawLine(
-                        color = inactiveColor,
-                        start = Offset(thumbX, centerY),
-                        end = Offset(width, centerY),
-                        strokeWidth = baseTrackThicknessPx,
-                        cap = StrokeCap.Round,
-                    )
-                }
+                // 1. Inactive background track: Full smooth capsule bar with rounded ends
+                drawLine(
+                    color = inactiveColor,
+                    start = Offset(0f, centerY),
+                    end = Offset(width, centerY),
+                    strokeWidth = baseTrackThicknessPx,
+                    cap = StrokeCap.Round,
+                )
 
                 // 2. Active 3-Layer Material Frosted Glass Waves with Dynamic Counter-Gradients
                 if (thumbX > 0f) {
@@ -238,15 +237,15 @@ fun WavySeekBar(
                     clipPathBounds.addRoundRect(
                         RoundRect(
                             rect = androidx.compose.ui.geometry.Rect(
-                                left = 0f,
+                                left = -halfThickness,
                                 top = 0f,
-                                right = thumbX + thumbRadiusPx,
+                                right = thumbX + halfThickness,
                                 bottom = height,
                             ),
                             topLeft = CornerRadius(halfThickness, halfThickness),
                             bottomLeft = CornerRadius(halfThickness, halfThickness),
-                            topRight = CornerRadius(0f, 0f),
-                            bottomRight = CornerRadius(0f, 0f),
+                            topRight = CornerRadius(halfThickness, halfThickness),
+                            bottomRight = CornerRadius(halfThickness, halfThickness),
                         )
                     )
 
@@ -270,11 +269,12 @@ fun WavySeekBar(
                             contour.moveTo(0f, topBaselineY)
 
                             var x = 0f
-                            val invTransition = 1f / transitionLengthPx
+                            val effectiveTransition = minOf(transitionLengthPx, thumbX * 0.48f)
+                            val invTransition = if (effectiveTransition > 0f) 1f / effectiveTransition else 0f
                             val invWavelength2Pi = (2 * PI / wavelength).toFloat()
                             while (x < thumbX) {
-                                val startEnv = smootherstep(x * invTransition)
-                                val endEnv = smootherstep((thumbX - x) * invTransition)
+                                val startEnv = if (invTransition > 0f) smootherstep(x * invTransition) else 1f
+                                val endEnv = if (invTransition > 0f) smootherstep((thumbX - x) * invTransition) else 1f
                                 val envelope = startEnv * endEnv
 
                                 val angle = x * invWavelength2Pi - phase
@@ -389,25 +389,27 @@ fun WavySeekBar(
             )
         }
 
-        Spacer(Modifier.height(2.dp))
+        if (showTimeLabels) {
+            Spacer(Modifier.height(2.dp))
 
-        // Time labels
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                text = formatTime(shownMs),
-                style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
-                color = textColor,
-            )
-            Text(
-                text = "−${formatTime((boundedDurationMs - shownMs).coerceAtLeast(0))}",
-                style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
-                color = textColor,
-            )
+            // Time labels
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = formatTime(shownMs),
+                    style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
+                    color = textColor,
+                )
+                Text(
+                    text = "−${formatTime((boundedDurationMs - shownMs).coerceAtLeast(0))}",
+                    style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
+                    color = textColor,
+                )
+            }
         }
     }
 }
@@ -429,3 +431,4 @@ fun WavySeekBar(
         trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" },
     )
 }
+

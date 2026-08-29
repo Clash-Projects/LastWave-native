@@ -608,7 +608,9 @@ fun SettingsScreen(
                         else -> "Max (Up to 24-bit / 192 kHz)"
                     }
 
-                    SettingsGroup(rowCount = if (misc.crossfadeEnabled) 3 else 2) { index, position ->
+                    val totalAudioRows = if (misc.crossfadeEnabled) 4 else 3
+                    SettingsGroup(rowCount = totalAudioRows) { index, position ->
+                        val lyricsIndex = if (misc.crossfadeEnabled) 3 else 2
                         when (index) {
                             0 -> SettingsActionCard(
                                 icon = Icons.Filled.HighQuality,
@@ -633,9 +635,40 @@ fun SettingsScreen(
                                 onCheckedChange = viewModel::setCrossfadeEnabled,
                                 position = position,
                             )
-                            2 -> CrossfadeDurationRow(
-                                seconds = misc.crossfadeSeconds,
-                                onSecondsChange = viewModel::setCrossfadeSeconds,
+                            2 -> if (misc.crossfadeEnabled) {
+                                CrossfadeDurationRow(
+                                    seconds = misc.crossfadeSeconds,
+                                    onSecondsChange = viewModel::setCrossfadeSeconds,
+                                    position = position,
+                                )
+                            } else {
+                                SettingsToggleCard(
+                                    icon = Icons.Filled.Lyrics,
+                                    iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                    iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    title = "Download Synced Lyrics",
+                                    subtitle = if (misc.downloadLyrics) {
+                                        "Save .lrc companion files & embed lyrics in downloads"
+                                    } else {
+                                        "Do not fetch or save lyrics when downloading"
+                                    },
+                                    checked = misc.downloadLyrics,
+                                    onCheckedChange = viewModel::setDownloadLyrics,
+                                    position = position,
+                                )
+                            }
+                            3 -> SettingsToggleCard(
+                                icon = Icons.Filled.Lyrics,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Download Synced Lyrics",
+                                subtitle = if (misc.downloadLyrics) {
+                                    "Save .lrc companion files & embed lyrics in downloads"
+                                } else {
+                                    "Do not fetch or save lyrics when downloading"
+                                },
+                                checked = misc.downloadLyrics,
+                                onCheckedChange = viewModel::setDownloadLyrics,
                                 position = position,
                             )
                         }

@@ -79,7 +79,7 @@ class AudioTagWriter @Inject constructor(
         album: String? = null,
         artworkUrl: String? = null,
         lyrics: String? = null,
-        unsyncedLyrics: String? = null,
+        year: String? = null,
     ): Boolean {
         if (!audioFile.exists() || audioFile.length() <= 0) return false
 
@@ -89,18 +89,16 @@ class AudioTagWriter @Inject constructor(
             } else null
 
             val kind = detectContainerKind(audioFile)
-            val preferredLyrics = lyrics?.takeIf { it.isNotBlank() }
-                ?: unsyncedLyrics?.takeIf { it.isNotBlank() }
             val ok = when (kind) {
                 // A FLAC whose metadata chain doesn't parse cleanly is left
                 // untouched — prepending ID3 there is nonstandard and can
                 // break strict extractors' format sniffing.
-                ContainerKind.FLAC -> embedIntoFlac(audioFile, title, artist, album, artworkBytes, preferredLyrics, unsyncedLyrics)
+                ContainerKind.FLAC -> embedIntoFlac(audioFile, title, artist, album, artworkBytes, lyrics, year)
                 // Keep MP4/WebM metadata native; ID3 prepends corrupt their container contract.
-                ContainerKind.MP4 -> embedIntoMp4(audioFile, title, artist, album, artworkBytes, preferredLyrics)
-                ContainerKind.WEBM -> embedIntoWebm(audioFile, title, artist, album, artworkBytes, preferredLyrics, unsyncedLyrics)
-                ContainerKind.OGG -> embedIntoOggOpus(audioFile, title, artist, album, artworkBytes, preferredLyrics, unsyncedLyrics)
-                else -> embedId3Prepend(audioFile, title, artist, album, artworkBytes, preferredLyrics)
+                ContainerKind.MP4 -> embedIntoMp4(audioFile, title, artist, album, artworkBytes, lyrics, year)
+                ContainerKind.WEBM -> embedIntoWebm(audioFile, title, artist, album, artworkBytes, lyrics, year)
+                ContainerKind.OGG -> embedIntoOggOpus(audioFile, title, artist, album, artworkBytes, lyrics, year)
+                else -> embedId3Prepend(audioFile, title, artist, album, artworkBytes, lyrics, year)
             }
             if (ok) {
                 Log.d(TAG, "Embedded ${kind.name} tags into ${audioFile.name}")
@@ -151,6 +149,7 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
+        year: String? = null,
     ): Boolean {
         val id3TagBytes = buildId3v2Tag(
             title = title,
@@ -158,6 +157,7 @@ class AudioTagWriter @Inject constructor(
             album = album,
             artworkBytes = artworkBytes,
             lyrics = lyrics,
+            year = year,
         )
 
         // Read original audio payload (skipping existing ID3v2 header if present)
@@ -189,6 +189,7 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String? = null,
+        year: String? = null,
     ): ByteArray {
         val framesOut = ByteArrayOutputStream()
 
@@ -201,6 +202,9 @@ class AudioTagWriter @Inject constructor(
         }
         if (!album.isNullOrBlank()) {
             writeTextFrame(framesOut, FRAME_ALBUM, album)
+        }
+        if (!year.isNullOrBlank()) {
+            writeTextFrame(framesOut, "TYER", year)
         }
         if (!lyrics.isNullOrBlank()) {
             writeLyricsFrame(framesOut, lyrics)
@@ -318,7 +322,7 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
-        unsyncedLyrics: String?,
+        year: String? = null,
     ): Boolean {
         val blocks = mutableListOf<FlacBlockRef>()
         var framesStart = -1L
@@ -365,7 +369,7 @@ class AudioTagWriter @Inject constructor(
         }
 
         val replacedFields = buildSet {
-            addAll(setOf("TITLE", "ARTIST", "ALBUMARTIST", "ALBUM", "LYRICS", "UNSYNCEDLYRICS"))
+            addAll(setOf("TITLE", "ARTIST", "ALBUMARTIST", "ALBUM", "LYRICS", "UNSYNCEDLYRICS", "DATE", "YEAR"))
             if (artworkBytes != null) {
                 addAll(setOf("METADATA_BLOCK_PICTURE", "COVERART", "COVERARTMIME"))
             }
@@ -378,8 +382,9 @@ class AudioTagWriter @Inject constructor(
         if (artist.isNotBlank()) comments += "ALBUMARTIST=$artist"
         if (!album.isNullOrBlank()) comments += "ALBUM=$album"
         if (!lyrics.isNullOrBlank()) comments += "LYRICS=$lyrics"
-        if (!unsyncedLyrics.isNullOrBlank() && unsyncedLyrics != lyrics) {
-            comments += "UNSYNCEDLYRICS=$unsyncedLyrics"
+        if (!year.isNullOrBlank()) {
+            comments += "DATE=$year"
+            comments += "YEAR=$year"
         }
 
         data class OutBlock(val type: Int, val fromSource: FlacBlockRef?, val generated: ByteArray?)
@@ -537,20 +542,12 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
-        unsyncedLyrics: String?,
+        year: String? = null,
     ): Boolean {
         val pages = readOggPages(audioFile)
         if (pages.isEmpty()) return false
         val location = findOpusTags(audioFile, pages) ?: return false
-        val newPacket = buildOpusTagsPacket(
-            location.packet,
-            title,
-            artist,
-            album,
-            artworkBytes,
-            lyrics,
-            unsyncedLyrics,
-        )
+        val newPacket = buildOpusTagsPacket(location.packet, title, artist, album, artworkBytes, lyrics, year)
         if (newPacket.isEmpty()) return false
 
         val tempFile = File.createTempFile("tagged_", ".opus", audioFile.parentFile)
@@ -732,10 +729,10 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
-        unsyncedLyrics: String?,
+        year: String? = null,
     ): ByteArray {
         val replacedFields = buildSet {
-            addAll(setOf("TITLE", "ARTIST", "ALBUMARTIST", "ALBUM", "LYRICS", "UNSYNCEDLYRICS"))
+            addAll(setOf("TITLE", "ARTIST", "ALBUMARTIST", "ALBUM", "LYRICS", "UNSYNCEDLYRICS", "DATE", "YEAR"))
             if (artworkBytes != null) {
                 addAll(setOf("METADATA_BLOCK_PICTURE", "COVERART", "COVERARTMIME"))
             }
@@ -750,8 +747,9 @@ class AudioTagWriter @Inject constructor(
         }
         if (!album.isNullOrBlank()) comments += "ALBUM=$album"
         if (!lyrics.isNullOrBlank()) comments += "LYRICS=$lyrics"
-        if (!unsyncedLyrics.isNullOrBlank() && unsyncedLyrics != lyrics) {
-            comments += "UNSYNCEDLYRICS=$unsyncedLyrics"
+        if (!year.isNullOrBlank()) {
+            comments += "DATE=$year"
+            comments += "YEAR=$year"
         }
         if (artworkBytes != null && artworkBytes.isNotEmpty()) {
             comments += "METADATA_BLOCK_PICTURE=${base64NoWrap(buildFlacPictureBody(artworkBytes))}"
@@ -990,9 +988,9 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
-        unsyncedLyrics: String?,
+        year: String? = null,
     ): Boolean {
-        val metadata = buildWebmMetadata(title, artist, album, artworkBytes, lyrics, unsyncedLyrics)
+        val metadata = buildWebmMetadata(title, artist, album, artworkBytes, lyrics, year)
         if (metadata.isEmpty()) return false
 
         val fileSize = audioFile.length()
@@ -1104,7 +1102,7 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
-        unsyncedLyrics: String?,
+        year: String? = null,
     ): ByteArray {
         val tagBody = ByteArrayOutputStream()
         // TargetTypeValue 30 is Matroska's TRACK/SONG level.
@@ -1115,9 +1113,7 @@ class AudioTagWriter @Inject constructor(
         addWebmSimpleTag(tagBody, "ALBUMARTIST", artist)
         if (!album.isNullOrBlank()) addWebmSimpleTag(tagBody, "ALBUM", album)
         if (!lyrics.isNullOrBlank()) addWebmSimpleTag(tagBody, "LYRICS", lyrics)
-        if (!unsyncedLyrics.isNullOrBlank() && unsyncedLyrics != lyrics) {
-            addWebmSimpleTag(tagBody, "UNSYNCEDLYRICS", unsyncedLyrics)
-        }
+        if (!year.isNullOrBlank()) addWebmSimpleTag(tagBody, "DATE", year)
 
         val output = ByteArrayOutputStream()
         val tag = ebmlElement(byteArrayOf(0x73, 0x73), tagBody.toByteArray())
@@ -1179,6 +1175,7 @@ class AudioTagWriter @Inject constructor(
         album: String?,
         artworkBytes: ByteArray?,
         lyrics: String?,
+        year: String? = null,
     ): Boolean {
         // Phase 1 — walk top-level boxes via headers only.
         var moovStart = -1L
@@ -1190,10 +1187,21 @@ class AudioTagWriter @Inject constructor(
                 raf.seek(offset)
                 val head = ByteArray(8)
                 if (raf.read(head) < 8) return false
-                val size = ((head[0].toLong() and 0xFF) shl 24) or
+                val size32 = ((head[0].toLong() and 0xFF) shl 24) or
                     ((head[1].toLong() and 0xFF) shl 16) or
                     ((head[2].toLong() and 0xFF) shl 8) or
                     (head[3].toLong() and 0xFF)
+                val size = when (size32) {
+                    0L -> fileSize - offset
+                    1L -> {
+                        if (offset + 16 > fileSize) return false
+                        raf.seek(offset + 8)
+                        val extHead = ByteArray(8)
+                        if (raf.read(extHead) < 8) return false
+                        readBeUInt64(extHead, 0) ?: return false
+                    }
+                    else -> size32
+                }
                 if (size < 8 || offset + size > fileSize) return false
                 val type = String(head, 4, 4, StandardCharsets.US_ASCII)
                 if (type == "moov") {
@@ -1213,6 +1221,7 @@ class AudioTagWriter @Inject constructor(
         addMp4TextItem(ilstItems, "aART", artist)
         if (!album.isNullOrBlank()) addMp4TextItem(ilstItems, "\u00A9alb", album)
         if (!lyrics.isNullOrBlank()) addMp4TextItem(ilstItems, "\u00A9lyr", lyrics)
+        if (!year.isNullOrBlank()) addMp4TextItem(ilstItems, "\u00A9day", year)
         if (artworkBytes != null && artworkBytes.isNotEmpty()) {
             addMp4CoverItem(ilstItems, artworkBytes)
         }
@@ -1234,33 +1243,37 @@ class AudioTagWriter @Inject constructor(
         metaBody.write(ilstBox)
         val udtaBox = wrapBox("udta", wrapBox("meta", metaBody.toByteArray()))
 
-        val newMoovSize = moovSize + udtaBox.size
-        if (newMoovSize > 0x7FFFFFFFL) return false
-
         val moovBody = ByteArray((moovSize - 8).toInt())
         java.io.RandomAccessFile(audioFile, "r").use { raf ->
             raf.seek(moovStart + 8)
             raf.readFully(moovBody)
         }
+
+        // Clean out any existing udta boxes so we don't produce duplicate udta boxes
+        // which standard players and Android MediaMetadataRetriever ignore.
+        val cleanedMoovBody = removeTopLevelBoxes(moovBody, setOf("udta"))
+        val delta = (cleanedMoovBody.size + udtaBox.size) - moovBody.size
+        val newMoovSize = 8L + cleanedMoovBody.size + udtaBox.size
+        if (newMoovSize > 0x7FFFFFFFL) return false
+
         // When moov precedes mdat, adding metadata shifts media bytes forward.
         // Patch every absolute stco/co64 chunk offset that points past moov.
-        if (!patchMp4ChunkOffsets(
-                bytes = moovBody,
-                start = 0,
-                end = moovBody.size,
-                shiftedRegionStart = moovStart + moovSize,
-                delta = udtaBox.size,
-            )
-        ) return false
+        if (delta != 0) {
+            if (!patchMp4ChunkOffsets(
+                    bytes = cleanedMoovBody,
+                    start = 0,
+                    end = cleanedMoovBody.size,
+                    shiftedRegionStart = moovStart + moovSize,
+                    delta = delta,
+                )
+            ) return false
+        }
 
         // Phase 2 — stream the preserved prefix, patched moov, metadata and tail.
         val tempFile = File.createTempFile("tagged_", ".m4a", audioFile.parentFile)
         try {
             FileOutputStream(tempFile).buffered().use { out ->
                 // Preserve ftyp/mdat/free and every other box before moov.
-                // The previous writer started the output at moov, silently
-                // dropping the actual audio payload and always failing its
-                // own length validation.
                 FileInputStream(audioFile).use { input ->
                     copyExactly(input, out, moovStart)
                 }
@@ -1271,7 +1284,7 @@ class AudioTagWriter @Inject constructor(
                 out.write(newMoovSize.toInt() and 0xFF)
                 out.write("moov".toByteArray(StandardCharsets.US_ASCII))
 
-                out.write(moovBody)
+                out.write(cleanedMoovBody)
                 out.write(udtaBox)
 
                 // Preserve boxes after moov (fast-start and fragmented MP4).
@@ -1292,12 +1305,39 @@ class AudioTagWriter @Inject constructor(
             return false
         }
 
-        val valid = tempFile.length() == fileSize + udtaBox.size
+        val valid = tempFile.length() == fileSize + delta
         if (!valid) {
             tempFile.delete()
             return false
         }
         return replaceOriginal(audioFile, tempFile, minimumValidLength = 16)
+    }
+
+    private fun removeTopLevelBoxes(bytes: ByteArray, boxTypes: Set<String>): ByteArray {
+        val out = ByteArrayOutputStream()
+        var offset = 0
+        while (offset + 8 <= bytes.size) {
+            val size32 = readBeUInt32(bytes, offset)
+            val type = String(bytes, offset + 4, 4, StandardCharsets.ISO_8859_1)
+            val boxSize = when (size32) {
+                0L -> (bytes.size - offset).toLong()
+                1L -> {
+                    if (offset + 16 > bytes.size) return bytes
+                    readBeUInt64(bytes, offset + 8) ?: return bytes
+                }
+                else -> size32
+            }
+            if (boxSize < 8 || offset + boxSize > bytes.size) return bytes
+            val boxLen = boxSize.toInt()
+            if (type !in boxTypes) {
+                out.write(bytes, offset, boxLen)
+            }
+            offset += boxLen
+        }
+        if (offset == bytes.size) {
+            return out.toByteArray()
+        }
+        return bytes
     }
 
     private fun patchMp4ChunkOffsets(

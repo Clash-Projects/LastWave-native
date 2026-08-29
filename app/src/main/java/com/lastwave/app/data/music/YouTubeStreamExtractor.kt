@@ -35,11 +35,13 @@ class YouTubeStreamExtractor @Inject constructor(
         streamCache.remove(videoId)
     }
 
-    suspend fun resolveAudioStream(videoId: String): YouTubeAudioStream = withContext(Dispatchers.IO) {
+    suspend fun resolveAudioStream(videoId: String, preferM4a: Boolean = false): YouTubeAudioStream = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        streamCache[videoId]?.let { (cachedAt, stream) ->
-            if (now - cachedAt < CACHE_EXPIRY_MS) {
-                return@withContext stream
+        if (!preferM4a) {
+            streamCache[videoId]?.let { (cachedAt, stream) ->
+                if (now - cachedAt < CACHE_EXPIRY_MS) {
+                    return@withContext stream
+                }
             }
         }
 
@@ -49,15 +51,14 @@ class YouTubeStreamExtractor @Inject constructor(
         } catch (error: Exception) {
             throw IOException("YouTube stream extraction failed for $videoId", error)
         }
-        // YouTube normally offers both AAC/MP4 and Opus/WebM. Prefer Opus so
-        // downloads can be losslessly remuxed to a standards-compliant .opus
-        // file instead of being saved as WebM or transcoded with quality loss.
-        val stream = info.audioStreams.maxWithOrNull(
-            compareBy<org.schabi.newpipe.extractor.stream.AudioStream> {
-                if (it.codec.orEmpty().contains("opus", ignoreCase = true)) 1 else 0
-            }.thenBy { maxOf(it.averageBitrate, it.bitrate) },
-        )
-            ?: throw IOException("YouTube returned no playable audio stream for $videoId")
+        val stream = if (preferM4a) {
+            info.audioStreams
+                .filter { it.format?.mimeType?.contains("mp4") == true || it.format?.mimeType?.contains("m4a") == true }
+                .maxByOrNull { maxOf(it.averageBitrate, it.bitrate) }
+                ?: info.audioStreams.maxByOrNull { maxOf(it.averageBitrate, it.bitrate) }
+        } else {
+            info.audioStreams.maxByOrNull { maxOf(it.averageBitrate, it.bitrate) }
+        } ?: throw IOException("YouTube returned no playable audio stream for $videoId")
         val reportedBitrate = maxOf(stream.averageBitrate, stream.bitrate)
         val result = YouTubeAudioStream(
             url = stream.content,
@@ -65,10 +66,11 @@ class YouTubeStreamExtractor @Inject constructor(
             // NewPipe reports kbps while raw InnerTube formats report bps;
             // normalize both providers to bps for one truthful UI value.
             bitrate = if (reportedBitrate in 1..9_999) reportedBitrate * 1_000 else reportedBitrate,
-            codec = stream.codec,
         )
-        pruneStreamCache(now)
-        streamCache[videoId] = Pair(now, result)
+        if (!preferM4a) {
+            pruneStreamCache(now)
+            streamCache[videoId] = Pair(now, result)
+        }
         result
     }
 

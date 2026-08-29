@@ -62,6 +62,8 @@ data class MiscSettings(
     /** When true (default), uses the multi-layer dynamic wavy seekbar.
      *  When false, uses the classic standard progress slider in the player tab. */
     val wavySeekbarEnabled: Boolean = true,
+    /** When true (default), downloads fetch and save synced lyrics (.lrc companion files and embedded tags). */
+    val downloadLyrics: Boolean = true,
 )
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
@@ -81,6 +83,7 @@ class SettingsPreferences @Inject constructor(
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
         val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
         val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
+        val DOWNLOAD_LYRICS = booleanPreferencesKey("lw_download_lyrics")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data
@@ -97,6 +100,7 @@ class SettingsPreferences @Inject constructor(
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 10),
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
+                downloadLyrics = p.readSafely(Keys.DOWNLOAD_LYRICS) ?: true,
             )
         }
 
@@ -134,6 +138,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setWavySeekbarEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.WAVY_SEEKBAR_ENABLED] = enabled }
+    }
+
+    suspend fun setDownloadLyrics(enabled: Boolean) {
+        dataStore.edit { it[Keys.DOWNLOAD_LYRICS] = enabled }
     }
 
     suspend fun toggleFriendPinned(username: String) {

@@ -1194,6 +1194,7 @@ private fun FullPlayer(
                                 player = player,
                                 lyricsState = lyricsState,
                                 lyricsAnimation = lyricsAnimation,
+                                wavySeekbarEnabled = wavySeekbarEnabled,
                                 onRetry = onRetryLyrics,
                                 modifier = Modifier.fillMaxSize(),
                             )
