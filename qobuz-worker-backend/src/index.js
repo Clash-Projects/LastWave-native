@@ -49,6 +49,22 @@ function getClient(env, request) {
   return cachedPool;
 }
 
+function getRouteCacheTTL(urlPath) {
+  if (urlPath === "/api/pool/status" || urlPath === "/api/pool" || urlPath.startsWith("/api/auth")) {
+    return 0; // Real-time health & auth never cached
+  }
+  if (urlPath.includes("/url") || urlPath.startsWith("/api/stream") || urlPath.startsWith("/stream")) {
+    return 1800; // 30 minutes for signed audio URLs
+  }
+  if (urlPath.startsWith("/api/search") || urlPath.startsWith("/api/track") || urlPath.startsWith("/api/album") || urlPath.startsWith("/api/artist") || urlPath.startsWith("/api/playlist")) {
+    return 86400; // 24 hours for catalog metadata
+  }
+  if (urlPath === "/docs" || urlPath === "/" || urlPath === "/ui" || urlPath === "/playground") {
+    return 604800; // 7 days for UI / Docs
+  }
+  return 3600; // 1 hour default
+}
+
 export default {
   async fetch(request, env, ctx) {
     // 1. Handle CORS Preflight
@@ -59,6 +75,28 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     const searchParams = url.searchParams;
+    const isGet = ["GET", "HEAD"].includes(request.method);
+    const ttl = getRouteCacheTTL(path);
+
+    // 1b. Check Cloudflare Edge Cache
+    const cache = (typeof caches !== "undefined" && caches.default) ? caches.default : null;
+    const cacheKey = new Request(url.toString(), request);
+    if (isGet && ttl > 0 && cache) {
+      try {
+        const cachedRes = await cache.match(cacheKey);
+        if (cachedRes) {
+          const newHeaders = new Headers(cachedRes.headers);
+          newHeaders.set("X-Cache", "HIT");
+          return new Response(cachedRes.body, {
+            status: cachedRes.status,
+            statusText: cachedRes.statusText,
+            headers: newHeaders
+          });
+        }
+      } catch (e) {
+        // Fallthrough if cache API error
+      }
+    }
 
     // 2. API Key security check
     const activeApiKey = env.API_AUTH_KEY;
@@ -86,8 +124,47 @@ export default {
       }
     }
 
+    let response;
     try {
-      // 3. Dedicated In-House Documentation Endpoint
+      response = await handleWorkerRequest(request, env, url, path, searchParams);
+    } catch (err) {
+      console.error("Worker Execution Error:", err);
+      return jsonResponse({
+        success: false,
+        error: err.message || "Internal Server Error",
+        status: err.status || 500,
+        data: err.data || null
+      }, err.status || 500);
+    }
+
+    // Apply Edge & CDN Cache-Control headers if 200 OK
+    if (response.status === 200 && isGet && ttl > 0) {
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set("Cache-Control", `public, max-age=${ttl}, s-maxage=${ttl * 2}, stale-while-revalidate=86400`);
+      newHeaders.set("CDN-Cache-Control", `max-age=${ttl * 2}`);
+      newHeaders.set("X-Cache", "MISS");
+
+      const finalResponse = new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+      });
+
+      if (cache) {
+        try {
+          ctx?.waitUntil?.(cache.put(cacheKey, finalResponse.clone()));
+        } catch (e) {}
+      }
+
+      return finalResponse;
+    }
+
+    return response;
+  }
+};
+
+async function handleWorkerRequest(request, env, url, path, searchParams) {
+  // 3. Dedicated In-House Documentation Endpoint
       if (path === "/docs") {
         return new Response(renderDocsHtml(url.origin), {
           status: 200,
@@ -548,15 +625,4 @@ export default {
 
       // 404 Route Not Found
       return jsonResponse({ success: false, error: `Route not found: ${path}` }, 404);
-
-    } catch (err) {
-      console.error("Worker Execution Error:", err);
-      return jsonResponse({
-        success: false,
-        error: err.message || "Internal Server Error",
-        status: err.status || 500,
-        data: err.data || null
-      }, err.status || 500);
-    }
-  }
-};
+}
