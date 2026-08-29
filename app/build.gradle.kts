@@ -1,3 +1,5 @@
+import java.io.File
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -80,7 +82,7 @@ android {
             val keystoreFile: File? = when {
                 base64Key.isNotBlank() -> {
                     try {
-                        val decodedBytes = java.util.Base64.getDecoder().decode(base64Key.trim())
+                        val decodedBytes = Base64.getDecoder().decode(base64Key.trim())
                         val tempKeystore = layout.buildDirectory.file("signing/release.keystore").get().asFile
                         tempKeystore.parentFile.mkdirs()
                         tempKeystore.writeBytes(decodedBytes)
