@@ -73,7 +73,7 @@ fun QuickPlayGrid(
             rows = GridCells.Fixed(3),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(375.dp),
+                .height(365.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 2.dp),
@@ -82,7 +82,7 @@ fun QuickPlayGrid(
                 QuickPlaySymmetricalTile(
                     track = track,
                     onClick = { onTrackClick(track) },
-                    modifier = Modifier.width(108.dp),
+                    modifier = Modifier.width(104.dp),
                 )
             }
         }
@@ -123,35 +123,35 @@ private fun QuickPlaySymmetricalTile(
                     fallbackIcon = Icons.Filled.MusicNote,
                     modifier = Modifier.fillMaxSize(),
                 )
-                // Symmetrical Play Badge on Bottom Right
+                // Sleek, compact play badge overlay
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(4.dp)
-                        .size(22.dp),
+                        .padding(3.dp)
+                        .size(18.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Filled.PlayArrow,
                             contentDescription = "Play",
                             tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(13.dp),
+                            modifier = Modifier.size(10.dp),
                         )
                     }
                 }
             }
 
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(3.dp))
 
             // Thin, small, single-line title only (no artist)
             Text(
                 text = track.name,
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = FontWeight.Normal,
-                    fontSize = TextUnit(9f, TextUnitType.Sp),
-                    lineHeight = TextUnit(11f, TextUnitType.Sp),
+                    fontSize = TextUnit(8.5f, TextUnitType.Sp),
+                    lineHeight = TextUnit(10.5f, TextUnitType.Sp),
                 ),
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                 maxLines = 1,
@@ -159,7 +159,7 @@ private fun QuickPlaySymmetricalTile(
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 2.dp, vertical = 2.dp),
+                    .padding(horizontal = 2.dp, vertical = 1.dp),
             )
         }
     }
