@@ -277,7 +277,7 @@ fun HomeScreen(
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
                                 )
                             }
                             Spacer(Modifier.height(14.dp))

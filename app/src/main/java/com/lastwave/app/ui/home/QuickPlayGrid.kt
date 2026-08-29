@@ -59,18 +59,18 @@ fun QuickPlayGrid(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 2.dp),
+                .padding(horizontal = 2.dp, vertical = 1.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = "Quick play",
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
             )
         }
 
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(2.dp))
 
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val spacing = 6.dp
@@ -81,9 +81,9 @@ fun QuickPlayGrid(
                 rows = GridCells.Fixed(3),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(390.dp),
+                    .height(320.dp),
                 horizontalArrangement = Arrangement.spacedBy(spacing),
-                verticalArrangement = Arrangement.spacedBy(spacing),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 contentPadding = PaddingValues(horizontal = 0.dp),
             ) {
                 items(tracks, key = { "${it.name}|${it.artist}" }) { track ->
@@ -106,9 +106,9 @@ private fun QuickPlaySymmetricalTile(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 1.dp, vertical = 2.dp),
+            .padding(horizontal = 1.dp, vertical = 1.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // Square Artwork Container
@@ -116,7 +116,7 @@ private fun QuickPlaySymmetricalTile(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)),
         ) {
             ArtworkImage(
@@ -132,29 +132,29 @@ private fun QuickPlaySymmetricalTile(
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(3.dp)
-                    .size(16.dp),
+                    .padding(2.5.dp)
+                    .size(14.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Filled.PlayArrow,
                         contentDescription = "Play",
                         tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(9.dp),
+                        modifier = Modifier.size(8.dp),
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(2.dp))
 
         // Thin, clearly visible song title
         Text(
             text = track.name,
             style = MaterialTheme.typography.labelSmall.copy(
                 fontWeight = FontWeight.Normal,
-                fontSize = TextUnit(9.5f, TextUnitType.Sp),
-                lineHeight = TextUnit(11.5f, TextUnitType.Sp),
+                fontSize = TextUnit(8.5f, TextUnitType.Sp),
+                lineHeight = TextUnit(10.5f, TextUnitType.Sp),
             ),
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
@@ -162,7 +162,7 @@ private fun QuickPlaySymmetricalTile(
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 2.dp),
+                .padding(horizontal = 1.dp),
         )
     }
 }
