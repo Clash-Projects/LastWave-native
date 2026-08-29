@@ -12,41 +12,41 @@ android {
     namespace = "com.lastwave.app"
     compileSdk = 35
 
+    val localProps = Properties().apply {
+        val localPropsFile = rootProject.file("local.properties")
+        if (localPropsFile.exists()) {
+            localPropsFile.inputStream().use { load(it) }
+        }
+        val envFile = rootProject.file(".env")
+        if (envFile.exists()) {
+            envFile.readLines().forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+                    val parts = trimmed.split("=", limit = 2)
+                    setProperty(parts[0].trim(), parts[1].trim())
+                }
+            }
+        }
+    }
+
+    fun resolveSecret(vararg keys: String): String {
+        for (key in keys) {
+            val fromEnv = System.getenv(key)
+            if (!fromEnv.isNullOrBlank()) return fromEnv.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+            val fromGradle = project.findProperty(key) as? String
+            if (!fromGradle.isNullOrBlank()) return fromGradle.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+            val fromLocal = localProps.getProperty(key)
+            if (!fromLocal.isNullOrBlank()) return fromLocal.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+        }
+        return ""
+    }
+
     defaultConfig {
         applicationId = "com.lastwave.app"
         minSdk = 24
         targetSdk = 35
         versionCode = 13
         versionName = "3.3.1"
-
-        val localProps = Properties().apply {
-            val localPropsFile = rootProject.file("local.properties")
-            if (localPropsFile.exists()) {
-                localPropsFile.inputStream().use { load(it) }
-            }
-            val envFile = rootProject.file(".env")
-            if (envFile.exists()) {
-                envFile.readLines().forEach { line ->
-                    val trimmed = line.trim()
-                    if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
-                        val parts = trimmed.split("=", limit = 2)
-                        setProperty(parts[0].trim(), parts[1].trim())
-                    }
-                }
-            }
-        }
-
-        fun resolveSecret(vararg keys: String): String {
-            for (key in keys) {
-                val fromEnv = System.getenv(key)
-                if (!fromEnv.isNullOrBlank()) return fromEnv.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
-                val fromGradle = project.findProperty(key) as? String
-                if (!fromGradle.isNullOrBlank()) return fromGradle.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
-                val fromLocal = localProps.getProperty(key)
-                if (!fromLocal.isNullOrBlank()) return fromLocal.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
-            }
-            return ""
-        }
 
         val qobuzApiKey = resolveSecret("QOBUZ_API_KEY", "QOBUZ_AUTH_KEY", "API_AUTH_KEY")
         buildConfigField("String", "QOBUZ_API_KEY", "\"$qobuzApiKey\"")
@@ -71,12 +71,33 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystoreFile = file("release.keystore")
-            if (keystoreFile.exists()) {
+            val base64Key = resolveSecret("SIGNING_KEY")
+            val storeFilePath = resolveSecret("RELEASE_STORE_FILE")
+            val storePasswordProp = resolveSecret("RELEASE_STORE_PASSWORD", "KEY_STORE_PASSWORD")
+            val keyAliasProp = resolveSecret("RELEASE_KEY_ALIAS", "ALIAS").ifBlank { "release_key" }
+            val keyPasswordProp = resolveSecret("RELEASE_KEY_PASSWORD", "KEY_PASSWORD").ifBlank { storePasswordProp }
+
+            val keystoreFile: File? = when {
+                base64Key.isNotBlank() -> {
+                    try {
+                        val decodedBytes = java.util.Base64.getDecoder().decode(base64Key.trim())
+                        val tempKeystore = layout.buildDirectory.file("signing/release.keystore").get().asFile
+                        tempKeystore.parentFile.mkdirs()
+                        tempKeystore.writeBytes(decodedBytes)
+                        tempKeystore
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                storeFilePath.isNotBlank() -> file(storeFilePath)
+                else -> null
+            }
+
+            if (keystoreFile != null && keystoreFile.exists() && storePasswordProp.isNotBlank()) {
                 storeFile = keystoreFile
-                storePassword = "lastwave123"
-                keyAlias = "lastwave"
-                keyPassword = "lastwave123"
+                storePassword = storePasswordProp
+                keyAlias = keyAliasProp
+                keyPassword = keyPasswordProp
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true

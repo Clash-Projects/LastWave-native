@@ -32,7 +32,6 @@ local.properties
 # Keystore files
 *.jks
 *.keystore
-!app/release.keystore
 *.p12
 *.pem
 

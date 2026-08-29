@@ -46,6 +46,10 @@ jobs:
         env:
           QOBUZ_API_KEY: ${{ secrets.QOBUZ_API_KEY }}
           LYRICS_API_KEY: ${{ secrets.LYRICS_API_KEY }}
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.ALIAS || secrets.RELEASE_KEY_ALIAS || 'release_key' }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
         run: ./gradlew assembleRelease assembleRawRelease --stacktrace
 
       - name: Sign Release APK with Custom Key (Optional)
@@ -55,9 +59,9 @@ jobs:
         with:
           releaseDirectory: app/build/outputs/apk/release
           signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
+          alias: ${{ secrets.ALIAS || secrets.RELEASE_KEY_ALIAS || 'release_key' }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
@@ -68,9 +72,9 @@ jobs:
         with:
           releaseDirectory: app/build/outputs/apk/rawRelease
           signingKeyBase64: ${{ secrets.SIGNING_KEY }}
-          alias: ${{ secrets.ALIAS }}
-          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
+          alias: ${{ secrets.ALIAS || secrets.RELEASE_KEY_ALIAS || 'release_key' }}
+          keyStorePassword: ${{ secrets.KEY_STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
