@@ -111,10 +111,10 @@ private fun QuickPlaySymmetricalTile(
             .padding(horizontal = 1.dp, vertical = 1.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Square Artwork Container
+        // Square Artwork Container - smaller to give ample room for song name
         Box(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxWidth(0.80f)
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)),
@@ -132,29 +132,29 @@ private fun QuickPlaySymmetricalTile(
                 color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(2.5.dp)
-                    .size(14.dp),
+                    .padding(2.dp)
+                    .size(13.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Filled.PlayArrow,
                         contentDescription = "Play",
                         tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(8.dp),
+                        modifier = Modifier.size(7.5.dp),
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(3.dp))
 
         // Thin, clearly visible song title
         Text(
             text = track.name,
             style = MaterialTheme.typography.labelSmall.copy(
                 fontWeight = FontWeight.Normal,
-                fontSize = TextUnit(8.5f, TextUnitType.Sp),
-                lineHeight = TextUnit(10.5f, TextUnitType.Sp),
+                fontSize = TextUnit(9f, TextUnitType.Sp),
+                lineHeight = TextUnit(11f, TextUnitType.Sp),
             ),
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
@@ -162,7 +162,7 @@ private fun QuickPlaySymmetricalTile(
             textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 1.dp),
+                .padding(horizontal = 2.dp),
         )
     }
 }

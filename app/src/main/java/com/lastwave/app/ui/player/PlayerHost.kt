@@ -673,7 +673,7 @@ private fun MiniPlayer(
                         track.title,
                         style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.Normal,
-                            fontSize = androidx.compose.ui.unit.TextUnit(12.5f, androidx.compose.ui.unit.TextUnitType.Sp),
+                            fontSize = androidx.compose.ui.unit.TextUnit(11.5f, androidx.compose.ui.unit.TextUnitType.Sp),
                         ),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -683,9 +683,9 @@ private fun MiniPlayer(
                         track.artist,
                         style = MaterialTheme.typography.bodySmall.copy(
                             fontWeight = FontWeight.Light,
-                            fontSize = androidx.compose.ui.unit.TextUnit(10.5f, androidx.compose.ui.unit.TextUnitType.Sp),
+                            fontSize = androidx.compose.ui.unit.TextUnit(9.5f, androidx.compose.ui.unit.TextUnitType.Sp),
                         ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
