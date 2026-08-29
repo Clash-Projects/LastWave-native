@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,9 +42,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
@@ -53,6 +55,7 @@ import com.lastwave.app.ui.common.ArtworkImage
 
 /**
  * 3x3 Symmetrical, Horizontally Scrollable Quick Play Grid with smooth snap animation.
+ * Features YouTube Music style album art cards with fused bottom black gradients and song names.
  */
 @Composable
 fun QuickPlayGrid(
@@ -80,12 +83,14 @@ fun QuickPlayGrid(
             )
         }
 
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(3.dp))
 
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            val spacing = 6.dp
-            // Exactly 3 columns fit 100% of the available width with smooth snapping
+            val spacing = 4.dp
+            // Exactly 3 columns fit 100% of the available width with tight, elegant spacing
             val tileWidth = (maxWidth - (spacing * 2)) / 3
+            // 3 square tiles + 2 vertical gaps of 4.dp
+            val gridHeight = (tileWidth * 3) + (spacing * 2)
 
             LazyHorizontalGrid(
                 rows = GridCells.Fixed(3),
@@ -93,9 +98,9 @@ fun QuickPlayGrid(
                 flingBehavior = flingBehavior,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(320.dp),
+                    .height(gridHeight),
                 horizontalArrangement = Arrangement.spacedBy(spacing),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(spacing),
                 contentPadding = PaddingValues(horizontal = 0.dp),
             ) {
                 items(tracks, key = { "${it.name}|${it.artist}" }) { track ->
@@ -127,73 +132,85 @@ private fun QuickPlaySymmetricalTile(
         label = "quickPlayTileScale",
     )
 
-    Column(
+    Box(
         modifier = modifier
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(RoundedCornerShape(8.dp))
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f))
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick,
-            )
-            .padding(horizontal = 1.dp, vertical = 1.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            ),
     ) {
-        // Square Artwork Container - smaller to give ample room for song name
+        // Full background album artwork
+        ArtworkImage(
+            name = track.name,
+            artist = track.artist,
+            embeddedUrl = track.artworkUrl,
+            fallbackIcon = Icons.Filled.MusicNote,
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        // Lower black gradient overlay (YouTube Music style)
         Box(
             modifier = Modifier
-                .fillMaxWidth(0.80f)
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)),
+                .fillMaxWidth()
+                .fillMaxHeight(0.60f)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color.Black.copy(alpha = 0.50f),
+                            Color.Black.copy(alpha = 0.90f),
+                        ),
+                    ),
+                ),
+        )
+
+        // Fused song title & sleek play badge directly on top of the gradient
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 6.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            ArtworkImage(
-                name = track.name,
-                artist = track.artist,
-                embeddedUrl = track.artworkUrl,
-                fallbackIcon = Icons.Filled.MusicNote,
-                modifier = Modifier.fillMaxSize(),
+            Text(
+                text = track.name,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Medium,
+                    fontSize = TextUnit(9.5f, TextUnitType.Sp),
+                    lineHeight = TextUnit(11.5f, TextUnitType.Sp),
+                ),
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
-            // Sleek, compact play badge overlay
+
+            Spacer(Modifier.width(4.dp))
+
             Surface(
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(2.dp)
-                    .size(13.dp),
+                color = Color.White.copy(alpha = 0.92f),
+                modifier = Modifier.size(15.dp),
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Filled.PlayArrow,
                         contentDescription = "Play",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(7.5.dp),
+                        tint = Color.Black,
+                        modifier = Modifier.size(8.5.dp),
                     )
                 }
             }
         }
-
-        Spacer(Modifier.height(3.dp))
-
-        // Thin, clearly visible song title
-        Text(
-            text = track.name,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontWeight = FontWeight.Normal,
-                fontSize = TextUnit(9f, TextUnitType.Sp),
-                lineHeight = TextUnit(11f, TextUnitType.Sp),
-            ),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 2.dp),
-        )
     }
 }
