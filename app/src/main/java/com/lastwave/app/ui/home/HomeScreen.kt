@@ -252,6 +252,10 @@ fun HomeScreen(
                         MixHeader(sortMode = uiState.sortMode, onSortModeChange = viewModel::setSortMode)
                     }
 
+                    val quickTracks = remember(uiState.allTracks) {
+                        uiState.allTracks.distinctBy { "${it.name}|${it.artist}" }.take(6)
+                    }
+
                     LazyColumn(
                         state = listState,
                         contentPadding = PaddingValues(
@@ -262,6 +266,28 @@ fun HomeScreen(
                         ),
                         modifier = Modifier.fillMaxSize(),
                     ) {
+                        if (quickTracks.isNotEmpty()) {
+                            item(key = "quick_play_grid", contentType = "quick_play") {
+                                QuickPlayGrid(
+                                    tracks = quickTracks,
+                                    onTrackClick = { track ->
+                                        musicPlayer.play(
+                                            com.lastwave.app.playback.PlayableTrack(
+                                                title = track.name,
+                                                artist = track.artist,
+                                                artworkUrl = track.artworkUrl,
+                                            ),
+                                            sourceLabel = "Quick Play",
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                                )
+                                Spacer(Modifier.height(10.dp))
+                            }
+                        }
+
                         itemsIndexed(
                             rows,
                             key = { _, row ->
