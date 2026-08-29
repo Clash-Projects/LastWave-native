@@ -264,6 +264,20 @@ export class QobuzClient {
 
       return result;
     } catch (err) {
+      // If signature invalid, auto-refresh secrets from BundleScraper and retry
+      if (err.message && err.message.includes("Invalid Request Signature parameter")) {
+        try {
+          const scraper = new BundleScraper();
+          const tokens = await scraper.getTokens();
+          this.secrets = [...new Set([...(this.secrets || []), ...tokens.secrets])].filter(Boolean);
+          await this.findWorkingSecret();
+          if (this.appSecret) {
+            const retrySigned = signTrackStreamUrl(trackId, requestedFmt, this.appSecret);
+            return await this.apiCall("track/getFileUrl", retrySigned);
+          }
+        } catch {}
+      }
+
       // If error occurs and fallback requested, step down qualities
       if (fallback && requestedFmt > 5) {
         const fallbackQualities = [7, 6, 5].filter(q => q < requestedFmt);

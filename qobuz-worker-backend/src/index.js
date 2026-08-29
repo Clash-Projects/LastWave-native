@@ -6,6 +6,7 @@
  */
 
 import { QobuzClient } from "./qobuz/client.js";
+import { AccountPool, createAccountPoolFromEnv } from "./qobuz/pool.js";
 import { Downloader } from "./qobuz/downloader.js";
 import { BundleScraper } from "./qobuz/bundle.js";
 import { 
@@ -22,41 +23,30 @@ import { formatTrackFilename, buildAudioTags } from "./qobuz/metadata.js";
 import { renderDashboardHtml } from "./ui.js";
 import { renderDocsHtml } from "./docs.js";
 
-// Cached client instance for worker execution context
-let cachedClient = null;
+// Cached account pool instance for worker execution context
+let cachedPool = null;
 
 function getClient(env, request) {
   const url = request ? new URL(request.url) : null;
   const reqAuthToken = request?.headers?.get("X-User-Auth-Token") || url?.searchParams?.get("token");
   const reqAppId = request?.headers?.get("X-App-Id") || url?.searchParams?.get("app_id");
 
-  const appId = reqAppId || env.QOBUZ_APP_ID || "798273057";
-  const appSecret = env.QOBUZ_APP_SECRET || null;
-  const userAuthToken = reqAuthToken || env.QOBUZ_USER_AUTH_TOKEN || null;
-  const email = env.QOBUZ_EMAIL || null;
-  const password = env.QOBUZ_PASSWORD || null;
-
   // If request provided distinct auth token or app ID, instantiate per-request client
   if (reqAuthToken || reqAppId) {
     return new QobuzClient({
-      appId,
-      appSecret,
-      userAuthToken,
-      email,
-      password
+      appId: reqAppId || env.QOBUZ_APP_ID || "798273057",
+      appSecret: env.QOBUZ_APP_SECRET || null,
+      userAuthToken: reqAuthToken || env.QOBUZ_USER_AUTH_TOKEN || null,
+      email: env.QOBUZ_EMAIL || null,
+      password: env.QOBUZ_PASSWORD || null
     });
   }
 
-  if (!cachedClient) {
-    cachedClient = new QobuzClient({
-      appId,
-      appSecret,
-      userAuthToken,
-      email,
-      password
-    });
+  // Otherwise, use the load-balanced AccountPool
+  if (!cachedPool) {
+    cachedPool = createAccountPoolFromEnv(env);
   }
-  return cachedClient;
+  return cachedPool;
 }
 
 export default {
@@ -166,6 +156,15 @@ export default {
       // Initialize client and downloader
       const client = getClient(env, request);
       const downloader = new Downloader(client);
+
+      // 3b. Account Pool Status & Load Balancer Metrics
+      if (path === "/api/pool/status" || path === "/api/pool") {
+        const poolStatus = client.getPoolStatus ? client.getPoolStatus() : { singleAccountMode: true };
+        return jsonResponse({
+          success: true,
+          pool: poolStatus
+        });
+      }
 
       // 4. Token & Scraper Status
       if (path === "/api/tokens") {

@@ -1,6 +1,6 @@
 # Qobuz Cloudflare Worker Backend — Setup Guide
 
-A 100% hand-crafted, zero-dependency serverless JavaScript music API and downloader backend for **Cloudflare Workers**, powered by the core architecture of [clashflac](https://github.com/ajisth69/clashflac) by [Ajisth (ajisth69)](https://github.com/ajisth69).
+A serverless JavaScript music API and downloader backend for **Cloudflare Workers**, powered by [clashflac](https://github.com/ajisth69/clashflac).
 
 ---
 
@@ -77,7 +77,7 @@ npm run deploy
 
 ---
 
-## Project Architecture (100% Hand-Crafted Pure JavaScript)
+## Project Architecture
 
 ```
 qobuz-worker-backend/
