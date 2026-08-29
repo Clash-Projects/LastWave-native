@@ -116,47 +116,50 @@ fun GenerateScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 2.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
                 shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 1.dp,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
             ) {
-                Text(
-                    text = "${GenerateMode.entries.size} Modes",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                )
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${GenerateMode.entries.size} Modes",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
+                    )
+                }
             }
             Surface(
                 shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 1.dp,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
                         Icons.Filled.AutoAwesome,
                         contentDescription = null,
-                        modifier = Modifier.size(13.dp),
+                        modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.primary,
                     )
-                    Spacer(Modifier.width(5.dp))
+                    Spacer(Modifier.width(6.dp))
                     Text(
                         text = "Smart Mixes",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
                     )
                 }
             }
         }
-        Spacer(Modifier.height(4.dp))
 
         com.lastwave.app.ui.common.WithoutPlatformOverscroll {
         LazyColumn(
