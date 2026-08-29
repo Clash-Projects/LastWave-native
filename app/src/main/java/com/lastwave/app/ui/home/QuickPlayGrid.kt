@@ -23,6 +23,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,6 +49,9 @@ fun QuickPlayGrid(
 ) {
     if (tracks.isEmpty()) return
 
+    var isExpanded by remember { mutableStateOf(false) }
+    val displayTracks = if (isExpanded) tracks.take(18) else tracks.take(6)
+
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -58,18 +65,24 @@ fun QuickPlayGrid(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
-            Text(
-                text = "View all",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.clickable { /* TODO: View all action */ },
-            )
+            if (tracks.size > 6) {
+                Text(
+                    text = if (isExpanded) "Show less" else "View all",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { isExpanded = !isExpanded }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
         }
 
         Spacer(Modifier.height(8.dp))
 
         // 3-column arrangement
-        val rows = tracks.take(6).chunked(3)
+        val rows = displayTracks.chunked(3)
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             rows.forEach { rowTracks ->
                 Row(

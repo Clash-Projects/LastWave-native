@@ -2,6 +2,7 @@ package com.lastwave.app.ui.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -253,7 +254,7 @@ fun HomeScreen(
                     }
 
                     val quickTracks = remember(uiState.allTracks) {
-                        uiState.allTracks.distinctBy { "${it.name}|${it.artist}" }.take(6)
+                        uiState.allTracks.distinctBy { "${it.name}|${it.artist}" }
                     }
 
                     LazyColumn(
@@ -514,66 +515,103 @@ private fun StatsCard(
 
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(animationSpec = tween(400)) + expandVertically(animationSpec = tween(400)),
+        enter = fadeIn(animationSpec = tween(300)) + expandVertically(animationSpec = tween(300)),
         modifier = modifier,
     ) {
         Surface(
-            shape = ExpressiveHeroShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 2.dp,
-            shadowElevation = 4.dp,
-            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
+            tonalElevation = 1.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenGenres() },
         ) {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                // Left: Main Scrobble Stat with subtle pill background
                 Surface(
-                    shape = HeroInnerShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
                 ) {
-                    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.align(Alignment.Center),
-                        ) {
-                            Text(
-                                formatCount(rememberAnimatedCount(scrobbles)),
-                                style = MaterialTheme.typography.displaySmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                            Text(
-                                "Scrobbles",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
-                            )
-                        }
-                        Surface(
-                            shape = ExpressivePillShape,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(46.dp).align(Alignment.CenterEnd),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                IconButton(onClick = onOpenGenres) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.ArrowForward,
-                                        contentDescription = "View genres",
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                    )
-                                }
-                            }
-                        }
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            formatCount(rememberAnimatedCount(scrobbles)),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                        Text(
+                            "Scrobbles",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                        )
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                // Middle: Compact stats row (Tracks, Artists, Albums)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CompactStatItem(count = trackCount, label = "Tracks")
+                    Box(
+                        modifier = Modifier
+                            .size(3.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.outlineVariant),
+                    )
+                    CompactStatItem(count = artistCount, label = "Artists")
+                    Box(
+                        modifier = Modifier
+                            .size(3.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.outlineVariant),
+                    )
+                    CompactStatItem(count = albumCount, label = "Albums")
+                }
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatPill("Tracks", trackCount, Modifier.weight(1f))
-                    StatPill("Artists", artistCount, Modifier.weight(1f))
-                    StatPill("Albums", albumCount, Modifier.weight(1f))
+                // Right: Sleek mini arrow action
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "View genres",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CompactStatItem(count: Long, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            formatCount(rememberAnimatedCount(count)),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -590,29 +628,6 @@ private fun rememberAnimatedCount(target: Long): Long {
         )
     }
     return animated.value.toLong()
-}
-
-@Composable
-private fun StatPill(label: String, value: Long, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier,
-        shape = StatPillShape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-    ) {
-        Column(Modifier.padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                formatCount(rememberAnimatedCount(value)),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
-            )
-        }
-    }
 }
 
 private fun formatCount(value: Long): String = if (value <= 0) "—" else "%,d".format(value)
