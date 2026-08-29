@@ -643,13 +643,13 @@ private fun MiniPlayer(
                     Modifier
                 })
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 9.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Album art with equal space above, below, and on the left
-                Box(Modifier.size(64.dp)) {
+                Box(Modifier.size(52.dp)) {
                     Surface(
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         tonalElevation = 2.dp,
                         modifier = Modifier.fillMaxSize(),
@@ -657,7 +657,7 @@ private fun MiniPlayer(
                         PlayerArtwork(
                             track = track,
                             modifier = Modifier.fillMaxSize(),
-                            corner = 18.dp,
+                            corner = 12.dp,
                         )
                     }
                 }
@@ -666,7 +666,7 @@ private fun MiniPlayer(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(start = 12.dp, end = 4.dp),
+                        .padding(start = 10.dp, end = 2.dp),
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -675,13 +675,13 @@ private fun MiniPlayer(
                         Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .padding(end = 6.dp),
+                                .padding(end = 4.dp),
                         ) {
                             Text(
                                 track.title,
                                 style = MaterialTheme.typography.titleSmall.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = androidx.compose.ui.unit.TextUnit(15.5f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                    fontWeight = FontWeight.Normal,
+                                    fontSize = androidx.compose.ui.unit.TextUnit(12.5f, androidx.compose.ui.unit.TextUnitType.Sp),
                                 ),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -690,9 +690,10 @@ private fun MiniPlayer(
                             Text(
                                 track.artist,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    fontSize = androidx.compose.ui.unit.TextUnit(13f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                    fontWeight = FontWeight.Light,
+                                    fontSize = androidx.compose.ui.unit.TextUnit(10.5f, androidx.compose.ui.unit.TextUnitType.Sp),
                                 ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -700,20 +701,20 @@ private fun MiniPlayer(
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
                             IconButton(
                                 onClick = {
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onToggleFavorite()
                                 },
-                                modifier = Modifier.size(44.dp),
+                                modifier = Modifier.size(36.dp),
                             ) {
                                 Icon(
                                     if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                                     contentDescription = "Favorite",
                                     tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                                    modifier = Modifier.size(24.dp),
+                                    modifier = Modifier.size(18.dp),
                                 )
                             }
 
@@ -722,17 +723,17 @@ private fun MiniPlayer(
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(48.dp),
+                                modifier = Modifier.size(38.dp),
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     if (state.isBuffering) {
                                         ExpressiveInlineLoadingIndicator(
-                                            size = 20.dp,
+                                            size = 16.dp,
                                             color = MaterialTheme.colorScheme.onPrimary,
                                             strokeWidth = 2.dp,
                                         )
                                     } else {
-                                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(26.dp))
+                                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(20.dp))
                                     }
                                 }
                             }
@@ -746,7 +747,7 @@ private fun MiniPlayer(
                         onSeek = onSeek,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 3.dp),
+                            .padding(top = 2.dp),
                     )
                 }
             }

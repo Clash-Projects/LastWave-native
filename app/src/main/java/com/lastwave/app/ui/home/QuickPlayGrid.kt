@@ -1,6 +1,7 @@
 package com.lastwave.app.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -103,72 +104,65 @@ private fun QuickPlaySymmetricalTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
-        tonalElevation = 0.dp,
-        modifier = modifier,
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 1.dp, vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Column(
+        // Square Artwork Container
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)),
         ) {
-            // Square Artwork Container
-            Box(
+            ArtworkImage(
+                name = track.name,
+                artist = track.artist,
+                embeddedUrl = track.artworkUrl,
+                fallbackIcon = Icons.Filled.MusicNote,
+                modifier = Modifier.fillMaxSize(),
+            )
+            // Sleek, compact play badge overlay
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)),
+                    .align(Alignment.BottomEnd)
+                    .padding(3.dp)
+                    .size(16.dp),
             ) {
-                ArtworkImage(
-                    name = track.name,
-                    artist = track.artist,
-                    embeddedUrl = track.artworkUrl,
-                    fallbackIcon = Icons.Filled.MusicNote,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                // Sleek, compact play badge overlay
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(2.5.dp)
-                        .size(16.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Filled.PlayArrow,
-                            contentDescription = "Play",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(9.dp),
-                        )
-                    }
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Filled.PlayArrow,
+                        contentDescription = "Play",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(9.dp),
+                    )
                 }
             }
-
-            Spacer(Modifier.height(3.dp))
-
-            // Thin, clearly visible song title
-            Text(
-                text = track.name,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Normal,
-                    fontSize = TextUnit(9.5f, TextUnitType.Sp),
-                    lineHeight = TextUnit(11.5f, TextUnitType.Sp),
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 2.dp, vertical = 1.dp),
-            )
         }
+
+        Spacer(Modifier.height(3.dp))
+
+        // Thin, clearly visible song title
+        Text(
+            text = track.name,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Normal,
+                fontSize = TextUnit(9.5f, TextUnitType.Sp),
+                lineHeight = TextUnit(11.5f, TextUnitType.Sp),
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp),
+        )
     }
 }
