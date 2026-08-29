@@ -395,19 +395,6 @@ fun PlayerHost(
                     else kotlinx.coroutines.flow.flowOf(false)
                 }.collectAsStateWithLifecycle(initialValue = false)
 
-                // Prevent background list elements beneath the MiniPlayer and dock from being clicked
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(if (hasBottomNavigation) 155.dp else 85.dp)
-                        .clickable(
-                            interactionSource = null,
-                            indication = null,
-                            onClick = {},
-                        ),
-                )
-
                 MiniPlayer(
                     state = state,
                     progressState = viewModel.progressState,
@@ -419,7 +406,7 @@ fun PlayerHost(
                     onPrevious = viewModel.player::previous,
                     onNext = viewModel.player::next,
                     onClose = viewModel.player::stopAndClear,
-                    bottomPadding = if (hasBottomNavigation) 84.dp else 10.dp,
+                    bottomPadding = if (hasBottomNavigation) 66.dp else 10.dp,
                     edgeToEdge = !hasBottomNavigation,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
@@ -656,13 +643,13 @@ private fun MiniPlayer(
                     Modifier
                 })
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                    .padding(horizontal = 8.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Album art with equal space above, below, and on the left
-                Box(Modifier.size(52.dp)) {
+                Box(Modifier.size(58.dp)) {
                     Surface(
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(16.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         tonalElevation = 2.dp,
                         modifier = Modifier.fillMaxSize(),
@@ -670,7 +657,7 @@ private fun MiniPlayer(
                         PlayerArtwork(
                             track = track,
                             modifier = Modifier.fillMaxSize(),
-                            corner = 14.dp,
+                            corner = 16.dp,
                         )
                     }
                 }
@@ -694,7 +681,7 @@ private fun MiniPlayer(
                                 track.title,
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.SemiBold,
-                                    fontSize = androidx.compose.ui.unit.TextUnit(14f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                    fontSize = androidx.compose.ui.unit.TextUnit(15f, androidx.compose.ui.unit.TextUnitType.Sp),
                                 ),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -703,7 +690,7 @@ private fun MiniPlayer(
                             Text(
                                 track.artist,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                    fontSize = androidx.compose.ui.unit.TextUnit(12.5f, androidx.compose.ui.unit.TextUnitType.Sp),
                                 ),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                 maxLines = 1,
@@ -720,13 +707,13 @@ private fun MiniPlayer(
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onToggleFavorite()
                                 },
-                                modifier = Modifier.size(36.dp),
+                                modifier = Modifier.size(42.dp),
                             ) {
                                 Icon(
                                     if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                                     contentDescription = "Favorite",
                                     tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier.size(22.dp),
                                 )
                             }
 
@@ -735,17 +722,17 @@ private fun MiniPlayer(
                                 shape = CircleShape,
                                 color = MaterialTheme.colorScheme.primary,
                                 contentColor = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(38.dp),
+                                modifier = Modifier.size(44.dp),
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     if (state.isBuffering) {
                                         ExpressiveInlineLoadingIndicator(
-                                            size = 16.dp,
+                                            size = 18.dp,
                                             color = MaterialTheme.colorScheme.onPrimary,
                                             strokeWidth = 2.dp,
                                         )
                                     } else {
-                                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(21.dp))
+                                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(24.dp))
                                     }
                                 }
                             }

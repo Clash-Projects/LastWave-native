@@ -234,6 +234,14 @@ class MusicPlayer @Inject constructor(
             .setCache(mediaCache)
             .setUpstreamDataSourceFactory(defaultDataSourceFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            .setEventListener(object : CacheDataSource.EventListener {
+                override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) {
+                    android.util.Log.d("SongCache", "Read $cachedBytesRead bytes from stream cache (total cached: ${cacheSizeBytes / 1024} KB)")
+                }
+                override fun onCacheIgnored(reason: Int) {
+                    android.util.Log.d("SongCache", "Cache bypassed/ignored (reason: $reason)")
+                }
+            })
     }
 
     private val listener = object : Player.Listener {

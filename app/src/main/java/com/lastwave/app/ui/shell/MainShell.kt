@@ -257,7 +257,7 @@ private fun FloatingNavItem(
         color = backgroundColor,
         modifier = Modifier
             .fillMaxWidth()
-            .height(46.dp)
+            .height(42.dp)
             .animateContentSize(animationSpec = navSpring()),
     ) {
         Row(
@@ -270,7 +270,7 @@ private fun FloatingNavItem(
                 imageVector = icon,
                 contentDescription = label,
                 tint = contentColor,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(20.dp),
             )
             AnimatedVisibility(
                 visible = selected,
@@ -286,10 +286,13 @@ private fun FloatingNavItem(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(4.dp))
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.labelLarge,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Medium,
+                            fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp),
+                        ),
                         color = contentColor,
                         maxLines = 1,
                     )

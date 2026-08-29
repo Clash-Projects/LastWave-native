@@ -249,10 +249,6 @@ fun HomeScreen(
                         .clip(ListContainerShape)
                         .background(MaterialTheme.colorScheme.surfaceContainer),
                 ) {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
-                        MixHeader(sortMode = uiState.sortMode, onSortModeChange = viewModel::setSortMode)
-                    }
-
                     val quickTracks = remember(uiState.allTracks) {
                         uiState.allTracks.distinctBy { "${it.name}|${it.artist}" }
                     }
@@ -262,7 +258,7 @@ fun HomeScreen(
                         contentPadding = PaddingValues(
                             start = 8.dp,
                             end = 8.dp,
-                            top = 0.dp,
+                            top = 8.dp,
                             bottom = FloatingNavDefaults.contentBottomPadding(),
                         ),
                         modifier = Modifier.fillMaxSize(),
@@ -283,10 +279,24 @@ fun HomeScreen(
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                                        .padding(horizontal = 6.dp, vertical = 4.dp),
                                 )
-                                Spacer(Modifier.height(10.dp))
+                                Spacer(Modifier.height(14.dp))
                             }
+                        }
+
+                        item(key = "list_header", contentType = "header") {
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                MixHeader(
+                                    sortMode = uiState.sortMode,
+                                    onSortModeChange = viewModel::setSortMode,
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
                         }
 
                         itemsIndexed(
