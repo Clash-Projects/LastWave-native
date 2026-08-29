@@ -19,14 +19,32 @@ sealed interface ArtistAlbumNavTarget {
 class ArtistAlbumNavigator @Inject constructor() {
     private val _events = MutableSharedFlow<ArtistAlbumNavTarget>(extraBufferCapacity = 1)
     val events: SharedFlow<ArtistAlbumNavTarget> = _events
+    private var lastNavTimestamp = 0L
+    private var lastNavTarget: ArtistAlbumNavTarget? = null
 
     fun openArtist(name: String, browseId: String? = null) {
-        if (name.isBlank()) return
-        _events.tryEmit(ArtistAlbumNavTarget.Artist(name.trim(), browseId?.takeIf(String::isNotBlank)))
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return
+        val target = ArtistAlbumNavTarget.Artist(trimmed, browseId?.takeIf(String::isNotBlank))
+        val now = System.currentTimeMillis()
+        if (target == lastNavTarget && now - lastNavTimestamp < 600L) {
+            return
+        }
+        lastNavTimestamp = now
+        lastNavTarget = target
+        _events.tryEmit(target)
     }
 
     fun openAlbum(title: String, artist: String = "", browseId: String? = null) {
-        if (title.isBlank()) return
-        _events.tryEmit(ArtistAlbumNavTarget.Album(title.trim(), artist.trim(), browseId?.takeIf(String::isNotBlank)))
+        val trimmedTitle = title.trim()
+        if (trimmedTitle.isBlank()) return
+        val target = ArtistAlbumNavTarget.Album(trimmedTitle, artist.trim(), browseId?.takeIf(String::isNotBlank))
+        val now = System.currentTimeMillis()
+        if (target == lastNavTarget && now - lastNavTimestamp < 600L) {
+            return
+        }
+        lastNavTimestamp = now
+        lastNavTarget = target
+        _events.tryEmit(target)
     }
 }

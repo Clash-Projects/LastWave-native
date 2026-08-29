@@ -83,6 +83,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -164,13 +165,6 @@ fun HomeScreen(
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            // Item 1 (this pass): the header container itself is now the
-            // one shared ExpressiveHeader — full-bleed, only its bottom
-            // edge rounded, same as every other tab. The username pill and
-            // live-listen-timer pill are deliberately NOT part of this
-            // container anymore (they were folded in before) — they render
-            // as their own free-floating row in the scroll content below,
-            // same as the original layout.
             ExpressiveHeader(
                 title = "LastWave",
                 actions = {
@@ -273,46 +267,6 @@ fun HomeScreen(
                             key = { _, row ->
                                 when (row) {
                                     is HomeRow.DateHeader -> "date_${row.label}"
-                                    // isNowPlaying deliberately left OUT of
-                                    // this key. Last.fm's own now-playing
-                                    // flag on user.getrecenttracks can
-                                    // flicker true/false/true across
-                                    // consecutive polls a few seconds apart
-                                    // for the same actual track — with it
-                                    // in the key, every flicker changed the
-                                    // key, which made Compose treat it as
-                                    // a brand new list item and remount the
-                                    // whole row from scratch, restarting
-                                    // its pulse animation each time. That's
-                                    // what read as "flickering" rather than
-                                    // one continuous loop — the animation
-                                    // itself was fine, it just kept getting
-                                    // torn down and recreated. Track
-                                    // identity (name/artist + timestamp)
-                                    // is stable across that flicker, so
-                                    // keying on that alone keeps the same
-                                    // composable instance (and its
-                                    // in-flight animation) across polls;
-                                    // isNowPlaying still reaches the row
-                                    // normally as a plain recomposition.
-                                    //
-                                    // The actual remaining blink: the
-                                    // synthetic "now playing" HomeTrack is
-                                    // rebuilt fresh on EVERY poll tick
-                                    // (NOW_PLAYING_POLL_MS / RECENT_TRACKS_
-                                    // POLL_MS) with timestampMillis set to
-                                    // System.currentTimeMillis() at poll
-                                    // time (see mergeRecentWithTop) — not
-                                    // the track's real scrobble time. Since
-                                    // that timestamp was part of this key,
-                                    // it changed every single poll even
-                                    // though the same song was still
-                                    // playing, so Compose tore down and
-                                    // recreated that row from scratch every
-                                    // few seconds — the actual blink. Give
-                                    // the now-playing row a stable
-                                    // identity-only key instead of pinning
-                                    // it to that synthetic timestamp.
                                     is HomeRow.Track -> if (row.track.isNowPlaying) {
                                         "nowplaying_${row.track.key}"
                                     } else {
@@ -327,7 +281,7 @@ fun HomeScreen(
                                 }
                             },
                         ) { rowIndex, row ->
-                            Box(Modifier.animateItem()) {
+                            Box {
                                 when (row) {
                                     is HomeRow.DateHeader -> DateHeaderRow(row.label)
                                     is HomeRow.Track -> TrackRow(
@@ -406,9 +360,6 @@ private fun HeaderRow(
         Surface(
             onClick = onClick,
             shape = BadgePillShape,
-            // A distinct tone while viewing a friend's data — a quiet but
-            // real signal (not just the name text) that this isn't your
-            // own profile right now, visible even at a glance.
             color = if (isViewingFriend) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
             Row(
@@ -421,9 +372,6 @@ private fun HeaderRow(
                     fontWeight = FontWeight.SemiBold,
                     color = if (isViewingFriend) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                 )
-                // Only shown while actually viewing a friend's data — no
-                // icon at all for your own profile, per explicit request
-                // (previously always showed, regardless of state).
                 if (isViewingFriend) {
                     Spacer(Modifier.width(6.dp))
                     Icon(
@@ -439,7 +387,6 @@ private fun HeaderRow(
         LiveListenTimer(viewModel)
     }
 }
-
 
 @Composable
 private fun LiveListenTimer(viewModel: HomeViewModel) {

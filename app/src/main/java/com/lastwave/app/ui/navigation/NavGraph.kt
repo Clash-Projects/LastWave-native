@@ -63,7 +63,9 @@ fun LastWaveNavHost(
     val pendingGenre by genreExplorerBridge.pendingGenre.collectAsStateWithLifecycle()
     LaunchedEffect(pendingGenre) {
         if (pendingGenre != null) {
-            navController.navigate(Screen.Genres.route)
+            navController.navigate(Screen.Genres.route) {
+                launchSingleTop = true
+            }
         }
     }
 
@@ -72,10 +74,14 @@ fun LastWaveNavHost(
         navBridge.navigator.events.collect { target ->
             when (target) {
                 is ArtistAlbumNavTarget.Artist -> {
-                    navController.navigate(Screen.ArtistDetail.createRoute(target.name, target.browseId))
+                    navController.navigate(Screen.ArtistDetail.createRoute(target.name, target.browseId)) {
+                        launchSingleTop = true
+                    }
                 }
                 is ArtistAlbumNavTarget.Album -> {
-                    navController.navigate(Screen.AlbumDetail.createRoute(target.title, target.artist, target.browseId))
+                    navController.navigate(Screen.AlbumDetail.createRoute(target.title, target.artist, target.browseId)) {
+                        launchSingleTop = true
+                    }
                 }
             }
         }
@@ -221,6 +227,7 @@ fun LastWaveNavHost(
         }
 
         composable(Screen.Settings.route) {
+            val context = androidx.compose.ui.platform.LocalContext.current
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 SettingsScreen(
                     onBack = { navController.popBackStack() },
