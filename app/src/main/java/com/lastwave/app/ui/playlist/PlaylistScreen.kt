@@ -147,59 +147,60 @@ fun PlaylistScreen(
         Column(Modifier.fillMaxSize()) {
             var sortMenuExpanded by remember { mutableStateOf(false) }
             ExpressiveHeader(
-                title = "Playlist",
-                subtitle = "${state.playlists.size} Playlists \u00b7 ${state.playlists.sumOf { it.tracks.size }} Tracks",
+                title = "Playlists",
                 actions = {
-                    IconButton(
+                    com.lastwave.app.ui.common.HeaderActionIcon(
+                        icon = Icons.Filled.Add,
+                        contentDescription = "Create custom playlist",
                         onClick = viewModel::openCreateDialog,
-                        modifier = Modifier.size(40.dp),
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = "Create custom playlist")
-                    }
-                    Box {
-                        Surface(
-                            onClick = { sortMenuExpanded = true },
-                            shape = RoundedCornerShape(50),
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            tonalElevation = 1.dp,
-                            modifier = Modifier.heightIn(min = 34.dp),
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.Sort,
-                                    contentDescription = "Sort playlists",
-                                    modifier = Modifier.size(15.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    "Sort",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = sortMenuExpanded,
-                            onDismissRequest = { sortMenuExpanded = false },
-                            shape = RoundedCornerShape(22.dp),
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            tonalElevation = 4.dp,
-                            shadowElevation = 10.dp,
-                            modifier = Modifier.padding(vertical = 4.dp),
-                        ) {
-                            DropdownMenuItem(text = { Text("Newest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_DESC); sortMenuExpanded = false })
-                            DropdownMenuItem(text = { Text("Oldest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_ASC); sortMenuExpanded = false })
-                            DropdownMenuItem(text = { Text("Name") }, onClick = { viewModel.setSortMode(PlaylistSortMode.NAME); sortMenuExpanded = false })
-                            DropdownMenuItem(text = { Text("Track count") }, onClick = { viewModel.setSortMode(PlaylistSortMode.TRACK_COUNT); sortMenuExpanded = false })
-                        }
-                    }
+                    )
                 },
             )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 1.dp,
+                ) {
+                    Text(
+                        text = "${state.playlists.size} Playlists",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 1.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Filled.MusicNote,
+                            contentDescription = null,
+                            modifier = Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = "${state.playlists.sumOf { it.tracks.size }} Tracks",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
 
             Box(
                 modifier = Modifier
@@ -210,8 +211,8 @@ fun PlaylistScreen(
                     state.isLoading && state.playlists.isEmpty() && !state.isGenerating -> LoadingState()
                     state.playlists.isEmpty() && !state.isGenerating -> EmptyState()
                     else -> LazyColumn(
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 2.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         if (state.isGenerating) {
@@ -248,7 +249,63 @@ fun PlaylistScreen(
                                 tonalElevation = 1.dp,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
-                                Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp)) {
+                                Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 2.dp, vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = "Your Playlists",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+
+                                        Box {
+                                            Surface(
+                                                onClick = { sortMenuExpanded = true },
+                                                shape = RoundedCornerShape(50),
+                                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                                tonalElevation = 1.dp,
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                ) {
+                                                    Icon(
+                                                        Icons.AutoMirrored.Filled.Sort,
+                                                        contentDescription = "Sort playlists",
+                                                        modifier = Modifier.size(13.dp),
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    )
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "Sort",
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                    )
+                                                }
+                                            }
+                                            DropdownMenu(
+                                                expanded = sortMenuExpanded,
+                                                onDismissRequest = { sortMenuExpanded = false },
+                                                shape = RoundedCornerShape(22.dp),
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                tonalElevation = 4.dp,
+                                                shadowElevation = 10.dp,
+                                                modifier = Modifier.padding(vertical = 4.dp),
+                                            ) {
+                                                DropdownMenuItem(text = { Text("Newest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_DESC); sortMenuExpanded = false })
+                                                DropdownMenuItem(text = { Text("Oldest first") }, onClick = { viewModel.setSortMode(PlaylistSortMode.DATE_ASC); sortMenuExpanded = false })
+                                                DropdownMenuItem(text = { Text("Name") }, onClick = { viewModel.setSortMode(PlaylistSortMode.NAME); sortMenuExpanded = false })
+                                                DropdownMenuItem(text = { Text("Track count") }, onClick = { viewModel.setSortMode(PlaylistSortMode.TRACK_COUNT); sortMenuExpanded = false })
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+
                                     state.playlists.forEachIndexed { index, playlist ->
                                         val isNewest = playlist.id == state.newestId
                                         PlaylistCard(
