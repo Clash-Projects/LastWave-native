@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Telegram Community & Discussion
+    url: https://t.me/clashdiscussion
+    about: Ask questions, share feedback, or discuss features with the community.
+  - name: Telegram Channel
+    url: https://t.me/clashprojects
+    about: Official announcements and updates for Clash Projects.
+  - name: GitHub Discussions
+    url: https://github.com/Clash-Projects/LastWave-native/discussions
+    about: Discuss development and project roadmap.

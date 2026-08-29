@@ -84,17 +84,17 @@ jobs:
         run: |
           mkdir -p final_apk
           TAG="${{ inputs.tag_name }}"
-          # Compressed release (R8 + ProGuard + shrinkResources)
+          # Universal release (R8 + ProGuard + shrinkResources)
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
-            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v${TAG}-release.apk
+            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v${TAG}-universal.apk
           else
-            cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v${TAG}-release.apk
+            cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v${TAG}-universal.apk
           fi
-          # Raw release (no minify, no shrink, no ProGuard)
+          # Universal uncompressed variant (raw debuggable/unminified)
           if [ -f "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" ]; then
-            cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/LastWave-v${TAG}-raw.apk
+            cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/LastWave-v${TAG}-universal-uncompressed.apk
           else
-            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/LastWave-v${TAG}-raw.apk
+            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/LastWave-v${TAG}-universal-uncompressed.apk
           fi
           ls -lh final_apk/
 
