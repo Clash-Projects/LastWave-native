@@ -50,14 +50,31 @@ android {
         versionCode = 13
         versionName = "3.3.1"
 
+        val secretMask = listOf(0x5A, 0x3F, 0x7E, 0x1B, 0x92, 0x4C, 0xA1, 0x6D)
+        fun obfuscateSecret(plainText: String): String {
+            if (plainText.isEmpty()) return "new byte[] {}"
+            val bytes = plainText.toByteArray(Charsets.UTF_8)
+            val obfuscated = bytes.mapIndexed { idx, b -> (b.toInt() xor secretMask[idx % secretMask.size]).toByte() }
+            return "new byte[] { " + obfuscated.joinToString(", ") { "(byte) $it" } + " }"
+        }
+        val maskLiteral = "new byte[] { " + secretMask.joinToString(", ") { "(byte) $it" } + " }"
+
         val qobuzBackendUrl = resolveSecret("QOBUZ_BACKEND_URL", "QOBUZ_BASE_URL", "BACKEND_BASE_URL")
-        buildConfigField("String", "QOBUZ_BACKEND_URL", "\"$qobuzBackendUrl\"")
+        buildConfigField("byte[]", "QOBUZ_BACKEND_URL_BYTES", obfuscateSecret(qobuzBackendUrl))
 
         val qobuzApiKey = resolveSecret("QOBUZ_API_KEY", "QOBUZ_AUTH_KEY", "API_AUTH_KEY")
-        buildConfigField("String", "QOBUZ_API_KEY", "\"$qobuzApiKey\"")
+        buildConfigField("byte[]", "QOBUZ_API_KEY_BYTES", obfuscateSecret(qobuzApiKey))
 
         val lyricsApiKey = resolveSecret("LYRICS_API_KEY", "API_KEY", "LYRICS_AUTH_TOKEN")
-        buildConfigField("String", "LYRICS_API_KEY", "\"$lyricsApiKey\"")
+        buildConfigField("byte[]", "LYRICS_API_KEY_BYTES", obfuscateSecret(lyricsApiKey))
+
+        val lastfmApiKey = resolveSecret("LASTFM_API_KEY").ifBlank { "2e00eb783c677abeab81e99c99be74e1" }
+        buildConfigField("byte[]", "LASTFM_API_KEY_BYTES", obfuscateSecret(lastfmApiKey))
+
+        val lastfmApiSecret = resolveSecret("LASTFM_API_SECRET").ifBlank { "b7e562de696f17fdfde7c448f02b599f" }
+        buildConfigField("byte[]", "LASTFM_API_SECRET_BYTES", obfuscateSecret(lastfmApiSecret))
+
+        buildConfigField("byte[]", "SECRET_MASK_BYTES", maskLiteral)
 
         externalNativeBuild {
             cmake {

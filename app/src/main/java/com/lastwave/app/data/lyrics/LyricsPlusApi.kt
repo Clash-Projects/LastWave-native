@@ -97,7 +97,10 @@ class LyricsPlusApi @Inject constructor(
         album: String?,
         durationSeconds: Int?,
     ): LyricsPlusResponse? {
-        val apiKey = BuildConfig.LYRICS_API_KEY.trim()
+        val apiKey = com.lastwave.app.data.qobuz.QobuzMusicApi.decodeSecretBytes(
+            BuildConfig.LYRICS_API_KEY_BYTES,
+            BuildConfig.SECRET_MASK_BYTES
+        ).trim()
 
         for (baseUrl in endpoints) {
             val urlBuilder = baseUrl.toHttpUrlOrNull()?.newBuilder() ?: continue

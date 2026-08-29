@@ -106,10 +106,24 @@ class QobuzMusicApi @Inject constructor(
 
     companion object {
         val BACKEND_BASE_URL: String
-            get() = com.lastwave.app.BuildConfig.QOBUZ_BACKEND_URL
+            get() = decodeSecretBytes(
+                com.lastwave.app.BuildConfig.QOBUZ_BACKEND_URL_BYTES,
+                com.lastwave.app.BuildConfig.SECRET_MASK_BYTES
+            )
 
         val BACKEND_API_KEY: String
-            get() = com.lastwave.app.BuildConfig.QOBUZ_API_KEY
+            get() = decodeSecretBytes(
+                com.lastwave.app.BuildConfig.QOBUZ_API_KEY_BYTES,
+                com.lastwave.app.BuildConfig.SECRET_MASK_BYTES
+            )
+
+        fun decodeSecretBytes(data: ByteArray, mask: ByteArray): String {
+            if (data.isEmpty() || mask.isEmpty()) return ""
+            val decoded = ByteArray(data.size) { i ->
+                (data[i].toInt() xor mask[i % mask.size].toInt()).toByte()
+            }
+            return String(decoded, Charsets.UTF_8)
+        }
 
         // Quality presets
         const val QUALITY_MAX_HI_RES = 27 // Up to 24-bit / 192 kHz

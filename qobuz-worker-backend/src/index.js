@@ -78,7 +78,8 @@ export default {
         if (!isSameOrigin) {
           const authHeader = request.headers.get("X-API-Key") || request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
           const authParam = searchParams.get("key");
-          if (authHeader !== activeApiKey && authParam !== activeApiKey) {
+          const allowedKeys = activeApiKey.split(",").map(k => k.trim()).filter(Boolean);
+          if (!allowedKeys.includes(authHeader) && !allowedKeys.includes(authParam)) {
             return jsonResponse({ success: false, error: "Unauthorized: Invalid or missing API Key" }, 401);
           }
         }
