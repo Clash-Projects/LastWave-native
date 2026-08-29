@@ -384,7 +384,7 @@ fun PlayerHost(
     CompositionLocalProvider(
         LocalMusicPlayer provides viewModel.player,
         LocalAddToPlaylist provides requestAddToPlaylist,
-        LocalMiniPlayerScrollClearance provides if (state.current != null) 68.dp else 0.dp,
+        LocalMiniPlayerScrollClearance provides if (state.current != null) 76.dp else 0.dp,
     ) {
         Box(Modifier.fillMaxSize()) {
             content()
@@ -406,7 +406,7 @@ fun PlayerHost(
                     onPrevious = viewModel.player::previous,
                     onNext = viewModel.player::next,
                     onClose = viewModel.player::stopAndClear,
-                    bottomPadding = if (hasBottomNavigation) 58.dp else 10.dp,
+                    bottomPadding = if (hasBottomNavigation) 66.dp else 10.dp,
                     edgeToEdge = !hasBottomNavigation,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )

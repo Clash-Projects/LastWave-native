@@ -85,50 +85,79 @@ fun QuickPlayGrid(
                 fontWeight = FontWeight.Bold,
             )
 
-            // Segmented source switcher (Last.fm / YT Music)
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                tonalElevation = 1.dp,
+            val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+            // Seamless minimalist source switcher (Last.fm / YT Music)
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                    .padding(2.5.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    modifier = Modifier.padding(2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                val lastFmSelected = currentSource == QuickPlaySource.LAST_FM
+                val ytSelected = currentSource == QuickPlaySource.YOUTUBE_MUSIC
+
+                val lastFmBg by androidx.compose.animation.animateColorAsState(
+                    targetValue = if (lastFmSelected) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
+                    animationSpec = androidx.compose.animation.core.tween(200),
+                    label = "lastFmBg",
+                )
+                val lastFmTextColor by androidx.compose.animation.animateColorAsState(
+                    targetValue = if (lastFmSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                    animationSpec = androidx.compose.animation.core.tween(200),
+                    label = "lastFmTextColor",
+                )
+                val ytBg by androidx.compose.animation.animateColorAsState(
+                    targetValue = if (ytSelected) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
+                    animationSpec = androidx.compose.animation.core.tween(200),
+                    label = "ytBg",
+                )
+                val ytTextColor by androidx.compose.animation.animateColorAsState(
+                    targetValue = if (ytSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                    animationSpec = androidx.compose.animation.core.tween(200),
+                    label = "ytTextColor",
+                )
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(lastFmBg)
+                        .clickable {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            onSourceToggle(QuickPlaySource.LAST_FM)
+                        }
+                        .padding(horizontal = 9.dp, vertical = 3.5.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    val lastFmSelected = currentSource == QuickPlaySource.LAST_FM
-                    val ytSelected = currentSource == QuickPlaySource.YOUTUBE_MUSIC
+                    Text(
+                        text = "Last.fm",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = if (lastFmSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            fontSize = TextUnit(11f, TextUnitType.Sp),
+                        ),
+                        color = lastFmTextColor,
+                    )
+                }
 
-                    Surface(
-                        onClick = { onSourceToggle(QuickPlaySource.LAST_FM) },
-                        shape = RoundedCornerShape(50),
-                        color = if (lastFmSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                    ) {
-                        Text(
-                            text = "Last.fm",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = if (lastFmSelected) FontWeight.Bold else FontWeight.Normal,
-                                fontSize = TextUnit(10.5f, TextUnitType.Sp),
-                            ),
-                            color = if (lastFmSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-                        )
-                    }
-
-                    Surface(
-                        onClick = { onSourceToggle(QuickPlaySource.YOUTUBE_MUSIC) },
-                        shape = RoundedCornerShape(50),
-                        color = if (ytSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-                    ) {
-                        Text(
-                            text = "YT Music",
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontWeight = if (ytSelected) FontWeight.Bold else FontWeight.Normal,
-                                fontSize = TextUnit(10.5f, TextUnitType.Sp),
-                            ),
-                            color = if (ytSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
-                        )
-                    }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(ytBg)
+                        .clickable {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            onSourceToggle(QuickPlaySource.YOUTUBE_MUSIC)
+                        }
+                        .padding(horizontal = 9.dp, vertical = 3.5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "YT Music",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = if (ytSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            fontSize = TextUnit(11f, TextUnitType.Sp),
+                        ),
+                        color = ytTextColor,
+                    )
                 }
             }
         }
