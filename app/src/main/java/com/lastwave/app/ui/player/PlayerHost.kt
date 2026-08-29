@@ -634,102 +634,117 @@ private fun MiniPlayer(
             shadowElevation = if (edgeToEdge) 0.dp else 6.dp,
             modifier = Modifier.fillMaxWidth().liquidGlassChrome(shape, liquidGlass),
         ) {
-            Column(
-                modifier = if (edgeToEdge) {
+            Row(
+                modifier = (if (edgeToEdge) {
                     Modifier.windowInsetsPadding(
                         WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
                     )
                 } else {
                     Modifier
-                },
+                })
+                    .fillMaxWidth()
+                    .height(62.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                // 1. Album art flush on the left (End-to-End)
+                Box(
+                    modifier = Modifier
+                        .size(62.dp)
+                        .clip(RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 ) {
-                    Box(Modifier.size(44.dp)) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            tonalElevation = 2.dp,
-                            modifier = Modifier.fillMaxSize(),
-                        ) {
-                            PlayerArtwork(track, Modifier.fillMaxSize(), 12.dp)
-                        }
-                    }
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .padding(start = 12.dp, end = 10.dp),
-                    ) {
-                        Text(
-                            track.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Spacer(Modifier.height(2.dp))
-                        Text(
-                            track.artist,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                    PlayerArtwork(
+                        track = track,
+                        modifier = Modifier.fillMaxSize(),
+                        corner = 0.dp,
+                    )
+                }
 
+                // 2. Track Info & Controls + Seekbar starting after album art
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .padding(start = 12.dp, end = 10.dp, top = 5.dp, bottom = 4.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        IconButton(
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onToggleFavorite()
-                            },
-                            modifier = Modifier.size(36.dp),
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 8.dp),
                         ) {
-                            Icon(
-                                if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                                contentDescription = "Favorite",
-                                tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
-                                modifier = Modifier.size(20.dp),
+                            Text(
+                                track.title,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(Modifier.height(1.dp))
+                            Text(
+                                track.artist,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
 
-                        Surface(
-                            onClick = onToggle,
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(38.dp),
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                if (state.isBuffering) {
-                                    ExpressiveInlineLoadingIndicator(
-                                        size = 16.dp,
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        strokeWidth = 2.dp,
-                                    )
-                                } else {
-                                    AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(20.dp))
+                            IconButton(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onToggleFavorite()
+                                },
+                                modifier = Modifier.size(34.dp),
+                            ) {
+                                Icon(
+                                    if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                    contentDescription = "Favorite",
+                                    tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+
+                            Surface(
+                                onClick = onToggle,
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(36.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (state.isBuffering) {
+                                        ExpressiveInlineLoadingIndicator(
+                                            size = 16.dp,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            strokeWidth = 2.dp,
+                                        )
+                                    } else {
+                                        AnimatedPlayPauseIcon(state.isPlaying, Modifier.size(20.dp))
+                                    }
                                 }
                             }
                         }
                     }
+
+                    // Seekbar starts after album art
+                    MiniWavyProgress(
+                        progressState = progressState,
+                        isPlaying = state.isPlaying,
+                        onSeek = onSeek,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 1.dp),
+                    )
                 }
-                MiniWavyProgress(
-                    progressState = progressState,
-                    isPlaying = state.isPlaying,
-                    onSeek = onSeek,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp)
-                        .padding(bottom = 3.dp),
-                )
             }
         }
     }
