@@ -196,7 +196,7 @@ private fun FloatingNavBar(
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
             )
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Surface(
@@ -211,7 +211,7 @@ private fun FloatingNavBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 tabs.forEachIndexed { index, tab ->
@@ -256,21 +256,21 @@ private fun FloatingNavItem(
         shape = PillShape,
         color = backgroundColor,
         modifier = Modifier
-            .height(48.dp)
+            .fillMaxWidth()
+            .height(46.dp)
             .animateContentSize(animationSpec = navSpring()),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
             modifier = Modifier
-                .padding(horizontal = if (selected) 18.dp else 12.dp)
-                .height(48.dp),
+                .fillMaxSize(),
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
                 tint = contentColor,
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(22.dp),
             )
             AnimatedVisibility(
                 visible = selected,
@@ -278,22 +278,20 @@ private fun FloatingNavItem(
                     animationSpec = navSpring(),
                     expandFrom = Alignment.Start,
                 ),
-                exit = fadeOut(animationSpec = tween(90)) + shrinkHorizontally(
+                exit = fadeOut(animationSpec = navSpring()) + shrinkHorizontally(
                     animationSpec = navSpring(),
                     shrinkTowards = Alignment.Start,
                 ),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 8.dp),
                 ) {
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = label,
                         style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
                         color = contentColor,
                         maxLines = 1,
-                        softWrap = false,
                     )
                 }
             }

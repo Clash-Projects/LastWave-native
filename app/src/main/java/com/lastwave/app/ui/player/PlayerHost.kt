@@ -419,7 +419,7 @@ fun PlayerHost(
                     onPrevious = viewModel.player::previous,
                     onNext = viewModel.player::next,
                     onClose = viewModel.player::stopAndClear,
-                    bottomPadding = if (hasBottomNavigation) 76.dp else 10.dp,
+                    bottomPadding = if (hasBottomNavigation) 84.dp else 10.dp,
                     edgeToEdge = !hasBottomNavigation,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
@@ -597,7 +597,7 @@ private fun MiniPlayer(
     val shape = if (edgeToEdge) {
         RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     } else {
-        RoundedCornerShape(20.dp)
+        RoundedCornerShape(22.dp)
     }
     val positionedModifier = if (edgeToEdge) {
         modifier.fillMaxWidth()
@@ -606,7 +606,7 @@ private fun MiniPlayer(
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
             )
-            .padding(horizontal = 14.dp)
+            .padding(horizontal = 10.dp)
             .padding(bottom = bottomPadding)
             .fillMaxWidth()
     }
@@ -656,30 +656,30 @@ private fun MiniPlayer(
                     Modifier
                 })
                     .fillMaxWidth()
-                    .height(68.dp),
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // 1. Album art flush on the left (End-to-End, Spacious)
-                Box(
-                    modifier = Modifier
-                        .size(68.dp)
-                        .clip(RoundedCornerShape(topStart = 20.dp, bottomStart = 20.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                ) {
-                    PlayerArtwork(
-                        track = track,
+                // Album art with equal space above, below, and on the left
+                Box(Modifier.size(52.dp)) {
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        tonalElevation = 2.dp,
                         modifier = Modifier.fillMaxSize(),
-                        corner = 0.dp,
-                    )
+                    ) {
+                        PlayerArtwork(
+                            track = track,
+                            modifier = Modifier.fillMaxSize(),
+                            corner = 14.dp,
+                        )
+                    }
                 }
 
-                // 2. Track Info & Controls + Seekbar starting after album art
+                // Track Info & Controls + Seekbar starting after album art
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxHeight()
-                        .padding(start = 14.dp, end = 12.dp, top = 7.dp, bottom = 6.dp),
-                    verticalArrangement = Arrangement.SpaceBetween,
+                        .padding(start = 12.dp, end = 4.dp),
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -688,13 +688,13 @@ private fun MiniPlayer(
                         Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .padding(end = 8.dp),
+                                .padding(end = 6.dp),
                         ) {
                             Text(
                                 track.title,
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.SemiBold,
-                                    fontSize = androidx.compose.ui.unit.TextUnit(14.5f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                    fontSize = androidx.compose.ui.unit.TextUnit(14f, androidx.compose.ui.unit.TextUnitType.Sp),
                                 ),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -703,7 +703,7 @@ private fun MiniPlayer(
                             Text(
                                 track.artist,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    fontSize = androidx.compose.ui.unit.TextUnit(12.5f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                    fontSize = androidx.compose.ui.unit.TextUnit(12f, androidx.compose.ui.unit.TextUnitType.Sp),
                                 ),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                                 maxLines = 1,
@@ -759,7 +759,7 @@ private fun MiniPlayer(
                         onSeek = onSeek,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 2.dp),
+                            .padding(top = 3.dp),
                     )
                 }
             }
