@@ -442,7 +442,7 @@ fun SearchScreen(
                                             playbackState.current?.title.equals(topResult.name, ignoreCase = true) &&
                                             (topResult.artist.isNullOrBlank() || playbackState.current?.artist.equals(topResult.artist, ignoreCase = true))
 
-                                        item(key = "top_result_card") {
+                                        item(key = "top_result_card", contentType = "top_card") {
                                             TopResultCard(
                                                 item = topResult,
                                                 tab = state.tab,
@@ -467,7 +467,11 @@ fun SearchScreen(
                                         }
                                     }
 
-                                    items(if (state.tab == SearchTab.USERS) state.results else otherResults, key = { it.entityId ?: it.url.ifBlank { it.name + it.artist.orEmpty() } }) { item ->
+                                    items(
+                                        if (state.tab == SearchTab.USERS) state.results else otherResults,
+                                        key = { it.entityId ?: it.url.ifBlank { it.name + it.artist.orEmpty() } },
+                                        contentType = { "search_result" },
+                                    ) { item ->
                                         val isItemPlaying = state.tab == SearchTab.TRACKS && playbackState.isPlaying &&
                                             playbackState.current?.title.equals(item.name, ignoreCase = true) &&
                                             (item.artist.isNullOrBlank() || playbackState.current?.artist.equals(item.artist, ignoreCase = true))
@@ -476,7 +480,6 @@ fun SearchScreen(
                                             item = item,
                                             tab = state.tab,
                                             isPlaying = isItemPlaying,
-                                            modifier = Modifier.animateItem(),
                                             onClick = {
                                                 when (state.tab) {
                                                     SearchTab.ARTISTS -> onOpenArtist(item.name, item.entityId)

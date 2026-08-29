@@ -2,8 +2,8 @@ package com.lastwave.app.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lastwave.app.data.ytmusic.YtMusicAuthManager
 import com.lastwave.app.data.music.InnerTubeMusicApi
+import com.lastwave.app.data.ytmusic.YtMusicAuthManager
 import com.lastwave.app.data.ytmusic.YtMusicSyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -30,19 +30,26 @@ class YouTubeLoginViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(YouTubeLoginUiState())
     val uiState: StateFlow<YouTubeLoginUiState> = _uiState.asStateFlow()
 
+    init {
+        val current = ytAuthManager.connection.value
+        if (current.isConnected) {
+            _uiState.update { it.copy(connectedName = current.accountName) }
+        }
+    }
+
     /**
-     * Persists the cookies captured from the sign-in WebView, then resolves
-     * the account identity through InnerTube itself (authoritative — no HTML
-     * scraping). Sync kicks off immediately so the user sees their playlists
-     * appear right away.
+     * Persists the cookies captured from the sign-in flow or user input, then
+     * resolves the account identity through InnerTube itself.
      */
-    fun attemptConnect(rawCookieHeader: String?) {
+    fun attemptConnect(rawInput: String?) {
         if (_uiState.value.verifying) return
-        val cookies = rawCookieHeader.orEmpty()
-        val hasSapisid = listOf("__Secure-3PAPISID=", "SAPISID=", "APISID=").any { it in cookies }
+        val raw = rawInput.orEmpty().trim()
+        val cleanedCookies = sanitizeCookieString(raw)
+
+        val hasSapisid = listOf("__Secure-3PAPISID=", "SAPISID=", "APISID=").any { it in cleanedCookies }
         if (!hasSapisid) {
             _uiState.update {
-                it.copy(errorMessage = "Sign-in incomplete — finish signing in, then tap \"I'm signed in\".")
+                it.copy(errorMessage = "Sign-in incomplete — please ensure you're signed in on YouTube Music, or paste a valid session cookie.")
             }
             return
         }
@@ -50,7 +57,7 @@ class YouTubeLoginViewModel @Inject constructor(
         _uiState.update { it.copy(verifying = true, errorMessage = null) }
         viewModelScope.launch {
             try {
-                ytAuthManager.connect(rawCookieHeader!!, "", null, null)
+                ytAuthManager.connect(cleanedCookies, "", null, null)
                 val info = runCatching { innerTube.fetchAccountInfo() }.getOrNull()
                 val displayName = info?.accountName ?: "Google account"
                 if (info != null) {
@@ -78,6 +85,20 @@ class YouTubeLoginViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun sanitizeCookieString(input: String): String {
+        var str = input
+        if (str.startsWith("Cookie:", ignoreCase = true)) {
+            str = str.substringAfter(":").trim()
+        }
+        if (str.contains("-H 'cookie:", ignoreCase = true)) {
+            str = str.substringAfter("-H 'cookie:").substringBefore("'").trim()
+        }
+        if (str.contains("-H \"cookie:", ignoreCase = true)) {
+            str = str.substringAfter("-H \"cookie:").substringBefore("\"").trim()
+        }
+        return str
     }
 
     fun dismissError() = _uiState.update { it.copy(errorMessage = null) }

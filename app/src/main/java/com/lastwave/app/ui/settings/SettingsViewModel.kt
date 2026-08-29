@@ -22,6 +22,7 @@ import com.lastwave.app.playback.NativeAudioEngine
 import com.lastwave.app.util.FileExportHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -87,8 +88,16 @@ class SettingsViewModel @Inject constructor(
     private val downloadedTrackDao: com.lastwave.app.data.local.db.DownloadedTrackDao,
     val playlistImportManager: com.lastwave.app.data.playlist.PlaylistImportManager,
     val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
+    private val musicPlayer: dagger.Lazy<com.lastwave.app.playback.MusicPlayer>,
+    private val favoritesRepository: com.lastwave.app.data.favorite.FavoritesRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
+
+    private val _streamCacheSizeBytes = MutableStateFlow(0L)
+    val streamCacheSizeBytes: StateFlow<Long> = _streamCacheSizeBytes.asStateFlow()
+
+    private val _streamCachedSongCount = MutableStateFlow(0)
+    val streamCachedSongCount: StateFlow<Int> = _streamCachedSongCount.asStateFlow()
 
     val authState: StateFlow<com.lastwave.app.data.model.AuthState> = authRepository.authState
 
@@ -138,6 +147,7 @@ class SettingsViewModel @Inject constructor(
         .withSettingsFallback("equalizer preferences", EqualizerSettings())
         .stateIn(viewModelScope, SettingsSharing, EqualizerSettings())
     private var immediateEqGains = EqualizerSettings().gainsDb.toFloatArray()
+    private var immediateEqEnabled = false
 
     val downloadCount: StateFlow<Int> = downloadedTrackDao.count()
         .withSettingsFallback("download count", 0)
@@ -175,7 +185,10 @@ class SettingsViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            equalizer.collect { immediateEqGains = it.gainsDb.toFloatArray() }
+            equalizer.collect {
+                immediateEqEnabled = it.enabled
+                immediateEqGains = it.gainsDb.toFloatArray()
+            }
         }
         viewModelScope.launch {
             generateRepository.observeRecommendationExclusions()
@@ -184,6 +197,7 @@ class SettingsViewModel @Inject constructor(
                     _uiState.update { it.copy(recommendationExclusionCount = exclusions.size) }
                 }
         }
+        refreshStreamCacheStats()
     }
 
     fun refreshRecommendationExclusionCount() {
@@ -234,24 +248,21 @@ class SettingsViewModel @Inject constructor(
         launchSettingsAction("update Studio Master Clarity") { settingsPreferences.setStudioMasterClarity(enabled) }
     }
     fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
-    fun setVolumeBoostEnabled(enabled: Boolean) {
-        runCatching { audioEngine.get().setVolumeBoost(enabled, misc.value.volumeBoostPercent) }
-        launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostEnabled(enabled) }
-    }
-    fun setVolumeBoostPercent(percent: Int) {
-        val safePercent = percent.coerceIn(100, 200)
-        runCatching { audioEngine.get().setVolumeBoost(misc.value.volumeBoostEnabled, safePercent) }
-        launchSettingsAction("update volume boost") { settingsPreferences.setVolumeBoostPercent(safePercent) }
-    }
-    fun setFullScreenCoverArt(enabled: Boolean) = launchSettingsAction("update cover art mode") { settingsPreferences.setFullScreenCoverArt(enabled) }
     fun setCrossfadeEnabled(enabled: Boolean) = launchSettingsAction("update crossfade") { settingsPreferences.setCrossfadeEnabled(enabled) }
     fun setCrossfadeSeconds(seconds: Int) = launchSettingsAction("update crossfade duration") {
         settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 10))
+    }
+    fun setWavySeekbarEnabled(enabled: Boolean) = launchSettingsAction("update seekbar style") {
+        settingsPreferences.setWavySeekbarEnabled(enabled)
+    }
+    fun setDownloadLyrics(enabled: Boolean) = launchSettingsAction("update download lyrics setting") {
+        settingsPreferences.setDownloadLyrics(enabled)
     }
 
     // ── Experimental: 15-band equalizer ──
 
     fun setEqualizerEnabled(enabled: Boolean) {
+        immediateEqEnabled = enabled
         runCatching { audioEngine.get().setEqualizer(enabled, immediateEqGains) }
         launchSettingsAction("update the equalizer") { equalizerPreferences.setEnabled(enabled) }
     }
@@ -260,17 +271,29 @@ class SettingsViewModel @Inject constructor(
      *  fresh preset would read as a dead control. */
     fun applyEqPreset(name: String) {
         com.lastwave.app.data.local.EqualizerPresets.byName(name)?.let { preset ->
+            immediateEqEnabled = true
             immediateEqGains = preset.gainsDb.toFloatArray()
             runCatching { audioEngine.get().setEqualizer(true, immediateEqGains) }
             launchSettingsAction("apply the equalizer preset") { equalizerPreferences.applyPreset(preset) }
         }
     }
 
+    /** Audible preview during drag; persistence is deferred until release. */
+    fun previewEqBandGain(bandIndex: Int, gainDb: Float) {
+        if (bandIndex !in immediateEqGains.indices || !gainDb.isFinite()) return
+        immediateEqGains = immediateEqGains.copyOf().also {
+            it[bandIndex] = gainDb.coerceIn(
+                -com.lastwave.app.data.local.EQ_MAX_GAIN_DB,
+                com.lastwave.app.data.local.EQ_MAX_GAIN_DB,
+            )
+        }
+        runCatching { audioEngine.get().setEqualizer(immediateEqEnabled, immediateEqGains) }
+    }
+
     /** Manual band drag → curve becomes Custom. */
     fun setEqBandGain(bandIndex: Int, gainDb: Float) {
         if (bandIndex !in immediateEqGains.indices) return
-        immediateEqGains = immediateEqGains.copyOf().also { it[bandIndex] = gainDb }
-        runCatching { audioEngine.get().setEqualizer(equalizer.value.enabled, immediateEqGains) }
+        previewEqBandGain(bandIndex, gainDb)
         launchSettingsAction("update the equalizer band") { equalizerPreferences.setBandGain(bandIndex, gainDb) }
     }
 
@@ -511,6 +534,25 @@ class SettingsViewModel @Inject constructor(
         launchSettingsAction("sync YouTube Music") { ytMusicSyncManager.syncNow("manual") }
     }
 
+    fun syncLikedSongs() {
+        launchSettingsAction("sync liked songs") {
+            val success = favoritesRepository.syncLikedSongsToYouTube()
+            _uiState.update { it.copy(toastMessage = if (success) "Liked songs synced to YouTube Music" else "Sync completed") }
+        }
+    }
+
+    fun setAutoSyncLikedSongsToYouTube(enabled: Boolean) {
+        launchSettingsAction("update liked songs auto-sync") {
+            settingsPreferences.setAutoSyncLikedSongsToYouTube(enabled)
+            if (enabled) {
+                val success = favoritesRepository.syncLikedSongsToYouTube()
+                _uiState.update { it.copy(toastMessage = if (success) "Auto-sync enabled & liked songs synced" else "Auto-sync enabled") }
+            } else {
+                _uiState.update { it.copy(toastMessage = "Auto-sync disabled") }
+            }
+        }
+    }
+
     fun dismissSessionKeyDialog() = _uiState.update { it.copy(showSessionKeyDialog = false, sessionKeyError = null) }
 
     fun submitPassword(password: String) {
@@ -525,6 +567,55 @@ class SettingsViewModel @Inject constructor(
                     _uiState.update { it.copy(sessionKeyLoading = false, sessionKeyError = result.message) }
                 }
             }
+        }
+    }
+
+    fun refreshStreamCacheStats() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val bytes = runCatching { musicPlayer.get().getStreamCacheSizeBytes() }.getOrDefault(0L)
+            val count = runCatching { musicPlayer.get().getStreamCachedSongCount() }.getOrDefault(0)
+            _streamCacheSizeBytes.value = bytes
+            _streamCachedSongCount.value = count
+        }
+    }
+
+    fun setStreamCacheEnabled(enabled: Boolean) = launchSettingsAction("update stream caching") {
+        settingsPreferences.setStreamCacheEnabled(enabled)
+        refreshStreamCacheStats()
+    }
+
+    fun setStreamCacheSongLimit(limit: Int) = launchSettingsAction("update stream cache capacity") {
+        settingsPreferences.setStreamCacheSongLimit(limit)
+        refreshStreamCacheStats()
+    }
+
+    fun clearStreamCache() {
+        launchSettingsAction("clear stream cache") {
+            musicPlayer.get().clearStreamCache()
+            kotlinx.coroutines.delay(400)
+            refreshStreamCacheStats()
+            _uiState.update { it.copy(toastMessage = "Stream cache cleared") }
+        }
+    }
+
+    fun checkAndConnectYouTube() {
+        if (ytAuthManager.connection.value.isConnected) return
+        val cookies = try {
+            android.webkit.CookieManager.getInstance().getCookie("https://music.youtube.com")
+        } catch (_: Exception) { null }
+        if (cookies.isNullOrBlank()) return
+        val hasSapisid = listOf("__Secure-3PAPISID=", "SAPISID=", "APISID=").any { it in cookies }
+        if (!hasSapisid) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ytAuthManager.connect(cookies, "", null, null)
+                val info = runCatching { innerTube.fetchAccountInfo() }.getOrNull()
+                if (info != null) {
+                    ytAuthManager.updateAccountIdentity(info.accountName, info.channelHandle, info.photoUrl)
+                }
+                ytMusicSyncManager.syncNow("connected")
+                _uiState.update { it.copy(toastMessage = "Connected to YouTube Music (${info?.accountName ?: "Google Account"})") }
+            } catch (_: Exception) {}
         }
     }
 }

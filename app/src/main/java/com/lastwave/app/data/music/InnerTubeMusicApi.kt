@@ -444,6 +444,50 @@ class InnerTubeMusicApi @Inject constructor(
         }
     }
 
+    /** Likes a video/track on the connected YouTube Music account (appears in official Liked Music). */
+    suspend fun likeSong(videoId: String): Boolean = withContext(Dispatchers.IO) {
+        if (!ytAuth.connection.value.isConnected) return@withContext false
+        val config = getWebConfig()
+        runCatching {
+            post(
+                url = "$MUSIC_API/like/like?key=${config.apiKey}&prettyPrint=false",
+                body = buildJsonObject {
+                    put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
+                    put("target", buildJsonObject {
+                        put("videoId", videoId)
+                    })
+                },
+                clientName = "WEB_REMIX",
+                clientVersion = config.clientVersion,
+                userAgent = WEB_USER_AGENT,
+                authenticated = true,
+            )
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Removes a like from a video/track on the connected YouTube Music account. */
+    suspend fun unlikeSong(videoId: String): Boolean = withContext(Dispatchers.IO) {
+        if (!ytAuth.connection.value.isConnected) return@withContext false
+        val config = getWebConfig()
+        runCatching {
+            post(
+                url = "$MUSIC_API/like/removelike?key=${config.apiKey}&prettyPrint=false",
+                body = buildJsonObject {
+                    put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
+                    put("target", buildJsonObject {
+                        put("videoId", videoId)
+                    })
+                },
+                clientName = "WEB_REMIX",
+                clientVersion = config.clientVersion,
+                userAgent = WEB_USER_AGENT,
+                authenticated = true,
+            )
+            true
+        }.getOrDefault(false)
+    }
+
     /** Reads back an OWNED playlist with each item's setVideoId for diffs/removals. */
     suspend fun fetchOwnedPlaylist(playlistIdOrUrl: String): YtOwnedPlaylist? = withContext(Dispatchers.IO) {
         if (!ytAuth.connection.value.isConnected) return@withContext null
@@ -1032,6 +1076,14 @@ class InnerTubeMusicApi @Inject constructor(
         } finally {
             activeStreamRequests.remove(videoId)
         }
+    }
+
+    /** Resolves stream specifically optimized for download compatibility (M4A AAC container). */
+    suspend fun resolveDownloadStream(videoId: String): YouTubeAudioStream = withContext(Dispatchers.IO) {
+        require(videoId.isNotBlank()) { "Missing YouTube Music video id" }
+        runCatching {
+            streamExtractor.resolveAudioStream(videoId, preferM4a = true)
+        }.getOrNull() ?: resolveAudioStream(videoId)
     }
 
     private suspend fun resolveAudioStreamInternal(videoId: String): YouTubeAudioStream = kotlinx.coroutines.coroutineScope {

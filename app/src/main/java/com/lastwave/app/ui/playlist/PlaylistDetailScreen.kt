@@ -545,7 +545,7 @@ fun PlaylistDetailScreen(
 
             // Track items
             if (displayTracks.isEmpty()) {
-                item(key = "empty_tracks") {
+                item(key = "empty_tracks", contentType = "empty") {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -563,12 +563,13 @@ fun PlaylistDetailScreen(
                 itemsIndexed(
                     items = displayTracks,
                     key = { index, track -> "${track.name}|${track.artist}|$index" },
+                    contentType = { _, _ -> "playlist_track" },
                 ) { index, track ->
                     val isPlayingThisSong = playbackState.isPlaying &&
                         playbackState.current?.title.equals(track.name, ignoreCase = true) &&
                         playbackState.current?.artist.equals(track.artist, ignoreCase = true)
 
-                    Box(Modifier.animateItem()) {
+                    Box {
                         NativeTrackRow(
                             index = index + 1,
                             track = track,
@@ -860,6 +861,7 @@ fun PlaylistDetailScreen(
                     )
                 }
             }
+
         }
 
         // Toasts
