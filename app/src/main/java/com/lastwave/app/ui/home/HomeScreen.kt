@@ -387,24 +387,24 @@ private fun HeaderRow(
         Surface(
             onClick = onClick,
             shape = BadgePillShape,
-            color = if (isViewingFriend) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = if (isViewingFriend) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f) else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     displayUsername.ifBlank { "—" },
-                    style = MaterialTheme.typography.labelLarge,
+                    style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = if (isViewingFriend) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                    color = if (isViewingFriend) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
                 )
                 if (isViewingFriend) {
                     Spacer(Modifier.width(6.dp))
                     Icon(
                         Icons.Filled.People,
                         contentDescription = "Switch profile",
-                        modifier = Modifier.size(15.dp),
+                        modifier = Modifier.size(14.dp),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
@@ -424,39 +424,30 @@ private fun LiveListenTimer(viewModel: HomeViewModel) {
 
     Surface(
         shape = BadgePillShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
         ) {
             Icon(
                 Icons.Filled.Headset,
                 contentDescription = "Estimated lifetime listening time",
-                modifier = Modifier.size(18.dp),
-                tint = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp),
+                tint = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
             )
             Spacer(Modifier.width(6.dp))
             Text(
                 formatTimer(totalSeconds),
-                style = MaterialTheme.typography.labelLarge,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
             )
         }
     }
 }
 
 private fun formatTimer(totalSeconds: Long): String {
-    // This is an ESTIMATED LIFETIME total (scrobble count × an average
-    // track length — see HomeRepository.HomeStats.timerBaseSeconds), not a
-    // session/session-elapsed timer, so it legitimately runs into weeks or
-    // months for anyone with a large scrobble history — 18,838 scrobbles
-    // at ~3.5 min average really is ~46 days of total listening. The raw
-    // "DD:HH:MM:SS" digits made that read as a broken/runaway counter
-    // instead of what it actually is; spelling out the units (matching how
-    // the rest of the app writes durations elsewhere) makes the same
-    // number immediately legible as "45 days" instead of a wall of colons.
     if (totalSeconds <= 0) return "--"
     val d = totalSeconds / 86400
     val h = (totalSeconds % 86400) / 3600
@@ -473,12 +464,8 @@ private fun formatTimer(totalSeconds: Long): String {
 private fun ProfileAvatar(avatarUrl: String?, modifier: Modifier = Modifier) {
     Surface(
         shape = CircleShape,
-        color = MaterialTheme.colorScheme.primaryContainer,
-        // A thin ring in the current accent color — matches the app theme
-        // (moves with Dynamic Color / manual accent / dynamic-now-playing
-        // the same way everything else does) instead of a plain flat
-        // avatar with no border at all.
-        border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
         modifier = modifier,
     ) {
         if (!avatarUrl.isNullOrBlank()) {
@@ -494,7 +481,7 @@ private fun ProfileAvatar(avatarUrl: String?, modifier: Modifier = Modifier) {
                 Icon(
                     Icons.Filled.AccountCircle,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -519,9 +506,9 @@ private fun StatsCard(
         modifier = modifier,
     ) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f),
-            tonalElevation = 1.dp,
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
+            tonalElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onOpenGenres() },
@@ -529,36 +516,36 @@ private fun StatsCard(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 // Left: Main Scrobble Stat with subtle pill background
                 Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f),
                 ) {
                     Column(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Text(
                             formatCount(rememberAnimatedCount(scrobbles)),
-                            style = MaterialTheme.typography.titleLarge,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
                             "Scrobbles",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                         )
                     }
                 }
 
                 // Middle: Compact stats row (Tracks, Artists, Albums)
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CompactStatItem(count = trackCount, label = "Tracks")
@@ -566,14 +553,14 @@ private fun StatsCard(
                         modifier = Modifier
                             .size(3.dp)
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.outlineVariant),
+                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                     )
                     CompactStatItem(count = artistCount, label = "Artists")
                     Box(
                         modifier = Modifier
                             .size(3.dp)
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.outlineVariant),
+                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                     )
                     CompactStatItem(count = albumCount, label = "Albums")
                 }
@@ -581,15 +568,15 @@ private fun StatsCard(
                 // Right: Sleek mini arrow action
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                    modifier = Modifier.size(32.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f),
+                    modifier = Modifier.size(28.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowForward,
                             contentDescription = "View genres",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }

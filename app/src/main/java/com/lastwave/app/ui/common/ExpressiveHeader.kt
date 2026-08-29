@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -99,8 +100,8 @@ fun ExpressiveHeader(
                     .windowInsetsPadding(
                         WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
                     )
-                    .padding(horizontal = 20.dp)
-                    .padding(top = 2.dp, bottom = 10.dp),
+                    .padding(horizontal = 18.dp)
+                    .padding(top = 0.dp, bottom = 4.dp),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -109,35 +110,36 @@ fun ExpressiveHeader(
                     if (onBack != null) {
                         FilledTonalIconButton(
                             onClick = onBack,
+                            modifier = Modifier.size(34.dp),
                             colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f),
                             ),
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", modifier = Modifier.size(18.dp))
                         }
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(10.dp))
                     }
 
                     Column(Modifier.weight(1f)) {
                         Text(
                             title,
-                            style = if (onBack != null) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
+                            style = if (onBack != null) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
-                            maxLines = 2,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         subtitle?.let {
                             Text(
                                 it,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
                         actions()
                     }
                 }
@@ -158,8 +160,8 @@ private fun Modifier.drawGlowBackground(color: Color, secondaryColor: Color): Mo
         val secondaryRadius = (size.width.coerceAtLeast(size.height) * 0.72f).coerceAtLeast(1f)
         val secondaryBrush = Brush.radialGradient(
             colors = listOf(
-                secondaryColor.copy(alpha = 0.13f),
-                secondaryColor.copy(alpha = 0.045f),
+                secondaryColor.copy(alpha = 0.06f),
+                secondaryColor.copy(alpha = 0.02f),
                 secondaryColor.copy(alpha = 0f),
             ),
             center = Offset(secondaryCx, size.height * 0.78f),
@@ -167,8 +169,8 @@ private fun Modifier.drawGlowBackground(color: Color, secondaryColor: Color): Mo
         )
         val primaryBrush = Brush.radialGradient(
             colors = listOf(
-                color.copy(alpha = 0.23f),
-                color.copy(alpha = 0.07f),
+                color.copy(alpha = 0.09f),
+                color.copy(alpha = 0.03f),
                 color.copy(alpha = 0f),
             ),
             center = Offset(cx, cy),
@@ -193,10 +195,11 @@ fun HeaderActionIcon(
 ) {
     FilledTonalIconButton(
         onClick = onClick,
+        modifier = Modifier.size(34.dp),
         colors = IconButtonDefaults.filledTonalIconButtonColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
         ),
     ) {
-        Icon(icon, contentDescription = contentDescription)
+        Icon(icon, contentDescription = contentDescription, modifier = Modifier.size(18.dp))
     }
 }
