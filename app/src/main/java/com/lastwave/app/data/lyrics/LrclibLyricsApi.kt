@@ -65,8 +65,8 @@ class LrclibLyricsApi @Inject constructor(
             }
         }
 
-        // 3. Fallback to /api/search query
-        searchLyrics(cleanedTitle, cleanedArtist) ?: searchLyrics(title, artist)
+        // 3. Fallback to /api/search query with strict validation
+        searchLyrics(cleanedTitle, cleanedArtist, durationSeconds) ?: searchLyrics(title, artist, durationSeconds)
     }
 
     private fun getLyricsExact(
@@ -106,6 +106,7 @@ class LrclibLyricsApi @Inject constructor(
     private fun searchLyrics(
         title: String,
         artist: String,
+        durationSeconds: Int? = null,
     ): LrclibRecord? {
         val urlBuilder = "https://lrclib.net/api/search".toHttpUrlOrNull()?.newBuilder() ?: return null
         urlBuilder.addQueryParameter("q", "$artist $title".trim())
@@ -120,11 +121,34 @@ class LrclibLyricsApi @Inject constructor(
                 if (!response.isSuccessful) return null
                 val body = response.body?.string() ?: return null
                 val list = json.decodeFromString<List<LrclibRecord>>(body)
-                // Prefer item with syncedLyrics first, then plainLyrics, or instrumental
-                list.firstOrNull { !it.syncedLyrics.isNullOrBlank() }
-                    ?: list.firstOrNull { !it.plainLyrics.isNullOrBlank() }
-                    ?: list.firstOrNull { it.instrumental == true }
-                    ?: list.firstOrNull()
+                if (list.isEmpty()) return null
+
+                // Filter & score candidates based on artist similarity, title similarity, and duration delta
+                val validCandidates = list.filter { candidate ->
+                    val candArtist = cleanArtistName(candidate.artistName ?: "")
+                    val reqArtist = cleanArtistName(artist)
+                    val artistMatches = candArtist.contains(reqArtist, ignoreCase = true) ||
+                            reqArtist.contains(candArtist, ignoreCase = true) ||
+                            isSimilar(candArtist, reqArtist)
+
+                    val candTitle = cleanTrackTitle(candidate.trackName ?: candidate.name ?: "")
+                    val reqTitle = cleanTrackTitle(title)
+                    val titleMatches = candTitle.contains(reqTitle, ignoreCase = true) ||
+                            reqTitle.contains(candTitle, ignoreCase = true) ||
+                            isSimilar(candTitle, reqTitle)
+
+                    val durationMatches = if (durationSeconds != null && durationSeconds > 0 && candidate.duration != null && candidate.duration > 0) {
+                        kotlin.math.abs(candidate.duration - durationSeconds) <= 8.0
+                    } else {
+                        true
+                    }
+
+                    artistMatches && titleMatches && durationMatches
+                }
+
+                validCandidates.firstOrNull { !it.syncedLyrics.isNullOrBlank() }
+                    ?: validCandidates.firstOrNull { !it.plainLyrics.isNullOrBlank() }
+                    ?: validCandidates.firstOrNull { it.instrumental == true }
             }
         } catch (e: IOException) {
             null
@@ -134,6 +158,18 @@ class LrclibLyricsApi @Inject constructor(
     }
 
     companion object {
+        fun isSimilar(s1: String, s2: String): Boolean {
+            val a = s1.trim().lowercase()
+            val b = s2.trim().lowercase()
+            if (a == b) return true
+            if (a.isEmpty() || b.isEmpty()) return false
+            val aTokens = a.split(Regex("""\s+""")).toSet()
+            val bTokens = b.split(Regex("""\s+""")).toSet()
+            val intersection = aTokens.intersect(bTokens).size
+            val union = aTokens.union(bTokens).size
+            return if (union > 0) (intersection.toDouble() / union) >= 0.5 else false
+        }
+
         fun cleanTrackTitle(raw: String): String {
             return raw
                 // Strip bracketed/parenthesized extra text: (feat. ...), (Official Video), [HQ], etc.

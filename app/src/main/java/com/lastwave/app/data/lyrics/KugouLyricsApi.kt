@@ -100,7 +100,38 @@ class KugouLyricsApi @Inject constructor(
             }
 
             val searchResult = json.decodeFromString<KugouSearchResponse>(searchJsonString)
-            val candidate = searchResult.candidates.firstOrNull() ?: return@withContext null
+            if (searchResult.candidates.isEmpty()) return@withContext null
+
+            val cleanedTitle = LrclibLyricsApi.cleanTrackTitle(title)
+            val cleanedArtist = LrclibLyricsApi.cleanArtistName(artist)
+
+            // Select best candidate based on artist similarity, title similarity, and duration delta
+            val candidate = searchResult.candidates.firstOrNull { cand ->
+                val candSinger = LrclibLyricsApi.cleanArtistName(cand.singer)
+                val candSong = LrclibLyricsApi.cleanTrackTitle(cand.song)
+
+                val artistMatches = candSinger.contains(cleanedArtist, ignoreCase = true) ||
+                        cleanedArtist.contains(candSinger, ignoreCase = true) ||
+                        LrclibLyricsApi.isSimilar(candSinger, cleanedArtist)
+
+                val titleMatches = candSong.contains(cleanedTitle, ignoreCase = true) ||
+                        cleanedTitle.contains(candSong, ignoreCase = true) ||
+                        LrclibLyricsApi.isSimilar(candSong, cleanedTitle)
+
+                val durationMatches = if (durationSeconds != null && durationSeconds > 0 && cand.duration > 0) {
+                    kotlin.math.abs(cand.duration - (durationSeconds * 1000L)) <= 8000L
+                } else {
+                    true
+                }
+
+                artistMatches && titleMatches && durationMatches
+            } ?: searchResult.candidates.firstOrNull { cand ->
+                if (durationSeconds != null && durationSeconds > 0 && cand.duration > 0) {
+                    kotlin.math.abs(cand.duration - (durationSeconds * 1000L)) <= 8000L
+                } else {
+                    true
+                }
+            } ?: return@withContext null
 
             // 2. Download KRC encrypted content
             val downloadUrl = "http://lyrics.kugou.com/download".toHttpUrlOrNull()
