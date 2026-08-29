@@ -3,6 +3,7 @@ package com.lastwave.app.ui.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -41,8 +42,9 @@ import com.lastwave.app.ui.common.ArtworkImage
 
 /**
  * 3x3 Symmetrical, Horizontally Scrollable Quick Play Grid.
- * Displays 3 rows x 3 columns on screen with prominent square album art,
- * fully visible song titles, and sleek compact play icons.
+ * Dynamically computes tile width so exactly 3 columns fit the screen width
+ * (0% of 4th column peeking; accessible only via scrolling).
+ * Displays thin, clearly visible song titles.
  */
 @Composable
 fun QuickPlayGrid(
@@ -69,21 +71,27 @@ fun QuickPlayGrid(
 
         Spacer(Modifier.height(4.dp))
 
-        LazyHorizontalGrid(
-            rows = GridCells.Fixed(3),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(390.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-            contentPadding = PaddingValues(horizontal = 2.dp),
-        ) {
-            items(tracks, key = { "${it.name}|${it.artist}" }) { track ->
-                QuickPlaySymmetricalTile(
-                    track = track,
-                    onClick = { onTrackClick(track) },
-                    modifier = Modifier.width(98.dp),
-                )
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val spacing = 6.dp
+            // Exactly 3 columns fit 100% of the available width with no 4th column peeking
+            val tileWidth = (maxWidth - (spacing * 2)) / 3
+
+            LazyHorizontalGrid(
+                rows = GridCells.Fixed(3),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(390.dp),
+                horizontalArrangement = Arrangement.spacedBy(spacing),
+                verticalArrangement = Arrangement.spacedBy(spacing),
+                contentPadding = PaddingValues(horizontal = 0.dp),
+            ) {
+                items(tracks, key = { "${it.name}|${it.artist}" }) { track ->
+                    QuickPlaySymmetricalTile(
+                        track = track,
+                        onClick = { onTrackClick(track) },
+                        modifier = Modifier.width(tileWidth),
+                    )
+                }
             }
         }
     }
@@ -145,11 +153,11 @@ private fun QuickPlaySymmetricalTile(
 
             Spacer(Modifier.height(3.dp))
 
-            // Clearly visible song title
+            // Thin, clearly visible song title
             Text(
                 text = track.name,
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Medium,
+                    fontWeight = FontWeight.Normal,
                     fontSize = TextUnit(9.5f, TextUnitType.Sp),
                     lineHeight = TextUnit(11.5f, TextUnitType.Sp),
                 ),

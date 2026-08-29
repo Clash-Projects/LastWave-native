@@ -395,6 +395,19 @@ fun PlayerHost(
                     else kotlinx.coroutines.flow.flowOf(false)
                 }.collectAsStateWithLifecycle(initialValue = false)
 
+                // Prevent background list elements beneath the MiniPlayer and dock from being clicked
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(if (hasBottomNavigation) 155.dp else 85.dp)
+                        .clickable(
+                            interactionSource = null,
+                            indication = null,
+                            onClick = {},
+                        ),
+                )
+
                 MiniPlayer(
                     state = state,
                     progressState = viewModel.progressState,
