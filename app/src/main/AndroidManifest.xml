@@ -23,6 +23,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.LastWave.Splash"
         android:usesCleartextTraffic="false"
+        android:hardwareAccelerated="true"
+        android:largeHeap="true"
         android:enableOnBackInvokedCallback="true">
 
         <activity
@@ -92,12 +94,25 @@
             </intent-filter>
         </service>
 
-        <!-- Native background music player service -->
+        <!-- Android Auto and Automotive OS integration -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+        <meta-data
+            android:name="com.google.android.gms.car.notification.SmallIcon"
+            android:resource="@mipmap/ic_launcher" />
+
+        <!-- Native background music player & Android Auto MediaBrowserService -->
         <service
             android:name=".playback.MusicPlaybackService"
-            android:exported="false"
+            android:exported="true"
             android:stopWithTask="false"
-            android:foregroundServiceType="mediaPlayback" />
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </service>
 
         <!-- Now playing widget -->
         <receiver
