@@ -9,6 +9,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.combinedClickable
@@ -143,7 +144,11 @@ fun PlaylistScreen(
 
     var menuTarget by remember { mutableStateOf<Pair<Long, GeneratedTrack>?>(null) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
         Column(Modifier.fillMaxSize()) {
             var sortMenuExpanded by remember { mutableStateOf(false) }
             ExpressiveHeader(
