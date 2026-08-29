@@ -73,7 +73,7 @@ fun QuickPlayGrid(
             rows = GridCells.Fixed(3),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(415.dp),
+                .height(445.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 2.dp),
@@ -82,7 +82,7 @@ fun QuickPlayGrid(
                 QuickPlaySymmetricalTile(
                     track = track,
                     onClick = { onTrackClick(track) },
-                    modifier = Modifier.width(106.dp),
+                    modifier = Modifier.width(112.dp),
                 )
             }
         }
@@ -105,10 +105,10 @@ private fun QuickPlaySymmetricalTile(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(6.dp),
+                .padding(4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Perfect 1:1 Square Artwork Container
+            // Large Prominent 1:1 Square Artwork Container
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -143,35 +143,33 @@ private fun QuickPlaySymmetricalTile(
                 }
             }
 
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(4.dp))
 
             Text(
                 text = track.name,
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = TextUnit(11.5f, TextUnitType.Sp),
-                    lineHeight = TextUnit(13.5f, TextUnitType.Sp),
+                    fontSize = TextUnit(10f, TextUnitType.Sp),
+                    lineHeight = TextUnit(12f, TextUnitType.Sp),
                 ),
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
             )
-
-            Spacer(Modifier.height(1.dp))
 
             Text(
                 text = track.artist,
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = TextUnit(10f, TextUnitType.Sp),
-                    lineHeight = TextUnit(12f, TextUnitType.Sp),
+                    fontSize = TextUnit(8.8f, TextUnitType.Sp),
+                    lineHeight = TextUnit(10.8f, TextUnitType.Sp),
                 ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
             )
         }
     }
