@@ -210,8 +210,8 @@ fun PlaylistScreen(
                     state.isLoading && state.playlists.isEmpty() && !state.isGenerating -> LoadingState()
                     state.playlists.isEmpty() && !state.isGenerating -> EmptyState()
                     else -> LazyColumn(
-                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
-                        verticalArrangement = Arrangement.spacedBy(com.lastwave.app.ui.common.GroupGap),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         if (state.isGenerating) {
@@ -227,7 +227,7 @@ fun PlaylistScreen(
                                     viewModel.dismissJustSavedBanner()
                                 }
                                 Surface(
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(18.dp),
                                     color = MaterialTheme.colorScheme.primaryContainer,
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
@@ -241,43 +241,55 @@ fun PlaylistScreen(
                             }
                         }
 
-                        itemsIndexed(state.playlists, key = { _, playlist -> playlist.id }) { index, playlist ->
-                            val isNewest = playlist.id == state.newestId
-                            Box(Modifier.animateItem()) {
-                                PlaylistCard(
-                                    playlist = playlist,
-                                    isNewest = isNewest,
-                                    position = com.lastwave.app.ui.common.groupPositionFor(index, state.playlists.size),
-                                    isRegenerating = state.regeneratingId == playlist.id,
-                                    currentTrack = playbackState.current,
-                                    isPlaying = playbackState.isPlaying,
-                                    playbackSource = playbackState.sourceLabel,
-                                    onClick = { onOpenPlaylist(playlist.id) },
-                                    onExport = { viewModel.openExportSheet(playlist.id) },
-                                    onRename = { viewModel.requestRename(playlist.id) },
-                                    onEditCover = { coverEditorPlaylistId = playlist.id },
-                                    onTogglePin = { viewModel.togglePinned(playlist.id) },
-                                    onRegenerate = {
-                                        viewModel.regenerate(playlist.id) { newId ->
-                                            onOpenPlaylist(newId)
-                                        }
-                                    },
-                                    onDelete = { viewModel.requestDelete(playlist.id) },
-                                    onPlay = {
-                                        musicPlayer.playQueue(
-                                            playlist.tracks.map { track ->
-                                                com.lastwave.app.playback.PlayableTrack(
-                                                    title = track.name,
-                                                    artist = track.artist,
-                                                    album = track.album,
-                                                    artworkUrl = track.artworkUrl,
+                        item(key = "playlists_card") {
+                            Surface(
+                                shape = RoundedCornerShape(22.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                tonalElevation = 1.dp,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Column(Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 8.dp)) {
+                                    state.playlists.forEachIndexed { index, playlist ->
+                                        val isNewest = playlist.id == state.newestId
+                                        PlaylistCard(
+                                            playlist = playlist,
+                                            isNewest = isNewest,
+                                            position = com.lastwave.app.ui.common.groupPositionFor(index, state.playlists.size),
+                                            isRegenerating = state.regeneratingId == playlist.id,
+                                            currentTrack = playbackState.current,
+                                            isPlaying = playbackState.isPlaying,
+                                            playbackSource = playbackState.sourceLabel,
+                                            onClick = { onOpenPlaylist(playlist.id) },
+                                            onExport = { viewModel.openExportSheet(playlist.id) },
+                                            onRename = { viewModel.requestRename(playlist.id) },
+                                            onEditCover = { coverEditorPlaylistId = playlist.id },
+                                            onTogglePin = { viewModel.togglePinned(playlist.id) },
+                                            onRegenerate = {
+                                                viewModel.regenerate(playlist.id) { newId ->
+                                                    onOpenPlaylist(newId)
+                                                }
+                                            },
+                                            onDelete = { viewModel.requestDelete(playlist.id) },
+                                            onPlay = {
+                                                musicPlayer.playQueue(
+                                                    playlist.tracks.map { track ->
+                                                        com.lastwave.app.playback.PlayableTrack(
+                                                            title = track.name,
+                                                            artist = track.artist,
+                                                            album = track.album,
+                                                            artworkUrl = track.artworkUrl,
+                                                        )
+                                                    },
+                                                    startIndex = 0,
+                                                    sourceLabel = playlist.title,
                                                 )
                                             },
-                                            startIndex = 0,
-                                            sourceLabel = playlist.title,
                                         )
-                                    },
-                                )
+                                        if (index < state.playlists.lastIndex) {
+                                            Spacer(Modifier.height(4.dp))
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -550,10 +562,10 @@ private fun PlaylistCard(
                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(playlist.title))
                     },
                 )
-                .padding(14.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(60.dp)) {
+            Box(Modifier.size(52.dp)) {
                 PlaylistCover(playlist = playlist, modifier = Modifier.fillMaxSize(), cornerRadius = 14.dp)
                 if (isThisPlaylistPlaying) {
                     com.lastwave.app.ui.player.PlayingWaveBars(
@@ -575,12 +587,12 @@ private fun PlaylistCard(
                     }
                 }
             }
-            Spacer(Modifier.width(14.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         playlist.title,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -592,7 +604,7 @@ private fun PlaylistCard(
                             Icons.Filled.PushPin,
                             contentDescription = "Pinned",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(15.dp),
                         )
                     }
                 }
@@ -600,7 +612,7 @@ private fun PlaylistCard(
                 Text(
                     "${playlist.tracks.size} tracks \u00b7 ${formatDate(playlist.createdAtMillis)}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

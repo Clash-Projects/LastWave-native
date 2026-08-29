@@ -241,8 +241,13 @@ fun HomeScreen(
                 }
                 val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
                 val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
-                val quickTracks = remember(uiState.allTracks) {
+                val lastFmQuickTracks = remember(uiState.allTracks) {
                     uiState.allTracks.distinctBy { "${it.name}|${it.artist}" }
+                }
+                val activeQuickTracks = if (uiState.quickPlaySource == QuickPlaySource.YOUTUBE_MUSIC) {
+                    uiState.ytMusicQuickTracks
+                } else {
+                    lastFmQuickTracks
                 }
 
                 LazyColumn(
@@ -255,7 +260,7 @@ fun HomeScreen(
                     ),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    if (quickTracks.isNotEmpty()) {
+                    if (lastFmQuickTracks.isNotEmpty() || uiState.quickPlaySource == QuickPlaySource.YOUTUBE_MUSIC) {
                         item(key = "quick_play_container", contentType = "quick_play") {
                             Surface(
                                 shape = RoundedCornerShape(22.dp),
@@ -264,7 +269,10 @@ fun HomeScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 QuickPlayGrid(
-                                    tracks = quickTracks,
+                                    tracks = activeQuickTracks,
+                                    currentSource = uiState.quickPlaySource,
+                                    onSourceToggle = viewModel::setQuickPlaySource,
+                                    isLoadingSource = uiState.isLoadingYtQuick,
                                     onTrackClick = { track ->
                                         musicPlayer.play(
                                             com.lastwave.app.playback.PlayableTrack(
@@ -272,7 +280,7 @@ fun HomeScreen(
                                                 artist = track.artist,
                                                 artworkUrl = track.artworkUrl,
                                             ),
-                                            sourceLabel = "Quick Play",
+                                            sourceLabel = if (uiState.quickPlaySource == QuickPlaySource.YOUTUBE_MUSIC) "YT Quick Play" else "Quick Play",
                                         )
                                     },
                                     modifier = Modifier

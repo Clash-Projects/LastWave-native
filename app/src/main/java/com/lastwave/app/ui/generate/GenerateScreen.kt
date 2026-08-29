@@ -48,6 +48,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -126,31 +127,47 @@ fun GenerateScreen(
 
             item(key = "modeGroup") {
                 val modes = GenerateMode.entries.toList()
-                ExpressiveGroup(rowCount = modes.size) { index, position ->
-                    val mode = modes[index]
-                    val (badgeContainer, badgeTint) = badgeColorsFor(iconFor(mode))
-                    ExpressiveGroupSelectRow(
-                        icon = iconFor(mode),
-                        title = mode.label,
-                        subtitle = mode.description,
-                        selected = state.selectedMode == mode,
-                        position = position,
-                        onClick = { if (!state.isGenerating) viewModel.selectMode(mode) },
-                        badgeContainer = badgeContainer,
-                        badgeTint = badgeTint,
-                    )
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    tonalElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp)) {
+                        Text(
+                            text = "Generation Mode",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 2.dp, bottom = 10.dp),
+                        )
+                        ExpressiveGroup(rowCount = modes.size) { index, position ->
+                            val mode = modes[index]
+                            val (badgeContainer, badgeTint) = badgeColorsFor(iconFor(mode))
+                            ExpressiveGroupSelectRow(
+                                icon = iconFor(mode),
+                                title = mode.label,
+                                subtitle = mode.description,
+                                selected = state.selectedMode == mode,
+                                position = position,
+                                onClick = { if (!state.isGenerating) viewModel.selectMode(mode) },
+                                badgeContainer = badgeContainer,
+                                badgeTint = badgeTint,
+                            )
+                        }
+                    }
                 }
             }
 
             state.selectedMode?.let { mode ->
                 if (!state.isGenerating) {
                     item(key = "options") {
-                        Card(
-                            shape = GeneratorOuterCardShape,
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                        Surface(
+                            shape = RoundedCornerShape(22.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            tonalElevation = 1.dp,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Column(Modifier.padding(20.dp)) {
+                            Column(Modifier.padding(16.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Box(
                                         Modifier
@@ -167,9 +184,9 @@ fun GenerateScreen(
                                         )
                                     }
                                     Spacer(Modifier.width(10.dp))
-                                    Text("Options", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Text("Options", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                                 }
-                                Spacer(Modifier.height(16.dp))
+                                Spacer(Modifier.height(14.dp))
 
                                 when (mode) {
                                     GenerateMode.TOP, GenerateMode.LIBRARY -> PeriodOptions(state.period, viewModel::setPeriod)
@@ -183,15 +200,15 @@ fun GenerateScreen(
                                     )
                                 }
 
-                                Spacer(Modifier.height(20.dp))
+                                Spacer(Modifier.height(16.dp))
                                 if (mode == GenerateMode.RECOMMENDATIONS) {
                                     Text(
                                         "Track count: $RECOMMENDATION_TRACK_COUNT (fixed)",
-                                        style = MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Medium,
                                     )
                                 } else {
-                                    Text("Track count: ${state.trackCount}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+                                    Text("Track count: ${state.trackCount}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                                     Slider(
                                         value = state.trackCount.toFloat(),
                                         onValueChange = { viewModel.setTrackCount(it.toInt()) },
@@ -204,12 +221,12 @@ fun GenerateScreen(
                                 Button(
                                     onClick = viewModel::generate,
                                     enabled = !state.isGenerating,
-                                    shape = ExpressivePillShape,
-                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(50),
+                                    modifier = Modifier.fillMaxWidth().height(48.dp),
                                 ) {
                                     Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Generate Playlist", fontWeight = FontWeight.Medium)
+                                    Text("Generate Playlist", fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }

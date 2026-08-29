@@ -25,6 +25,11 @@ import javax.inject.Inject
 import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.Dispatchers
 
+enum class QuickPlaySource(val label: String) {
+    LAST_FM("Last.fm"),
+    YOUTUBE_MUSIC("YT Music")
+}
+
 @Immutable
 data class HomeUiState(
     val isLoading: Boolean = true,
@@ -43,6 +48,9 @@ data class HomeUiState(
     val topTracksOverall: List<HomeTrack> = emptyList(),
     val topTracks7Days: List<HomeTrack> = emptyList(),
     val topTracks30Days: List<HomeTrack> = emptyList(),
+    val quickPlaySource: QuickPlaySource = QuickPlaySource.LAST_FM,
+    val ytMusicQuickTracks: List<HomeTrack> = emptyList(),
+    val isLoadingYtQuick: Boolean = false,
     val page: Int = 1,
     val totalPages: Int = 1,
     val error: String? = null,
@@ -167,6 +175,7 @@ class HomeViewModel @Inject constructor(
     private val viewingProfileState: com.lastwave.app.data.repository.ViewingProfileState,
     private val settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
     private val scrobbleRepository: com.lastwave.app.data.repository.ScrobbleRepository,
+    private val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -175,6 +184,32 @@ class HomeViewModel @Inject constructor(
     val listenElapsedSeconds: StateFlow<Int> = _listenElapsedSeconds.asStateFlow()
 
     private var cachedTopTracks: List<HomeTrack> = emptyList()
+
+    fun setQuickPlaySource(source: QuickPlaySource) {
+        _uiState.update { it.copy(quickPlaySource = source) }
+        if (source == QuickPlaySource.YOUTUBE_MUSIC && _uiState.value.ytMusicQuickTracks.isEmpty()) {
+            loadYtMusicQuickTracks()
+        }
+    }
+
+    fun loadYtMusicQuickTracks() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingYtQuick = true) }
+            val signals = runCatching { innerTube.fetchTasteSignals(recentLimit = 30, likedLimit = 30, feedLimit = 30) }.getOrNull()
+            val ytTracks = (signals?.recentTracks.orEmpty() + signals?.likedTracks.orEmpty() + signals?.feedTracks.orEmpty())
+                .distinctBy { "${it.title}|${it.artist}" }
+                .map {
+                    HomeTrack(
+                        name = it.title,
+                        artist = it.artist,
+                        artworkUrl = it.artworkUrl,
+                        timestampMillis = null,
+                        playCount = 1,
+                    )
+                }
+            _uiState.update { it.copy(ytMusicQuickTracks = ytTracks, isLoadingYtQuick = false) }
+        }
+    }
 
     init {
         loadInitial()

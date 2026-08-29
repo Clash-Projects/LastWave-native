@@ -60,10 +60,13 @@ import com.lastwave.app.ui.common.ArtworkImage
 @Composable
 fun QuickPlayGrid(
     tracks: List<HomeTrack>,
+    currentSource: QuickPlaySource = QuickPlaySource.LAST_FM,
+    onSourceToggle: (QuickPlaySource) -> Unit = {},
+    isLoadingSource: Boolean = false,
     onTrackClick: (HomeTrack) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (tracks.isEmpty()) return
+    if (tracks.isEmpty() && !isLoadingSource) return
 
     val gridState = rememberLazyGridState()
     val flingBehavior = rememberSnapFlingBehavior(lazyGridState = gridState)
@@ -72,7 +75,7 @@ fun QuickPlayGrid(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 2.dp, vertical = 1.dp),
+                .padding(horizontal = 2.dp, vertical = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -81,34 +84,92 @@ fun QuickPlayGrid(
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
             )
+
+            // Segmented source switcher (Last.fm / YT Music)
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                tonalElevation = 1.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val lastFmSelected = currentSource == QuickPlaySource.LAST_FM
+                    val ytSelected = currentSource == QuickPlaySource.YOUTUBE_MUSIC
+
+                    Surface(
+                        onClick = { onSourceToggle(QuickPlaySource.LAST_FM) },
+                        shape = RoundedCornerShape(50),
+                        color = if (lastFmSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    ) {
+                        Text(
+                            text = "Last.fm",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (lastFmSelected) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = TextUnit(10.5f, TextUnitType.Sp),
+                            ),
+                            color = if (lastFmSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                        )
+                    }
+
+                    Surface(
+                        onClick = { onSourceToggle(QuickPlaySource.YOUTUBE_MUSIC) },
+                        shape = RoundedCornerShape(50),
+                        color = if (ytSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    ) {
+                        Text(
+                            text = "YT Music",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = if (ytSelected) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = TextUnit(10.5f, TextUnitType.Sp),
+                            ),
+                            color = if (ytSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
         }
 
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(4.dp))
 
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            val spacing = 4.dp
-            // Exactly 3 columns fit 100% of the available width with tight, elegant spacing
-            val tileWidth = (maxWidth - (spacing * 2)) / 3
-            // 3 square tiles + 2 vertical gaps of 4.dp
-            val gridHeight = (tileWidth * 3) + (spacing * 2)
-
-            LazyHorizontalGrid(
-                rows = GridCells.Fixed(3),
-                state = gridState,
-                flingBehavior = flingBehavior,
+        if (isLoadingSource) {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(gridHeight),
-                horizontalArrangement = Arrangement.spacedBy(spacing),
-                verticalArrangement = Arrangement.spacedBy(spacing),
-                contentPadding = PaddingValues(horizontal = 0.dp),
+                    .height(180.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                items(tracks, key = { "${it.name}|${it.artist}" }) { track ->
-                    QuickPlaySymmetricalTile(
-                        track = track,
-                        onClick = { onTrackClick(track) },
-                        modifier = Modifier.width(tileWidth),
-                    )
+                com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator(size = 28.dp)
+            }
+        } else {
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                val spacing = 4.dp
+                // Exactly 3 columns fit 100% of the available width with tight, elegant spacing
+                val tileWidth = (maxWidth - (spacing * 2)) / 3
+                // 3 square tiles + 2 vertical gaps of 4.dp
+                val gridHeight = (tileWidth * 3) + (spacing * 2)
+
+                LazyHorizontalGrid(
+                    rows = GridCells.Fixed(3),
+                    state = gridState,
+                    flingBehavior = flingBehavior,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(gridHeight),
+                    horizontalArrangement = Arrangement.spacedBy(spacing),
+                    verticalArrangement = Arrangement.spacedBy(spacing),
+                    contentPadding = PaddingValues(horizontal = 0.dp),
+                ) {
+                    items(tracks, key = { it.key }) { track ->
+                        QuickPlaySymmetricalTile(
+                            track = track,
+                            onClick = { onTrackClick(track) },
+                            modifier = Modifier.width(tileWidth),
+                        )
+                    }
                 }
             }
         }
