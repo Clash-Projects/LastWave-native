@@ -6,17 +6,32 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
+data class LyricSyllable(
+    val timeMs: Long,
+    val durationMs: Long,
+    val text: String,
+    val isBackground: Boolean = false,
+)
+
 data class LyricLine(
     val timeMs: Long,
+    val durationMs: Long = 0L,
     val text: String,
-)
+    val syllables: List<LyricSyllable> = emptyList(),
+    val transliteration: String? = null,
+    val transliterationSyllables: List<LyricSyllable> = emptyList(),
+) {
+    val hasSyllables: Boolean get() = syllables.isNotEmpty()
+}
 
 sealed interface LyricsResult {
     data class Success(
         val lines: List<LyricLine>,
         val isSynced: Boolean,
+        val isWordSynced: Boolean = false,
         val plainLyrics: String? = null,
         val isInstrumental: Boolean = false,
+        val source: String? = null,
     ) : LyricsResult
 
     data object Empty : LyricsResult
@@ -25,6 +40,7 @@ sealed interface LyricsResult {
 
 @Singleton
 class LyricsRepository @Inject constructor(
+    private val lyricsPlusApi: LyricsPlusApi,
     private val lrclibApi: LrclibLyricsApi,
 ) {
     private val cache = ConcurrentHashMap<String, LyricsResult>()
@@ -41,56 +57,111 @@ class LyricsRepository @Inject constructor(
             cache[cacheKey]?.let { return@withContext it }
         }
 
-        val record = try {
+        // 1. PRIMARY: Try word-by-word / syllable sync from LyricsPlus
+        try {
+            val wordResponse = lyricsPlusApi.fetchWordLyrics(title, artist, album, durationSeconds)
+            if (wordResponse != null && !wordResponse.lyrics.isNullOrEmpty()) {
+                val lines = wordResponse.lyrics.map { line ->
+                    val syllables = line.syllabus?.map { syl ->
+                        LyricSyllable(
+                            timeMs = syl.time,
+                            durationMs = syl.duration,
+                            text = syl.text,
+                            isBackground = syl.isBackground,
+                        )
+                    } ?: emptyList()
+
+                    val transliterationSyllables = line.transliteration?.syllabus?.map { syl ->
+                        LyricSyllable(
+                            timeMs = syl.time,
+                            durationMs = syl.duration,
+                            text = syl.text,
+                            isBackground = syl.isBackground,
+                        )
+                    } ?: emptyList()
+
+                    LyricLine(
+                        timeMs = line.time,
+                        durationMs = line.duration,
+                        text = line.text,
+                        syllables = syllables,
+                        transliteration = line.transliteration?.text,
+                        transliterationSyllables = transliterationSyllables,
+                    )
+                }.sortedBy { it.timeMs }
+
+                if (lines.isNotEmpty()) {
+                    val hasWordTiming = lines.any { it.hasSyllables } || wordResponse.type.equals("WORD", ignoreCase = true)
+                    val result = LyricsResult.Success(
+                        lines = lines,
+                        isSynced = true,
+                        isWordSynced = hasWordTiming,
+                        plainLyrics = lines.joinToString("\n") { it.text },
+                        isInstrumental = false,
+                        source = if (hasWordTiming) "LyricsPlus (Word-Sync)" else "LyricsPlus (Line-Sync)",
+                    )
+                    cache[cacheKey] = result
+                    return@withContext result
+                }
+            }
+        } catch (_: Exception) {
+            // Silently fall back to secondary line-by-line provider
+        }
+
+        // 2. SECONDARY: Fall back to LRCLIB line-by-line sync
+        val lrclibRecord = try {
             lrclibApi.fetchLyrics(title, artist, album, durationSeconds)
         } catch (e: Exception) {
-            return@withContext LyricsResult.Error(e.localizedMessage ?: "Failed to load lyrics")
+            null
         }
 
-        if (record == null) {
-            val empty = LyricsResult.Empty
-            cache[cacheKey] = empty
-            return@withContext empty
-        }
-
-        if (record.instrumental == true) {
-            val result = LyricsResult.Success(
-                lines = emptyList(),
-                isSynced = false,
-                plainLyrics = null,
-                isInstrumental = true,
-            )
-            cache[cacheKey] = result
-            return@withContext result
-        }
-
-        val synced = record.syncedLyrics
-        if (!synced.isNullOrBlank()) {
-            val lines = parseLrc(synced)
-            if (lines.isNotEmpty()) {
+        if (lrclibRecord != null) {
+            if (lrclibRecord.instrumental == true) {
                 val result = LyricsResult.Success(
-                    lines = lines,
-                    isSynced = true,
-                    plainLyrics = record.plainLyrics,
+                    lines = emptyList(),
+                    isSynced = false,
+                    isWordSynced = false,
+                    plainLyrics = null,
+                    isInstrumental = true,
+                    source = "LRCLIB (Instrumental)",
+                )
+                cache[cacheKey] = result
+                return@withContext result
+            }
+
+            val synced = lrclibRecord.syncedLyrics
+            if (!synced.isNullOrBlank()) {
+                val lines = parseLrc(synced)
+                if (lines.isNotEmpty()) {
+                    val result = LyricsResult.Success(
+                        lines = lines,
+                        isSynced = true,
+                        isWordSynced = false,
+                        plainLyrics = lrclibRecord.plainLyrics,
+                        isInstrumental = false,
+                        source = "LRCLIB (Line-Sync)",
+                    )
+                    cache[cacheKey] = result
+                    return@withContext result
+                }
+            }
+
+            val plain = lrclibRecord.plainLyrics
+            if (!plain.isNullOrBlank()) {
+                val result = LyricsResult.Success(
+                    lines = emptyList(),
+                    isSynced = false,
+                    isWordSynced = false,
+                    plainLyrics = plain.trim(),
                     isInstrumental = false,
+                    source = "LRCLIB (Plain)",
                 )
                 cache[cacheKey] = result
                 return@withContext result
             }
         }
 
-        val plain = record.plainLyrics
-        if (!plain.isNullOrBlank()) {
-            val result = LyricsResult.Success(
-                lines = emptyList(),
-                isSynced = false,
-                plainLyrics = plain.trim(),
-                isInstrumental = false,
-            )
-            cache[cacheKey] = result
-            return@withContext result
-        }
-
+        // 3. TERTIARY: If both fail, return Empty (no lyrics)
         val empty = LyricsResult.Empty
         cache[cacheKey] = empty
         empty
@@ -134,7 +205,13 @@ class LyricsRepository @Inject constructor(
                     }
 
                     val totalMs = (minutes * 60 * 1000) + (seconds * 1000) + fractionMs + offsetMs
-                    result.add(LyricLine(timeMs = totalMs.coerceAtLeast(0L), text = text))
+                    result.add(
+                        LyricLine(
+                            timeMs = totalMs.coerceAtLeast(0L),
+                            text = text,
+                            syllables = emptyList(),
+                        ),
+                    )
                 }
             }
 
