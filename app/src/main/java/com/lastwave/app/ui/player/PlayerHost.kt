@@ -406,7 +406,7 @@ fun PlayerHost(
                     onPrevious = viewModel.player::previous,
                     onNext = viewModel.player::next,
                     onClose = viewModel.player::stopAndClear,
-                    bottomPadding = if (hasBottomNavigation) 92.dp else 12.dp,
+                    bottomPadding = if (hasBottomNavigation) 74.dp else 10.dp,
                     edgeToEdge = !hasBottomNavigation,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
@@ -584,7 +584,7 @@ private fun MiniPlayer(
     val shape = if (edgeToEdge) {
         RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     } else {
-        RoundedCornerShape(22.dp)
+        RoundedCornerShape(20.dp)
     }
     val positionedModifier = if (edgeToEdge) {
         modifier.fillMaxWidth()
@@ -593,7 +593,7 @@ private fun MiniPlayer(
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
             )
-            .padding(horizontal = 12.dp)
+            .padding(horizontal = 14.dp)
             .padding(bottom = bottomPadding)
             .fillMaxWidth()
     }
@@ -646,17 +646,17 @@ private fun MiniPlayer(
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 6.dp),
+                        .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(46.dp)) {
+                    Box(Modifier.size(42.dp)) {
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHighest,
                             tonalElevation = 2.dp,
                             modifier = Modifier.fillMaxSize(),
                         ) {
-                            PlayerArtwork(track, Modifier.fillMaxSize(), 12.dp)
+                            PlayerArtwork(track, Modifier.fillMaxSize(), 10.dp)
                         }
                     }
                     Column(

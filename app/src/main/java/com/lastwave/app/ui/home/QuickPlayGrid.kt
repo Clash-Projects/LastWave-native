@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -36,8 +38,11 @@ import androidx.compose.ui.unit.dp
 import com.lastwave.app.data.repository.HomeTrack
 import com.lastwave.app.ui.common.ArtworkImage
 
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+
 /**
- * 3-Column Quick Play Grid composable for the Home screen feed.
+ * Horizontally swipeable Quick Play row for the Home screen feed.
  * Displays compact playable song shortcuts with square artwork, title, artist,
  * and a subtle play overlay.
  */
@@ -49,58 +54,27 @@ fun QuickPlayGrid(
 ) {
     if (tracks.isEmpty()) return
 
-    var isExpanded by remember { mutableStateOf(false) }
-    val displayTracks = if (isExpanded) tracks.take(18) else tracks.take(6)
-
     Column(modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+        Text(
+            text = "Quick play",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(horizontal = 2.dp),
         ) {
-            Text(
-                text = "Quick play",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            if (tracks.size > 6) {
-                Text(
-                    text = if (isExpanded) "Show less" else "View all",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { isExpanded = !isExpanded }
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+            items(tracks, key = { "${it.name}|${it.artist}" }) { track ->
+                QuickPlayTile(
+                    track = track,
+                    onClick = { onTrackClick(track) },
+                    modifier = Modifier.width(116.dp),
                 )
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-
-        // 3-column arrangement
-        val rows = displayTracks.chunked(3)
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            rows.forEach { rowTracks ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    rowTracks.forEach { track ->
-                        QuickPlayTile(
-                            track = track,
-                            onClick = { onTrackClick(track) },
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    // Fill remaining space if row has fewer than 3 items
-                    repeat(3 - rowTracks.size) {
-                        Spacer(Modifier.weight(1f))
-                    }
-                }
             }
         }
     }

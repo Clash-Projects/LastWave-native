@@ -195,7 +195,7 @@ private fun FloatingNavBar(
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
             )
-            .padding(horizontal = 24.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Surface(
