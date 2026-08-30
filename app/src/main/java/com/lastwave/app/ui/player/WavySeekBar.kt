@@ -577,6 +577,7 @@ fun MiniWavyProgress(
     progressState: kotlinx.coroutines.flow.StateFlow<PlaybackProgressState>,
     isPlaying: Boolean,
     onSeek: ((Long) -> Unit)? = null,
+    wavyEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val state by progressState.collectAsStateWithLifecycle()
@@ -701,7 +702,21 @@ fun MiniWavyProgress(
                 cap = StrokeCap.Round,
             )
 
-            if (thumbX > 0.5f) {
+            if (!wavyEnabled) {
+                if (thumbX > 0.5f) {
+                    drawLine(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(primaryColor, secondaryColor),
+                            startX = 0f,
+                            endX = thumbX,
+                        ),
+                        start = Offset(0f, centerY),
+                        end = Offset(thumbX, centerY),
+                        strokeWidth = baseTrackThicknessPx,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            } else if (thumbX > 0.5f) {
                 clipBounds.reset()
                 clipBounds.addRoundRect(
                     RoundRect(

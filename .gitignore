@@ -56,3 +56,5 @@ keystore_credentials.txt
 .wrangler/
 qobuz-worker-backend/wrangler.toml
 qobuz-worker-backend/.env
+.vscode/
+graphify-out/

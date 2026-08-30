@@ -394,11 +394,13 @@ fun PlayerHost(
                     if (miniTrack != null) viewModel.isFavorite(miniTrack.title, miniTrack.artist)
                     else kotlinx.coroutines.flow.flowOf(false)
                 }.collectAsStateWithLifecycle(initialValue = false)
+                val settings by viewModel.settings.collectAsStateWithLifecycle()
 
                 MiniPlayer(
                     state = state,
                     progressState = viewModel.progressState,
                     isFavorite = miniIsFavorite,
+                    wavySeekbarEnabled = settings.wavySeekbarEnabled,
                     onToggleFavorite = { miniTrack?.let { viewModel.toggleFavorite(it) } },
                     onExpand = { expanded = true },
                     onToggle = viewModel.player::togglePlayPause,
@@ -562,6 +564,7 @@ private fun MiniPlayer(
     state: PlaybackChromeState,
     progressState: StateFlow<PlaybackProgressState>,
     isFavorite: Boolean,
+    wavySeekbarEnabled: Boolean = true,
     onToggleFavorite: () -> Unit,
     onExpand: () -> Unit,
     onToggle: () -> Unit,
@@ -695,6 +698,7 @@ private fun MiniPlayer(
                         progressState = progressState,
                         isPlaying = state.isPlaying,
                         onSeek = onSeek,
+                        wavyEnabled = wavySeekbarEnabled,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 4.dp),

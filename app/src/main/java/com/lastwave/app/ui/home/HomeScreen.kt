@@ -274,14 +274,7 @@ fun HomeScreen(
                                     onSourceToggle = viewModel::setQuickPlaySource,
                                     isLoadingSource = uiState.isLoadingYtQuick,
                                     onTrackClick = { track ->
-                                        musicPlayer.play(
-                                            com.lastwave.app.playback.PlayableTrack(
-                                                title = track.name,
-                                                artist = track.artist,
-                                                artworkUrl = track.artworkUrl,
-                                            ),
-                                            sourceLabel = if (uiState.quickPlaySource == QuickPlaySource.YOUTUBE_MUSIC) "YT Quick Play" else "Quick Play",
-                                        )
+                                        viewModel.playQuickTrack(track, musicPlayer)
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()

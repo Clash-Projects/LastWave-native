@@ -24,6 +24,11 @@ import javax.inject.Inject
 
 import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import com.lastwave.app.data.generate.GenerateRepository
+import com.lastwave.app.data.search.SearchRepository
+import com.lastwave.app.playback.MusicPlayer
+import com.lastwave.app.playback.PlayableTrack
 
 enum class QuickPlaySource(val label: String) {
     LAST_FM("Last.fm"),
@@ -166,7 +171,6 @@ private const val NOW_PLAYING_POLL_MS = 12_000L
 private const val RECENT_TRACKS_POLL_MS = 30_000L
 private const val LISTEN_TICK_MS = 1_000L
 
-
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val homeRepository: HomeRepository,
@@ -176,6 +180,7 @@ class HomeViewModel @Inject constructor(
     private val settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
     private val scrobbleRepository: com.lastwave.app.data.repository.ScrobbleRepository,
     private val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
+    private val songRadioResolver: com.lastwave.app.playback.SongRadioResolver,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -184,11 +189,40 @@ class HomeViewModel @Inject constructor(
     val listenElapsedSeconds: StateFlow<Int> = _listenElapsedSeconds.asStateFlow()
 
     private var cachedTopTracks: List<HomeTrack> = emptyList()
+    private var quickPlayRadioJob: Job? = null
 
     fun setQuickPlaySource(source: QuickPlaySource) {
         _uiState.update { it.copy(quickPlaySource = source) }
         if (source == QuickPlaySource.YOUTUBE_MUSIC && _uiState.value.ytMusicQuickTracks.isEmpty()) {
             loadYtMusicQuickTracks()
+        }
+    }
+
+    fun playQuickTrack(track: HomeTrack, musicPlayer: MusicPlayer) {
+        val selected = PlayableTrack(
+            title = track.name,
+            artist = track.artist,
+            artworkUrl = track.artworkUrl,
+        )
+        val sourceLabel = if (_uiState.value.quickPlaySource == QuickPlaySource.YOUTUBE_MUSIC) "YT Quick Play" else "Quick Play"
+        musicPlayer.play(selected, sourceLabel = sourceLabel)
+
+        quickPlayRadioJob?.cancel()
+        quickPlayRadioJob = viewModelScope.launch(Dispatchers.IO) {
+            val currentGrid = if (_uiState.value.quickPlaySource == QuickPlaySource.YOUTUBE_MUSIC) {
+                _uiState.value.ytMusicQuickTracks
+            } else {
+                _uiState.value.topTracksOverall.ifEmpty { _uiState.value.allTracks }
+            }
+            val fallbackPool = currentGrid.map {
+                PlayableTrack(title = it.name, artist = it.artist, artworkUrl = it.artworkUrl)
+            }
+            val radioTracks = songRadioResolver.resolveRadioTracks(seed = selected, fallbackPool = fallbackPool)
+            musicPlayer.appendQueueRecommendations(
+                seed = selected,
+                tracks = radioTracks,
+                allowedSourceLabels = setOf("Quick Play", "YT Quick Play"),
+            )
         }
     }
 

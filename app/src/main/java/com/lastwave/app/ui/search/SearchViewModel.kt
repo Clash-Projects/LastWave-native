@@ -9,6 +9,7 @@ import com.lastwave.app.data.search.SearchResultItem
 import com.lastwave.app.data.search.SearchTab
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.PlayableTrack
+import com.lastwave.app.playback.SongRadioResolver
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -41,6 +42,7 @@ class SearchViewModel @Inject constructor(
     private val repository: SearchRepository,
     private val historyRepository: SearchHistoryRepository,
     private val musicPlayer: MusicPlayer,
+    private val songRadioResolver: SongRadioResolver,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
@@ -151,17 +153,11 @@ class SearchViewModel @Inject constructor(
                 // and are appended only if this is still the active track.
                 musicPlayer.play(selected, sourceLabel = "Search")
                 searchQueueJob = viewModelScope.launch {
-                    val related = repository.similarSongsFor(item)
-                    musicPlayer.appendSearchRecommendations(
+                    val related = songRadioResolver.resolveRadioTracks(seed = selected)
+                    musicPlayer.appendQueueRecommendations(
                         seed = selected,
-                        tracks = related.map { track ->
-                            PlayableTrack(
-                                title = track.name,
-                                artist = track.artist,
-                                album = track.album,
-                                artworkUrl = track.artworkUrl,
-                            )
-                        },
+                        tracks = related,
+                        allowedSourceLabels = setOf("Search"),
                     )
                 }
             }

@@ -713,9 +713,13 @@ class MusicPlayer @Inject constructor(
         }
     }
 
-    /** Adds the varied continuation loaded for a search-started track.
+    /** Adds continuation/radio recommendations loaded for a single-started track (e.g. Search, Quick Play).
      * A stale response can never modify a newer playback queue. */
-    fun appendSearchRecommendations(seed: PlayableTrack, tracks: List<PlayableTrack>) {
+    fun appendQueueRecommendations(
+        seed: PlayableTrack,
+        tracks: List<PlayableTrack>,
+        allowedSourceLabels: Set<String> = setOf("Search", "Quick Play", "YT Quick Play"),
+    ) {
         if (tracks.isEmpty()) return
         onMain {
             val current = player.currentMediaItem?.toPlayableTrack() ?: return@onMain
@@ -725,7 +729,7 @@ class MusicPlayer @Inject constructor(
                 seed.title.equals(current.title, ignoreCase = true) &&
                     seed.artist.equals(current.artist, ignoreCase = true)
             }
-            if (!sameSeed || _state.value.sourceLabel != "Search") return@onMain
+            if (!sameSeed || _state.value.sourceLabel !in allowedSourceLabels) return@onMain
 
             val seenQueueKeys = (0 until player.mediaItemCount).mapTo(mutableSetOf()) {
                 player.getMediaItemAt(it).toPlayableTrack().queueKey()
@@ -749,6 +753,11 @@ class MusicPlayer @Inject constructor(
                 preloadNextTrack(player.getMediaItemAt(nextIndex).toPlayableTrack())
             }
         }
+    }
+
+    /** Retained for SearchViewModel */
+    fun appendSearchRecommendations(seed: PlayableTrack, tracks: List<PlayableTrack>) {
+        appendQueueRecommendations(seed, tracks, allowedSourceLabels = setOf("Search"))
     }
 
     fun resume() = onMain {
