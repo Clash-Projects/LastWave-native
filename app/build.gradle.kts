@@ -80,13 +80,10 @@ android {
             cmake {
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
-                    // Android 15+ can boot with 16 KB memory pages; all native
-                    // libraries must be built/aligned accordingly. Ignored
-                    // harmlessly by NDK toolchains that predate the flag.
                     "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
                 )
-                cFlags += "-Wl,-z,max-page-size=16384"
-                cppFlags += "-Wl,-z,max-page-size=16384"
+                cFlags += listOf("-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384")
+                cppFlags += listOf("-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384")
             }
         }
     }
@@ -182,7 +179,7 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            useLegacyPackaging = true
+            useLegacyPackaging = false
         }
     }
 
