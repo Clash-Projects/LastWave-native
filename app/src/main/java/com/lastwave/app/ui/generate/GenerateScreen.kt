@@ -48,6 +48,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -60,6 +61,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -105,16 +107,64 @@ fun GenerateScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
     ) {
         ExpressiveHeader(
             title = "Generator",
-            subtitle = "Choose a mode to generate a playlist",
         )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${GenerateMode.entries.size} Modes",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
+                    )
+                }
+            }
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.45f),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Smart Mixes",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
+                    )
+                }
+            }
+        }
 
         com.lastwave.app.ui.common.WithoutPlatformOverscroll {
         LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 2.dp, bottom = FloatingNavDefaults.contentBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds().wobbleOverscroll(),
         ) {
@@ -126,50 +176,149 @@ fun GenerateScreen(
 
             item(key = "modeGroup") {
                 val modes = GenerateMode.entries.toList()
-                ExpressiveGroup(rowCount = modes.size) { index, position ->
-                    val mode = modes[index]
-                    val (badgeContainer, badgeTint) = badgeColorsFor(iconFor(mode))
-                    ExpressiveGroupSelectRow(
-                        icon = iconFor(mode),
-                        title = mode.label,
-                        subtitle = mode.description,
-                        selected = state.selectedMode == mode,
-                        position = position,
-                        onClick = { if (!state.isGenerating) viewModel.selectMode(mode) },
-                        badgeContainer = badgeContainer,
-                        badgeTint = badgeTint,
-                    )
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    tonalElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 2.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Modes",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            state.selectedMode?.let {
+                                Text(
+                                    text = it.label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+
+                        modes.forEachIndexed { index, mode ->
+                            val isSelected = state.selectedMode == mode
+                            val interactionSource = remember { MutableInteractionSource() }
+                            val isPressed by interactionSource.collectIsPressedAsState()
+                            val rowScale by animateFloatAsState(
+                                targetValue = if (isPressed) 0.98f else 1f,
+                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                                label = "modeRowScale",
+                            )
+                            val rowBackground by animateColorAsState(
+                                targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                                else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                                animationSpec = androidx.compose.animation.core.tween(200),
+                                label = "modeRowBg",
+                            )
+
+                            Surface(
+                                onClick = { if (!state.isGenerating) viewModel.selectMode(mode) },
+                                shape = RoundedCornerShape(14.dp),
+                                color = rowBackground,
+                                interactionSource = interactionSource,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .graphicsLayer {
+                                        scaleX = rowScale
+                                        scaleY = rowScale
+                                    },
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(52.dp)
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(
+                                                if (isSelected) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                            ),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            imageVector = iconFor(mode),
+                                            contentDescription = null,
+                                            tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(22.dp),
+                                        )
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            text = mode.label,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                        Text(
+                                            text = mode.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    if (isSelected) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                                .background(MaterialTheme.colorScheme.primary),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(15.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            if (index < modes.lastIndex) {
+                                Spacer(Modifier.height(4.dp))
+                            }
+                        }
+                    }
                 }
             }
 
             state.selectedMode?.let { mode ->
                 if (!state.isGenerating) {
                     item(key = "options") {
-                        Card(
-                            shape = GeneratorOuterCardShape,
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                        Surface(
+                            shape = RoundedCornerShape(22.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            tonalElevation = 1.dp,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            Column(Modifier.padding(20.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(
-                                        Modifier
-                                            .size(36.dp)
-                                            .clip(IconBadgeShape)
-                                            .background(MaterialTheme.colorScheme.primaryContainer),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.Tune,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                    Spacer(Modifier.width(10.dp))
-                                    Text("Options", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text("Options", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                                 }
-                                Spacer(Modifier.height(16.dp))
+                                Spacer(Modifier.height(10.dp))
 
                                 when (mode) {
                                     GenerateMode.TOP, GenerateMode.LIBRARY -> PeriodOptions(state.period, viewModel::setPeriod)
@@ -183,15 +332,15 @@ fun GenerateScreen(
                                     )
                                 }
 
-                                Spacer(Modifier.height(20.dp))
+                                Spacer(Modifier.height(12.dp))
                                 if (mode == GenerateMode.RECOMMENDATIONS) {
                                     Text(
                                         "Track count: $RECOMMENDATION_TRACK_COUNT (fixed)",
-                                        style = MaterialTheme.typography.labelLarge,
+                                        style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Medium,
                                     )
                                 } else {
-                                    Text("Track count: ${state.trackCount}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+                                    Text("Track count: ${state.trackCount}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                                     Slider(
                                         value = state.trackCount.toFloat(),
                                         onValueChange = { viewModel.setTrackCount(it.toInt()) },
@@ -200,16 +349,16 @@ fun GenerateScreen(
                                         enabled = !state.isGenerating,
                                     )
                                 }
-                                Spacer(Modifier.height(10.dp))
+                                Spacer(Modifier.height(8.dp))
                                 Button(
                                     onClick = viewModel::generate,
                                     enabled = !state.isGenerating,
-                                    shape = ExpressivePillShape,
-                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(50),
+                                    modifier = Modifier.fillMaxWidth().height(48.dp),
                                 ) {
                                     Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Generate Playlist", fontWeight = FontWeight.Medium)
+                                    Text("Generate Playlist", fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         }

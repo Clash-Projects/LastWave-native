@@ -152,68 +152,68 @@ fun LyricsPanel(
                 .fillMaxWidth(),
         ) { targetState ->
             when (targetState) {
-                    is LyricsUiState.Loading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
+                is LyricsUiState.Loading -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                            ) {
-                                ExpressiveInlineLoadingIndicator(
-                                    size = 42.dp,
-                                    strokeWidth = 3.5.dp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                                Text(
-                                    "Finding lyrics…",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                            ExpressiveInlineLoadingIndicator(
+                                size = 42.dp,
+                                strokeWidth = 3.5.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                "Finding lyrics…",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
+                }
 
-                    is LyricsUiState.Empty, is LyricsUiState.Error -> {
+                is LyricsUiState.Empty, is LyricsUiState.Error -> {
+                    EmptyLyricsView(
+                        isInstrumental = false,
+                        onRetry = onRetry,
+                    )
+                }
+
+                is LyricsUiState.Success -> {
+                    if (targetState.isInstrumental) {
+                        EmptyLyricsView(
+                            isInstrumental = true,
+                            onRetry = onRetry,
+                        )
+                    } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
+                        SyncedLyricsList(
+                            lines = targetState.lines,
+                            currentPositionMs = smoothedPositionMs,
+                            isPlaying = state.isPlaying,
+                            onSeek = player::seekTo,
+                            animationStyle = lyricsAnimation,
+                            liquidGlass = liquidGlass,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else if (!targetState.plainLyrics.isNullOrBlank()) {
+                        PlainLyricsView(
+                            plainLyrics = targetState.plainLyrics,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
                         EmptyLyricsView(
                             isInstrumental = false,
                             onRetry = onRetry,
                         )
                     }
+                }
 
-                    is LyricsUiState.Success -> {
-                        if (targetState.isInstrumental) {
-                            EmptyLyricsView(
-                                isInstrumental = true,
-                                onRetry = onRetry,
-                            )
-                        } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
-                            SyncedLyricsList(
-                                lines = targetState.lines,
-                                currentPositionMs = smoothedPositionMs,
-                                isPlaying = state.isPlaying,
-                                onSeek = player::seekTo,
-                                animationStyle = lyricsAnimation,
-                                liquidGlass = liquidGlass,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        } else if (!targetState.plainLyrics.isNullOrBlank()) {
-                            PlainLyricsView(
-                                plainLyrics = targetState.plainLyrics,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        } else {
-                            EmptyLyricsView(
-                                isInstrumental = false,
-                                onRetry = onRetry,
-                            )
-                        }
-                    }
-
-                    is LyricsUiState.Idle -> {
-                        Box(Modifier.fillMaxSize())
-                    }
+                is LyricsUiState.Idle -> {
+                    Box(Modifier.fillMaxSize())
+                }
             }
         }
 

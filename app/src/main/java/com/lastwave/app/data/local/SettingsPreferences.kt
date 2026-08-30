@@ -64,6 +64,12 @@ data class MiscSettings(
     val wavySeekbarEnabled: Boolean = true,
     /** When true (default), downloads fetch and save synced lyrics (.lrc companion files and embedded tags). */
     val downloadLyrics: Boolean = true,
+    /** When true (default), caches streamed songs locally for instant playback and data savings. */
+    val streamCacheEnabled: Boolean = true,
+    /** Maximum number of streamed songs to retain in local LRU stream cache (25, 50, 100, 200, 500). */
+    val streamCacheSongLimit: Int = 50,
+    /** When true, automatically syncs liked/favorited songs to YouTube Music. */
+    val autoSyncLikedSongsToYouTube: Boolean = false,
 )
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
@@ -84,6 +90,9 @@ class SettingsPreferences @Inject constructor(
         val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
         val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
         val DOWNLOAD_LYRICS = booleanPreferencesKey("lw_download_lyrics")
+        val STREAM_CACHE_ENABLED = booleanPreferencesKey("lw_stream_cache_enabled")
+        val STREAM_CACHE_SONG_LIMIT = intPreferencesKey("lw_stream_cache_song_limit")
+        val AUTO_SYNC_LIKED_TO_YOUTUBE = booleanPreferencesKey("lw_auto_sync_liked_to_youtube")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data
@@ -101,6 +110,9 @@ class SettingsPreferences @Inject constructor(
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 10),
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
                 downloadLyrics = p.readSafely(Keys.DOWNLOAD_LYRICS) ?: true,
+                streamCacheEnabled = p.readSafely(Keys.STREAM_CACHE_ENABLED) ?: true,
+                streamCacheSongLimit = p.readSafely(Keys.STREAM_CACHE_SONG_LIMIT) ?: 50,
+                autoSyncLikedSongsToYouTube = p.readSafely(Keys.AUTO_SYNC_LIKED_TO_YOUTUBE) ?: false,
             )
         }
 
@@ -142,6 +154,18 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setDownloadLyrics(enabled: Boolean) {
         dataStore.edit { it[Keys.DOWNLOAD_LYRICS] = enabled }
+    }
+
+    suspend fun setStreamCacheEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.STREAM_CACHE_ENABLED] = enabled }
+    }
+
+    suspend fun setStreamCacheSongLimit(limit: Int) {
+        dataStore.edit { it[Keys.STREAM_CACHE_SONG_LIMIT] = limit.coerceIn(10, 1000) }
+    }
+
+    suspend fun setAutoSyncLikedSongsToYouTube(enabled: Boolean) {
+        dataStore.edit { it[Keys.AUTO_SYNC_LIKED_TO_YOUTUBE] = enabled }
     }
 
     suspend fun toggleFriendPinned(username: String) {

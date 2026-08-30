@@ -247,6 +247,7 @@ dependencies {
     // Native in-app audio playback, background service, system media
     // controls, Bluetooth/headset controls and a MediaController-backed UI.
     implementation("androidx.media3:media3-exoplayer:1.2.1")
+    implementation("androidx.media:media:1.7.0")
 
     // GPLv3 Media3-matched FFmpeg software decoder (distribution must comply).
     // The renderer factory prefers FFmpeg for every codec it supports so all
@@ -276,5 +277,3 @@ dependencies {
 tasks.withType<Test> {
     maxHeapSize = "2048m"
 }
-
-

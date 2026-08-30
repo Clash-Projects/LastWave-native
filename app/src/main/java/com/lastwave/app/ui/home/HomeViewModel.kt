@@ -24,6 +24,16 @@ import javax.inject.Inject
 
 import androidx.compose.runtime.Immutable
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import com.lastwave.app.data.generate.GenerateRepository
+import com.lastwave.app.data.search.SearchRepository
+import com.lastwave.app.playback.MusicPlayer
+import com.lastwave.app.playback.PlayableTrack
+
+enum class QuickPlaySource(val label: String) {
+    LAST_FM("Last.fm"),
+    YOUTUBE_MUSIC("YT Music")
+}
 
 @Immutable
 data class HomeUiState(
@@ -43,6 +53,9 @@ data class HomeUiState(
     val topTracksOverall: List<HomeTrack> = emptyList(),
     val topTracks7Days: List<HomeTrack> = emptyList(),
     val topTracks30Days: List<HomeTrack> = emptyList(),
+    val quickPlaySource: QuickPlaySource = QuickPlaySource.LAST_FM,
+    val ytMusicQuickTracks: List<HomeTrack> = emptyList(),
+    val isLoadingYtQuick: Boolean = false,
     val page: Int = 1,
     val totalPages: Int = 1,
     val error: String? = null,
@@ -158,7 +171,6 @@ private const val NOW_PLAYING_POLL_MS = 12_000L
 private const val RECENT_TRACKS_POLL_MS = 30_000L
 private const val LISTEN_TICK_MS = 1_000L
 
-
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val homeRepository: HomeRepository,
@@ -167,6 +179,8 @@ class HomeViewModel @Inject constructor(
     private val viewingProfileState: com.lastwave.app.data.repository.ViewingProfileState,
     private val settingsPreferences: com.lastwave.app.data.local.SettingsPreferences,
     private val scrobbleRepository: com.lastwave.app.data.repository.ScrobbleRepository,
+    private val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
+    private val songRadioResolver: com.lastwave.app.playback.SongRadioResolver,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -175,6 +189,61 @@ class HomeViewModel @Inject constructor(
     val listenElapsedSeconds: StateFlow<Int> = _listenElapsedSeconds.asStateFlow()
 
     private var cachedTopTracks: List<HomeTrack> = emptyList()
+    private var quickPlayRadioJob: Job? = null
+
+    fun setQuickPlaySource(source: QuickPlaySource) {
+        _uiState.update { it.copy(quickPlaySource = source) }
+        if (source == QuickPlaySource.YOUTUBE_MUSIC && _uiState.value.ytMusicQuickTracks.isEmpty()) {
+            loadYtMusicQuickTracks()
+        }
+    }
+
+    fun playQuickTrack(track: HomeTrack, musicPlayer: MusicPlayer) {
+        val selected = PlayableTrack(
+            title = track.name,
+            artist = track.artist,
+            artworkUrl = track.artworkUrl,
+        )
+        val sourceLabel = if (_uiState.value.quickPlaySource == QuickPlaySource.YOUTUBE_MUSIC) "YT Quick Play" else "Quick Play"
+        musicPlayer.play(selected, sourceLabel = sourceLabel)
+
+        quickPlayRadioJob?.cancel()
+        quickPlayRadioJob = viewModelScope.launch(Dispatchers.IO) {
+            val currentGrid = if (_uiState.value.quickPlaySource == QuickPlaySource.YOUTUBE_MUSIC) {
+                _uiState.value.ytMusicQuickTracks
+            } else {
+                _uiState.value.topTracksOverall.ifEmpty { _uiState.value.allTracks }
+            }
+            val fallbackPool = currentGrid.map {
+                PlayableTrack(title = it.name, artist = it.artist, artworkUrl = it.artworkUrl)
+            }
+            val radioTracks = songRadioResolver.resolveRadioTracks(seed = selected, fallbackPool = fallbackPool)
+            musicPlayer.appendQueueRecommendations(
+                seed = selected,
+                tracks = radioTracks,
+                allowedSourceLabels = setOf("Quick Play", "YT Quick Play"),
+            )
+        }
+    }
+
+    fun loadYtMusicQuickTracks() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingYtQuick = true) }
+            val signals = runCatching { innerTube.fetchTasteSignals(recentLimit = 30, likedLimit = 30, feedLimit = 30) }.getOrNull()
+            val ytTracks = (signals?.recentTracks.orEmpty() + signals?.likedTracks.orEmpty() + signals?.feedTracks.orEmpty())
+                .distinctBy { "${it.title}|${it.artist}" }
+                .map {
+                    HomeTrack(
+                        name = it.title,
+                        artist = it.artist,
+                        artworkUrl = it.artworkUrl,
+                        timestampMillis = null,
+                        playCount = 1,
+                    )
+                }
+            _uiState.update { it.copy(ytMusicQuickTracks = ytTracks, isLoadingYtQuick = false) }
+        }
+    }
 
     init {
         loadInitial()

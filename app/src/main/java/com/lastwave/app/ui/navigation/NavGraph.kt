@@ -227,6 +227,7 @@ fun LastWaveNavHost(
         }
 
         composable(Screen.Settings.route) {
+            val context = androidx.compose.ui.platform.LocalContext.current
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 SettingsScreen(
                     onBack = { navController.popBackStack() },

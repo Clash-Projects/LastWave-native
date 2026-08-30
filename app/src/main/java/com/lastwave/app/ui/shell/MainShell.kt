@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
@@ -195,7 +196,7 @@ private fun FloatingNavBar(
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
             )
-            .padding(horizontal = 24.dp, vertical = 12.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center,
     ) {
         Surface(
@@ -203,21 +204,29 @@ private fun FloatingNavBar(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp,
             shadowElevation = 12.dp,
-            modifier = Modifier.liquidGlassChrome(DockShape, liquidGlass),
+            modifier = Modifier
+                .fillMaxWidth()
+                .liquidGlassChrome(DockShape, liquidGlass),
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 tabs.forEachIndexed { index, tab ->
                     val onClick = remember(index) { { onSelect(index) } }
-                    FloatingNavItem(
-                        label = tab.label,
-                        icon = tab.icon(),
-                        selected = selectedIndex == index,
-                        onClick = onClick,
-                    )
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        FloatingNavItem(
+                            label = tab.label,
+                            icon = tab.icon(),
+                            selected = selectedIndex == index,
+                            onClick = onClick,
+                        )
+                    }
                 }
             }
         }
@@ -247,21 +256,21 @@ private fun FloatingNavItem(
         shape = PillShape,
         color = backgroundColor,
         modifier = Modifier
-            .height(48.dp)
+            .fillMaxWidth()
+            .height(42.dp)
             .animateContentSize(animationSpec = navSpring()),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
             modifier = Modifier
-                .padding(horizontal = if (selected) 18.dp else 12.dp)
-                .height(48.dp),
+                .fillMaxSize(),
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = label,
                 tint = contentColor,
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(18.dp),
             )
             AnimatedVisibility(
                 visible = selected,
@@ -269,22 +278,23 @@ private fun FloatingNavItem(
                     animationSpec = navSpring(),
                     expandFrom = Alignment.Start,
                 ),
-                exit = fadeOut(animationSpec = tween(90)) + shrinkHorizontally(
+                exit = fadeOut(animationSpec = navSpring()) + shrinkHorizontally(
                     animationSpec = navSpring(),
                     shrinkTowards = Alignment.Start,
                 ),
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(start = 8.dp),
                 ) {
+                    Spacer(Modifier.width(4.dp))
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Normal,
+                            fontSize = androidx.compose.ui.unit.TextUnit(11f, androidx.compose.ui.unit.TextUnitType.Sp),
+                        ),
                         color = contentColor,
                         maxLines = 1,
-                        softWrap = false,
                     )
                 }
             }

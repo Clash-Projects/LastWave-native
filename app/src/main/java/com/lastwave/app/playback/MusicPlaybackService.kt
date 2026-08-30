@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.Service
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -12,22 +11,28 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
-import android.media.MediaMetadata
 import android.media.session.MediaController
-import android.media.session.MediaSession
-import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
+import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.MediaMetadataCompat
+import android.support.v4.media.session.MediaSessionCompat
+import android.support.v4.media.session.PlaybackStateCompat
 import android.view.View
 import android.widget.RemoteViews
 import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.ColorUtils
 import androidx.core.graphics.drawable.toBitmap
+import androidx.media.MediaBrowserServiceCompat
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import com.lastwave.app.MainActivity
 import com.lastwave.app.R
+import com.lastwave.app.auto.AndroidAutoConstants
+import com.lastwave.app.auto.AndroidAutoMediaSource
+import com.lastwave.app.data.favorite.FavoritesRepository
 import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.local.ScrobblerSettings
 import com.lastwave.app.data.repository.ScrobbleRepository
@@ -66,19 +71,20 @@ private fun sameServiceState(previous: MusicPlayerState, current: MusicPlayerSta
         (previous.isPlaying || current.isPlaying || previous.positionMs == current.positionMs)
 
 /**
- * Foreground playback host and standard Android MediaSession bridge. It
- * gives the singleton player lock-screen, notification, headset, Bluetooth
- * and external hardware controls without requiring notification-listener
- * access.
+ * Foreground playback host, standard Android MediaSession bridge, and Android Auto
+ * MediaBrowserService. It gives the singleton player lock-screen, notification,
+ * headset, Bluetooth, external hardware controls, and a rich Android Auto car experience.
  */
 @AndroidEntryPoint
-class MusicPlaybackService : Service() {
+class MusicPlaybackService : MediaBrowserServiceCompat() {
     @Inject lateinit var musicPlayer: MusicPlayer
     @Inject lateinit var scrobbleRepository: ScrobbleRepository
     @Inject lateinit var scrobblerPreferences: ScrobblerPreferences
     @Inject lateinit var debugLog: ScrobbleDebugLog
     @Inject lateinit var themeRepository: ThemeRepository
     @Inject lateinit var artworkRepository: com.lastwave.app.data.artwork.ArtworkRepository
+    @Inject lateinit var autoMediaSource: AndroidAutoMediaSource
+    @Inject lateinit var favoritesRepository: FavoritesRepository
 
     // SupervisorJob stops sibling failure propagation; the handler below
     // additionally stops an unexpected exception in any fire-and-forget
@@ -90,12 +96,7 @@ class MusicPlaybackService : Service() {
                 android.util.Log.e("MusicPlaybackService", "Suppressed playback service coroutine failure", error)
             },
     )
-    // A handful of ROMs ship broken or deliberately crippled media-session
-    // stacks where constructing a MediaSession or MediaController throws, or
-    // the binder calls fail at runtime. Audio playback itself never depends
-    // on either handle, so they stay nullable and every use degrades to
-    // notification-only transport controls instead of crashing the service.
-    private var mediaSession: MediaSession? = null
+    private var mediaSessionCompat: MediaSessionCompat? = null
     private var ownController: MediaController? = null
     private var settings = ScrobblerSettings()
     private var detectorJob: Job? = null
@@ -125,25 +126,55 @@ class MusicPlaybackService : Service() {
         super.onCreate()
         createNotificationChannel()
         runCatching {
-            mediaSession = MediaSession(this, "LastWavePlayer").apply {
-                setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
-                setCallback(object : MediaSession.Callback() {
+            mediaSessionCompat = MediaSessionCompat(this, "LastWavePlayer").apply {
+                setFlags(
+                    MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
+                        MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS or
+                        MediaSessionCompat.FLAG_HANDLES_QUEUE_COMMANDS,
+                )
+                setCallback(object : MediaSessionCompat.Callback() {
                     override fun onPlay() = musicPlayer.resume()
                     override fun onPause() = musicPlayer.pause()
                     override fun onSkipToNext() = musicPlayer.next()
                     override fun onSkipToPrevious() = musicPlayer.previous()
                     override fun onSeekTo(pos: Long) = musicPlayer.seekTo(pos)
                     override fun onStop() = musicPlayer.stopAndClear()
+                    override fun onSetShuffleMode(shuffleMode: Int) = musicPlayer.toggleShuffle()
+                    override fun onSetRepeatMode(repeatMode: Int) = musicPlayer.cycleRepeatMode()
+                    override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+                        if (mediaId != null) {
+                            scope.launch { autoMediaSource.playFromMediaId(mediaId) }
+                        }
+                    }
+                    override fun onPlayFromSearch(query: String?, extras: Bundle?) {
+                        if (!query.isNullOrBlank()) {
+                            scope.launch { autoMediaSource.playFromSearch(query) }
+                        } else {
+                            musicPlayer.resume()
+                        }
+                    }
+                    override fun onCustomAction(action: String?, extras: Bundle?) {
+                        when (action) {
+                            AndroidAutoConstants.ACTION_FAVORITE -> {
+                                val track = musicPlayer.state.value.current ?: return
+                                scope.launch { favoritesRepository.toggleFavorite(track) }
+                            }
+                            AndroidAutoConstants.ACTION_TOGGLE_SHUFFLE -> musicPlayer.toggleShuffle()
+                            AndroidAutoConstants.ACTION_CYCLE_REPEAT -> musicPlayer.cycleRepeatMode()
+                        }
+                    }
                 })
                 setSessionActivity(openAppPendingIntent())
                 isActive = true
             }
-            ownController = mediaSession?.sessionToken?.let { token -> MediaController(this, token) }
-            ActiveMediaSessionHolder.ownToken = mediaSession?.sessionToken
+            sessionToken = mediaSessionCompat?.sessionToken
+            val platformToken = mediaSessionCompat?.sessionToken?.token as? android.media.session.MediaSession.Token
+            ownController = platformToken?.let { token -> MediaController(this, token) }
+            ActiveMediaSessionHolder.ownToken = platformToken
         }.onFailure { error ->
             android.util.Log.e("MusicPlaybackService", "System media integration unavailable; continuing audio-only", error)
-            runCatching { mediaSession?.release() }
-            mediaSession = null
+            runCatching { mediaSessionCompat?.release() }
+            mediaSessionCompat = null
             ownController = null
             ActiveMediaSessionHolder.ownToken = null
         }
@@ -177,9 +208,6 @@ class MusicPlaybackService : Service() {
         scope.launch {
             themeRepository.uiState.collectLatest { theme ->
                 val newPalette = NotificationPalette.from(theme.colorScheme)
-                // Only force a notification rebuild when the palette actually
-                // changed — unrelated DataStore settings also flow through this
-                // state and used to trigger pointless RemoteViews rebuilds.
                 if (newPalette != notificationPalette) {
                     notificationPalette = newPalette
                     notificationSignature = ""
@@ -189,11 +217,6 @@ class MusicPlaybackService : Service() {
         }
         scope.launch {
             musicPlayer.state
-                // Position/buffer ticks arrive about 16 times per second for
-                // the seek bar. Notification, widget and MediaSession chrome
-                // do not need that cadence; Android extrapolates a playing
-                // position from the published speed. Filter those ticks before
-                // doing string work, artwork lookup and binder-state checks.
                 .distinctUntilChanged(::sameServiceState)
                 .collect { state ->
                     requestArtwork(state.current)
@@ -216,6 +239,32 @@ class MusicPlaybackService : Service() {
         startDetector()
     }
 
+    override fun onGetRoot(clientPackageName: String, clientUid: Int, rootHints: Bundle?): BrowserRoot {
+        val extras = Bundle().apply {
+            putBoolean(AndroidAutoConstants.CONTENT_STYLE_SUPPORTED, true)
+            putInt(AndroidAutoConstants.CONTENT_STYLE_BROWSABLE_HINT, AndroidAutoConstants.CONTENT_STYLE_GRID_ITEM_HINT_VALUE)
+            putInt(AndroidAutoConstants.CONTENT_STYLE_PLAYABLE_HINT, AndroidAutoConstants.CONTENT_STYLE_LIST_ITEM_HINT_VALUE)
+            putBoolean("android.media.browse.SEARCH_SUPPORTED", true)
+        }
+        return BrowserRoot(AndroidAutoConstants.MEDIA_ROOT_ID, extras)
+    }
+
+    override fun onLoadChildren(parentId: String, result: Result<List<MediaBrowserCompat.MediaItem>>) {
+        result.detach()
+        scope.launch {
+            val items = autoMediaSource.getChildren(parentId)
+            result.sendResult(items)
+        }
+    }
+
+    override fun onSearch(query: String, extras: Bundle?, result: Result<List<MediaBrowserCompat.MediaItem>>) {
+        result.detach()
+        scope.launch {
+            val items = autoMediaSource.searchTracks(query)
+            result.sendResult(items)
+        }
+    }
+
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -227,16 +276,17 @@ class MusicPlaybackService : Service() {
         return START_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onBind(intent: Intent?): IBinder? = super.onBind(intent)
 
     override fun onDestroy() {
         detectorJob?.cancel()
         artworkJob?.cancel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE)
         else @Suppress("DEPRECATION") stopForeground(true)
-        val releasedToken = mediaSession?.sessionToken
-        runCatching { mediaSession?.isActive = false }
-        runCatching { mediaSession?.release() }
+        val releasedToken = mediaSessionCompat?.sessionToken?.token as? android.media.session.MediaSession.Token
+        runCatching { mediaSessionCompat?.isActive = false }
+        runCatching { mediaSessionCompat?.release() }
+        mediaSessionCompat = null
         ownController?.let { controller -> ActiveMediaSessionHolder.clear(controller) }
         ActiveMediaSessionHolder.clearToken(releasedToken)
         scope.cancel()
@@ -432,7 +482,7 @@ class MusicPlaybackService : Service() {
         // Transport-control target is cheap and must stay fresh every emission.
         val active = ActiveMediaSessionHolder.controller
         val otherAppIsPlaying = active?.packageName != packageName &&
-            active?.playbackState?.state == PlaybackState.STATE_PLAYING
+            active?.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
         if (track != null && (state.isPlaying || active == null || !otherAppIsPlaying)) {
             ActiveMediaSessionHolder.controller = ownController
         }
@@ -446,10 +496,10 @@ class MusicPlaybackService : Service() {
         // changes (track, duration, play/buffer state, artwork, or a seek
         // while paused) need to cross the binder.
         val playbackState = when {
-            state.isBuffering -> PlaybackState.STATE_BUFFERING
-            state.isPlaying -> PlaybackState.STATE_PLAYING
-            track != null -> PlaybackState.STATE_PAUSED
-            else -> PlaybackState.STATE_NONE
+            state.isBuffering -> PlaybackStateCompat.STATE_BUFFERING
+            state.isPlaying -> PlaybackStateCompat.STATE_PLAYING
+            track != null -> PlaybackStateCompat.STATE_PAUSED
+            else -> PlaybackStateCompat.STATE_NONE
         }
         val signature = buildString {
             append(track?.title).append('|')
@@ -465,35 +515,49 @@ class MusicPlaybackService : Service() {
         systemStateSignature = signature
 
         val artUri = artworkUrl ?: track?.artworkUrl.orEmpty()
-        val session = mediaSession ?: return
+        val session = mediaSessionCompat ?: return
         runCatching {
             session.setMetadata(
-                MediaMetadata.Builder()
-                    .putString(MediaMetadata.METADATA_KEY_TITLE, track?.title.orEmpty())
-                    .putString(MediaMetadata.METADATA_KEY_ARTIST, track?.artist.orEmpty())
-                    .putString(MediaMetadata.METADATA_KEY_ALBUM, track?.album.orEmpty())
-                    .putString(MediaMetadata.METADATA_KEY_ALBUM_ART_URI, artUri)
-                    .putString(MediaMetadata.METADATA_KEY_ART_URI, artUri)
-                    .putString(MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI, artUri)
-                    .putLong(MediaMetadata.METADATA_KEY_DURATION, state.durationMs)
+                MediaMetadataCompat.Builder()
+                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track?.title.orEmpty())
+                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, track?.artist.orEmpty())
+                    .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, track?.album.orEmpty())
+                    .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, artUri)
+                    .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artUri)
+                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, artUri)
+                    .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, state.durationMs)
                     .apply {
                         val art = artworkBitmap
                         if (art != null) {
-                            putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, art)
-                            putBitmap(MediaMetadata.METADATA_KEY_ART, art)
-                            putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, art)
+                            putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, art)
+                            putBitmap(MediaMetadataCompat.METADATA_KEY_ART, art)
+                            putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, art)
                         }
                     }
                     .build(),
             )
+            val actions = PlaybackStateCompat.ACTION_PLAY or
+                PlaybackStateCompat.ACTION_PAUSE or
+                PlaybackStateCompat.ACTION_PLAY_PAUSE or
+                PlaybackStateCompat.ACTION_SEEK_TO or
+                PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                PlaybackStateCompat.ACTION_STOP or
+                PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+                PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH or
+                PlaybackStateCompat.ACTION_SET_SHUFFLE_MODE or
+                PlaybackStateCompat.ACTION_SET_REPEAT_MODE
+
+            val favAction = PlaybackStateCompat.CustomAction.Builder(
+                AndroidAutoConstants.ACTION_FAVORITE,
+                "Favorite",
+                R.drawable.ic_auto_favorite,
+            ).build()
+
             session.setPlaybackState(
-                PlaybackState.Builder()
-                    .setActions(
-                        PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
-                            PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SEEK_TO or
-                            PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS or
-                            PlaybackState.ACTION_STOP,
-                    )
+                PlaybackStateCompat.Builder()
+                    .setActions(actions)
+                    .addCustomAction(favAction)
                     .setState(playbackState, state.positionMs, if (state.isPlaying) state.speed else 0f)
                     .build(),
             )
@@ -508,7 +572,7 @@ class MusicPlaybackService : Service() {
         val track = state.current ?: return
         val active = ActiveMediaSessionHolder.controller
         val otherAppIsPlaying = active?.packageName != packageName &&
-            active?.playbackState?.state == PlaybackState.STATE_PLAYING
+            active?.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
         if (!state.isPlaying && otherAppIsPlaying) return
         val signature = "${track.title}|${track.artist}|${state.isPlaying}|$artworkUrl|${artworkBitmap != null}"
         if (signature == widgetSignature) return
@@ -641,7 +705,7 @@ class MusicPlaybackService : Service() {
         )
         val style = Notification.DecoratedMediaCustomViewStyle()
             .setShowActionsInCompactView(0, 1, 2)
-        mediaSession?.sessionToken?.let(style::setMediaSession)
+        (mediaSessionCompat?.sessionToken?.token as? android.media.session.MediaSession.Token)?.let(style::setMediaSession)
 
         return builder
             .setSmallIcon(R.drawable.ic_launcher_logo)

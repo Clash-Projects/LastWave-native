@@ -1,6 +1,7 @@
 package com.lastwave.app.data.ytmusic
 
 import android.util.Log
+import com.lastwave.app.data.local.SettingsPreferences
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.playlist.SavedPlaylist
@@ -65,6 +66,7 @@ class YtMusicSyncManager @Inject constructor(
     private val innerTube: InnerTubeMusicApi,
     private val ytAuth: YtMusicAuthManager,
     private val preferences: YtMusicPreferences,
+    private val settingsPreferences: SettingsPreferences,
     private val applicationScope: CoroutineScope,
 ) {
     private val _state = MutableStateFlow<YtSyncState>(YtSyncState.Idle)
@@ -111,7 +113,10 @@ class YtMusicSyncManager @Inject constructor(
             _state.value = YtSyncState.Idle
             return false
         }
-        if (!preferences.isSyncActive()) {
+        val isSyncActive = preferences.isSyncActive()
+        val isFavSync = reason.startsWith("favorites")
+        val settings = settingsPreferences.settings.first()
+        if (!isSyncActive && !isFavSync && !settings.autoSyncLikedSongsToYouTube) {
             _state.value = YtSyncState.Idle
             return false
         }
@@ -119,7 +124,15 @@ class YtMusicSyncManager @Inject constructor(
         try {
             val allPlaylists = playlistRepository.getAll()
             val syncedIds = preferences.syncedPlaylistIds.first()
-            val playlists = if (syncedIds != null) allPlaylists.filter { it.id in syncedIds } else allPlaylists
+            val playlists = if (isFavSync && !isSyncActive) {
+                allPlaylists.filter { it.title.equals("Favorites", ignoreCase = true) }
+            } else if (syncedIds != null) {
+                allPlaylists.filter {
+                    it.id in syncedIds || (settings.autoSyncLikedSongsToYouTube && it.title.equals("Favorites", ignoreCase = true))
+                }
+            } else {
+                allPlaylists
+            }
 
             if (playlists.isEmpty()) {
                 _state.value = YtSyncState.Completed(System.currentTimeMillis(), 0, 0, 0)

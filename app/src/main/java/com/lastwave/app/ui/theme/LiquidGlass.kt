@@ -33,32 +33,30 @@ fun Modifier.liquidGlassChrome(shape: Shape, enabled: Boolean): Modifier =
             is Outline.Generic -> outline.path
             is Outline.Rectangle -> Path().apply { addRect(outline.rect) }
         }
-        val substrate = Color(0xFF090A0D).copy(alpha = 0.38f)
+        val substrate = Color(0xFF10131A).copy(alpha = 0.42f)
         val reflection = Brush.verticalGradient(
-            0f to Color.White.copy(alpha = 0.20f),
-            0.16f to Color.White.copy(alpha = 0.075f),
-            0.48f to Color.Transparent,
-            1f to Color.Black.copy(alpha = 0.14f),
+            0f to Color.White.copy(alpha = 0.08f),
+            0.18f to Color.White.copy(alpha = 0.02f),
+            0.50f to Color.Transparent,
+            1f to Color.Black.copy(alpha = 0.12f),
             startY = 0f,
             endY = size.height,
         )
         val refraction = Brush.linearGradient(
-            0f to Color(0xFFB8D8FF).copy(alpha = 0.075f),
-            0.48f to Color.Transparent,
-            1f to Color(0xFFFFD8F0).copy(alpha = 0.055f),
+            0f to Color(0xFFB8D8FF).copy(alpha = 0.035f),
+            0.50f to Color.Transparent,
+            1f to Color(0xFFFFD8F0).copy(alpha = 0.025f),
             start = Offset.Zero,
             end = Offset(size.width, size.height),
         )
-        val fresnelEdge = Brush.linearGradient(
-            0f to Color.White.copy(alpha = 0.72f),
-            0.20f to Color.White.copy(alpha = 0.28f),
-            0.58f to Color.White.copy(alpha = 0.07f),
-            1f to Color.White.copy(alpha = 0.34f),
+        val frostedEdge = Brush.linearGradient(
+            0f to Color.White.copy(alpha = 0.14f),
+            0.45f to Color.White.copy(alpha = 0.05f),
+            1f to Color.White.copy(alpha = 0.09f),
             start = Offset.Zero,
             end = Offset(size.width, size.height),
         )
-        val edgeWidth = 1.dp.toPx()
-        val innerEdgeWidth = 2.5.dp.toPx()
+        val edgeWidth = 0.8.dp.toPx()
 
         onDrawWithContent {
             clipPath(path) {
@@ -67,12 +65,7 @@ fun Modifier.liquidGlassChrome(shape: Shape, enabled: Boolean): Modifier =
                 drawRect(refraction)
             }
             drawContent()
-            drawPath(
-                path,
-                Color.White.copy(alpha = 0.055f),
-                style = Stroke(width = innerEdgeWidth),
-            )
-            drawPath(path, fresnelEdge, style = Stroke(width = edgeWidth))
+            drawPath(path, frostedEdge, style = Stroke(width = edgeWidth))
         }
     }
 

@@ -203,13 +203,27 @@ class MusicPlayer @Inject constructor(
     private var errorRetryCount = 0
     private var retryMediaId: String? = null
 
+    @Volatile
+    private var streamCacheEnabled: Boolean = true
+    @Volatile
+    private var streamCacheSongLimit: Int = 50
+
+    private val cacheEvictor: DynamicLruStreamCacheEvictor by lazy {
+        DynamicLruStreamCacheEvictor {
+            if (!streamCacheEnabled) {
+                0L
+            } else {
+                streamCacheSongLimit.toLong() * AVERAGE_STREAM_SONG_BYTES
+            }
+        }
+    }
+
     private val mediaCache: Cache by lazy {
         val cacheDir = java.io.File(appContext.cacheDir, "media_stream_cache")
-        // Bounded playback buffer, not an offline library. LRU eviction keeps
-        // recent rewind/next-track data while preventing multi-GB growth.
-        val evictor = LeastRecentlyUsedCacheEvictor(MEDIA_STREAM_CACHE_BYTES)
         val dbProvider = StandaloneDatabaseProvider(appContext)
-        SimpleCache(cacheDir, evictor, dbProvider)
+        SimpleCache(cacheDir, cacheEvictor, dbProvider).also {
+            android.util.Log.i("SongCache", "Stream cache active at ${cacheDir.absolutePath} (cached: ${it.cacheSpace / 1024} KB)")
+        }
     }
 
     private val cacheDataSourceFactory: CacheDataSource.Factory by lazy {
@@ -223,6 +237,14 @@ class MusicPlayer @Inject constructor(
             .setCache(mediaCache)
             .setUpstreamDataSourceFactory(defaultDataSourceFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            .setEventListener(object : CacheDataSource.EventListener {
+                override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) {
+                    android.util.Log.i("SongCache", "Read $cachedBytesRead bytes from stream cache (total cached: ${cacheSizeBytes / 1024} KB)")
+                }
+                override fun onCacheIgnored(reason: Int) {
+                    android.util.Log.i("SongCache", "Cache bypassed/ignored (reason: $reason)")
+                }
+            })
     }
 
     private val listener = object : Player.Listener {
@@ -560,6 +582,9 @@ class MusicPlayer @Inject constructor(
             settingsPreferences.settings.collect { settings ->
                 crossfadeEnabled = settings.crossfadeEnabled
                 crossfadeDurationMs = settings.crossfadeSeconds * 1000L
+                streamCacheEnabled = settings.streamCacheEnabled
+                streamCacheSongLimit = settings.streamCacheSongLimit
+                runCatching { cacheEvictor.evictIfNeeded(mediaCache) }
                 if (!settings.crossfadeEnabled) {
                     onMain {
                         if (player.volume < 0.99f) player.volume = 1.0f
@@ -688,9 +713,13 @@ class MusicPlayer @Inject constructor(
         }
     }
 
-    /** Adds the varied continuation loaded for a search-started track.
+    /** Adds continuation/radio recommendations loaded for a single-started track (e.g. Search, Quick Play).
      * A stale response can never modify a newer playback queue. */
-    fun appendSearchRecommendations(seed: PlayableTrack, tracks: List<PlayableTrack>) {
+    fun appendQueueRecommendations(
+        seed: PlayableTrack,
+        tracks: List<PlayableTrack>,
+        allowedSourceLabels: Set<String> = setOf("Search", "Quick Play", "YT Quick Play"),
+    ) {
         if (tracks.isEmpty()) return
         onMain {
             val current = player.currentMediaItem?.toPlayableTrack() ?: return@onMain
@@ -700,7 +729,7 @@ class MusicPlayer @Inject constructor(
                 seed.title.equals(current.title, ignoreCase = true) &&
                     seed.artist.equals(current.artist, ignoreCase = true)
             }
-            if (!sameSeed || _state.value.sourceLabel != "Search") return@onMain
+            if (!sameSeed || _state.value.sourceLabel !in allowedSourceLabels) return@onMain
 
             val seenQueueKeys = (0 until player.mediaItemCount).mapTo(mutableSetOf()) {
                 player.getMediaItemAt(it).toPlayableTrack().queueKey()
@@ -724,6 +753,11 @@ class MusicPlayer @Inject constructor(
                 preloadNextTrack(player.getMediaItemAt(nextIndex).toPlayableTrack())
             }
         }
+    }
+
+    /** Retained for SearchViewModel */
+    fun appendSearchRecommendations(seed: PlayableTrack, tracks: List<PlayableTrack>) {
+        appendQueueRecommendations(seed, tracks, allowedSourceLabels = setOf("Search"))
     }
 
     fun resume() = onMain {
@@ -836,6 +870,18 @@ class MusicPlayer @Inject constructor(
             ?.let { SystemClock.elapsedRealtime() + it * 60_000L }
         _state.update {
             it.copy(sleepTimerRemainingMs = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime()))
+        }
+    }
+    fun setSleepTimer(minutes: Int) = onMain {
+        if (minutes <= 0) {
+            sleepTimerDeadlineMs = null
+            sleepTimerStep = 0
+        } else {
+            sleepTimerDeadlineMs = SystemClock.elapsedRealtime() + minutes * 60_000L
+            sleepTimerStep = SLEEP_TIMER_MINUTES.indexOf(minutes).let { if (it >= 0) it else 0 }
+        }
+        _state.update {
+            it.copy(sleepTimerRemainingMs = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())?.coerceAtLeast(0))
         }
     }
     fun clearUpcoming() = onMain {
@@ -1404,6 +1450,30 @@ class MusicPlayer @Inject constructor(
         persistPlaybackSession()
     }
 
+    fun getStreamCacheSizeBytes(): Long {
+        return runCatching {
+            val cacheDir = java.io.File(appContext.cacheDir, "media_stream_cache")
+            cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        }.getOrDefault(0L)
+    }
+
+    fun getStreamCachedSongCount(): Int {
+        return runCatching { mediaCache.keys.size }.getOrDefault(0)
+    }
+
+    fun clearStreamCache() {
+        applicationScope.launch(Dispatchers.IO) {
+            runCatching {
+                mediaCache.keys.toList().forEach { key ->
+                    mediaCache.removeResource(key)
+                }
+            }.onFailure {
+                val cacheDir = java.io.File(appContext.cacheDir, "media_stream_cache")
+                cacheDir.deleteRecursively()
+            }
+        }
+    }
+
     private companion object {
         const val DISCOVER_QUEUE_BATCH_SIZE = 16
         const val DISCOVER_QUEUE_REFILL_THRESHOLD = 8
@@ -1418,6 +1488,7 @@ class MusicPlayer @Inject constructor(
         /** Hard ceiling for the blocking data-spec stream resolution inside ExoPlayer's loader. */
         const val QOBUZ_RESOLVE_TIMEOUT_MS = 4_000L
         const val RESOLVE_DATA_SPEC_TIMEOUT_MS = 35_000L
+        const val AVERAGE_STREAM_SONG_BYTES = 30L * 1024 * 1024
         const val MEDIA_STREAM_CACHE_BYTES = 256L * 1024 * 1024
         const val NEXT_TRACK_PREFETCH_BYTES = 4L * 1024 * 1024
         val PERMANENT_HTTP_STATUS_CODES = setOf(401, 404, 410, 451)
