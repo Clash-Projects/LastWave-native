@@ -88,6 +88,7 @@ android {
         }
     }
 
+    var isReleaseSigningConfigured = false
     signingConfigs {
         create("release") {
             val base64Key = resolveSecret("SIGNING_KEY")
@@ -120,8 +121,7 @@ android {
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
-            } else {
-                initWith(getByName("debug"))
+                isReleaseSigningConfigured = true
             }
         }
     }
@@ -130,16 +130,22 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            val releaseConfig = signingConfigs.getByName("release")
-            signingConfig = if (releaseConfig.storeFile != null) releaseConfig else signingConfigs.getByName("debug")
+            signingConfig = if (isReleaseSigningConfigured) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         create("rawRelease") {
             initWith(getByName("release"))
             isMinifyEnabled = false
             isShrinkResources = false
-            val releaseConfig = signingConfigs.getByName("release")
-            signingConfig = if (releaseConfig.storeFile != null) releaseConfig else signingConfigs.getByName("debug")
+            signingConfig = if (isReleaseSigningConfigured) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         debug {
             isDebuggable = true
