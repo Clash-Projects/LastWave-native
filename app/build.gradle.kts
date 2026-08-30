@@ -121,10 +121,7 @@ android {
                 enableV2Signing = true
                 enableV3Signing = true
             } else {
-                val debugKeystore = file(System.getProperty("user.home") + "/.android/debug.keystore")
-                if (debugKeystore.exists()) {
-                    initWith(getByName("debug"))
-                }
+                initWith(getByName("debug"))
             }
         }
     }
@@ -133,16 +130,16 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            val releaseConfig = signingConfigs.getByName("release")
+            signingConfig = if (releaseConfig.storeFile != null) releaseConfig else signingConfigs.getByName("debug")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         create("rawRelease") {
             initWith(getByName("release"))
             isMinifyEnabled = false
             isShrinkResources = false
-            // Raw variant — no code/resource shrinking, no ProGuard/R8
-            signingConfig = signingConfigs.getByName("release")
-            // proguardFiles from initWith are ignored when minify is off
+            val releaseConfig = signingConfigs.getByName("release")
+            signingConfig = if (releaseConfig.storeFile != null) releaseConfig else signingConfigs.getByName("debug")
         }
         debug {
             isDebuggable = true
