@@ -187,7 +187,7 @@ class ThemeRepository @Inject constructor(
         settingsPreferences.settings,
     ) { prefs: ThemePrefs, dynamic: String?, nowPlaying: String?, misc: MiscSettings ->
         val isAmoled = prefs.amoled
-        val isGlass = prefs.liquidGlass
+        val isGlass = prefs.liquidGlass && !misc.performanceModeEnabled
         val scheme = when {
             misc.dynamicNowPlayingEnabled && nowPlaying != null ->
                 Md3SchemeBuilder.buildScheme(nowPlaying, isAmoled, isGlass)

@@ -7,7 +7,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -15,19 +19,24 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
@@ -38,9 +47,12 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.playback.MusicPlayerState
+import com.lastwave.app.playback.PlaybackProgressState
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -72,8 +84,7 @@ private fun Color.shiftTonal(lightnessDelta: Float, saturationScale: Float = 1.0
  */
 @Composable
 fun WavySeekBar(
-    positionMs: Long,
-    durationMs: Long,
+    progressState: kotlinx.coroutines.flow.StateFlow<com.lastwave.app.playback.PlaybackProgressState>,
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -85,22 +96,19 @@ fun WavySeekBar(
     val dragging by interactionSource.collectIsDraggedAsState()
     var dragPositionMs by remember(trackKey) { mutableFloatStateOf(0f) }
 
-    val boundedDurationMs = durationMs.coerceAtLeast(0L)
-    val boundedPositionMs = if (boundedDurationMs > 0L) {
-        positionMs.coerceIn(0L, boundedDurationMs)
-    } else {
-        0L
+    val state = progressState.collectAsStateWithLifecycle()
+    
+    val durationState by remember { derivedStateOf { state.value.durationMs.coerceAtLeast(0L) } }
+    val positionState by remember { derivedStateOf { if (durationState > 0L) state.value.positionMs.coerceIn(0L, durationState) else 0L } }
+
+    val shownMs by remember { 
+        derivedStateOf { 
+            if (dragging) dragPositionMs.toLong().coerceIn(0L, durationState) else positionState 
+        } 
     }
-    val shownMs = if (dragging) {
-        dragPositionMs.toLong().coerceIn(0L, boundedDurationMs)
-    } else {
-        boundedPositionMs
-    }
-    val shownFraction = if (boundedDurationMs > 0L) {
-        (shownMs.toDouble() / boundedDurationMs.toDouble()).toFloat().coerceIn(0f, 1f)
-    } else {
-        0f
-    }
+    
+    val timeLabelElapsed by remember { derivedStateOf { formatTime(shownMs.coerceAtLeast(0)) } }
+    val timeLabelRemaining by remember { derivedStateOf { "−${formatTime((durationState - shownMs).coerceAtLeast(0))}" } }
 
     // 100% Material Design 3 Harmonized Theme Colors
     val primaryColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
@@ -170,21 +178,19 @@ fun WavySeekBar(
     val baseAmp1Px = with(density) { 13.0.dp.toPx() } // Deep ambient glass layer
     val baseAmp2Px = with(density) { 10.0.dp.toPx() } // Middle frosted glass layer
     val baseAmp3Px = with(density) { 7.5.dp.toPx() }  // Foreground luminous glass layer
-    val draggingAmpPx = with(density) { 1.2.dp.toPx() }
-
     val amp1 by animateFloatAsState(
-        targetValue = if (dragging) draggingAmpPx else baseAmp1Px,
-        animationSpec = tween(durationMillis = 180),
+        targetValue = if (!isPlaying || dragging) 0f else baseAmp1Px,
+        animationSpec = tween(durationMillis = 280),
         label = "Amp1",
     )
     val amp2 by animateFloatAsState(
-        targetValue = if (dragging) draggingAmpPx else baseAmp2Px,
-        animationSpec = tween(durationMillis = 180),
+        targetValue = if (!isPlaying || dragging) 0f else baseAmp2Px,
+        animationSpec = tween(durationMillis = 280),
         label = "Amp2",
     )
     val amp3 by animateFloatAsState(
-        targetValue = if (dragging) draggingAmpPx else baseAmp3Px,
-        animationSpec = tween(durationMillis = 180),
+        targetValue = if (!isPlaying || dragging) 0f else baseAmp3Px,
+        animationSpec = tween(durationMillis = 280),
         label = "Amp3",
     )
 
@@ -196,7 +202,7 @@ fun WavySeekBar(
     val baseTrackThicknessPx = with(density) { 4.5.dp.toPx() }
     val thumbRadiusPx = with(density) { 7.5.dp.toPx() }
     val transitionLengthPx = with(density) { 44.dp.toPx() }
-    val waveSampleStepPx = with(density) { 1.5.dp.toPx() }
+    val waveSampleStepPx = with(density) { 4.5.dp.toPx() } // Optimized for lower end devices (was 1.5)
 
     // Reusable Path caches to eliminate garbage collector allocations during frame drawing
     val pathFilled1 = remember { Path() }
@@ -207,6 +213,24 @@ fun WavySeekBar(
     val pathContour3 = remember { Path() }
     val clipPathBounds = remember { Path() }
 
+    // Pre-allocate color lists to eliminate garbage collection churn during 60fps draw loop
+    val gradient1Colors = remember(layer1Light, layer1Dark, isTranslucent) { listOf(layer1Light.copy(alpha = if (isTranslucent) 0.38f else 0.30f), layer1Dark.copy(alpha = if (isTranslucent) 0.12f else 0.08f)) }
+    val gradient2Colors = remember(layer2Light, layer2Dark, isTranslucent) { listOf(layer2Light.copy(alpha = if (isTranslucent) 0.45f else 0.38f), layer2Dark.copy(alpha = if (isTranslucent) 0.18f else 0.12f)) }
+    val gradient3Colors = remember(layer3Light, layer3Dark, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 0.65f else 0.56f), layer3Dark.copy(alpha = if (isTranslucent) 0.28f else 0.22f)) }
+    val gradient3HorizontalColors = remember(layer3Light, layer3Dark, secondaryColor, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 0.40f else 0.32f), secondaryColor.copy(alpha = if (isTranslucent) 0.28f else 0.22f), layer3Dark.copy(alpha = if (isTranslucent) 0.45f else 0.38f)) }
+    
+    val contour1Colors = remember(layer1Light, layer1Dark, isTranslucent) { listOf(layer1Light.copy(alpha = if (isTranslucent) 0.24f else 0.18f), layer1Dark.copy(alpha = if (isTranslucent) 0.16f else 0.12f)) }
+    val contour2Colors = remember(layer2Light, layer2Dark, isTranslucent) { listOf(layer2Dark.copy(alpha = if (isTranslucent) 0.32f else 0.24f), layer2Light.copy(alpha = if (isTranslucent) 0.26f else 0.18f)) }
+    val contour3OuterColors = remember(layer3Light, layer3Dark, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 0.42f else 0.32f), layer3Dark.copy(alpha = if (isTranslucent) 0.32f else 0.22f)) }
+    val contour3InnerColors = remember(layer3Light, layer3Dark, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 0.65f else 0.52f), layer3Dark.copy(alpha = if (isTranslucent) 0.52f else 0.40f)) }
+    
+    val crispContour1Colors = remember(layer1Light, layer1Dark, isTranslucent) { listOf(layer1Light.copy(alpha = if (isTranslucent) 0.50f else 0.45f), layer1Dark.copy(alpha = if (isTranslucent) 0.38f else 0.32f)) }
+    val crispContour2Colors = remember(layer2Light, layer2Dark, isTranslucent) { listOf(layer2Dark.copy(alpha = if (isTranslucent) 0.78f else 0.72f), layer2Light.copy(alpha = if (isTranslucent) 0.68f else 0.62f)) }
+    val crispContour3Colors = remember(layer3Light, layer3Dark, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 1.0f else 0.98f), layer3Dark.copy(alpha = if (isTranslucent) 0.95f else 0.92f)) }
+
+    val baselineGlowColors = remember(layer3Light, layer3Dark, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 0.35f else 0.25f), layer3Dark.copy(alpha = if (isTranslucent) 0.25f else 0.18f)) }
+    val baselineCoreColors = remember(layer3Light, layer3Dark) { listOf(layer3Light, layer3Dark) }
+
     Column(modifier = modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
@@ -214,10 +238,16 @@ fun WavySeekBar(
                 .height(50.dp),
         ) {
             Canvas(modifier = Modifier.matchParentSize()) {
+                val currentFraction = if (durationState > 0L) {
+                    (shownMs.toDouble() / durationState.toDouble()).toFloat().coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+                
                 val width = size.width
                 val height = size.height
                 val centerY = height / 2f + 7.dp.toPx()
-                val thumbX = (shownFraction * width).coerceIn(0f, width)
+                val thumbX = (currentFraction * width).coerceIn(0f, width)
                 val halfThickness = baseTrackThicknessPx / 2f
                 val bottomY = centerY + halfThickness
                 val topBaselineY = centerY - halfThickness
@@ -299,53 +329,142 @@ fun WavySeekBar(
                         populateWave(pathFilled3, pathContour3, waveLength3Px, amp3, currPhase3)
 
                         val activeWidth = thumbX.coerceAtLeast(1f)
+                        val topWaveY = topBaselineY - maxOf(amp1, maxOf(amp2, amp3))
 
-                        // Layer 1: Soft organic wave
+                        // 1. Layer 1 Filled Wave (Ambient deep vertical gradient body)
+                        drawPath(
+                            path = pathFilled1,
+                            brush = Brush.verticalGradient(
+                                colors = gradient1Colors,
+                                startY = topWaveY,
+                                endY = bottomY,
+                            ),
+                        )
+
+                        // 2. Layer 2 Filled Wave (Middle harmonic translucent gradient body)
+                        drawPath(
+                            path = pathFilled2,
+                            brush = Brush.verticalGradient(
+                                colors = gradient2Colors,
+                                startY = topWaveY,
+                                endY = bottomY,
+                            ),
+                        )
+
+                        // 3. Layer 3 Filled Wave (Primary vibrant vertical + horizontal liquid gradient body)
+                        drawPath(
+                            path = pathFilled3,
+                            brush = Brush.verticalGradient(
+                                colors = gradient3Colors,
+                                startY = topWaveY,
+                                endY = bottomY,
+                            ),
+                        )
+                        drawPath(
+                            path = pathFilled3,
+                            brush = Brush.horizontalGradient(
+                                colors = gradient3HorizontalColors,
+                                startX = 0f,
+                                endX = activeWidth,
+                            ),
+                        )
+
+                        // ── Gradient Glow Halos (Subtle luminous bloom along wave crests) ──
+
+                        // Layer 1 Ambient Glow
                         drawPath(
                             path = pathContour1,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer1Light.copy(alpha = if (isTranslucent) 0.42f else 0.38f),
-                                    layer1Dark.copy(alpha = if (isTranslucent) 0.32f else 0.28f),
-                                ),
+                                colors = contour1Colors,
+                                startX = 0f,
+                                endX = activeWidth,
+                            ),
+                            style = Stroke(width = 4.0.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        )
+
+                        // Layer 2 Harmonic Glow
+                        drawPath(
+                            path = pathContour2,
+                            brush = Brush.horizontalGradient(
+                                colors = contour2Colors,
+                                startX = 0f,
+                                endX = activeWidth,
+                            ),
+                            style = Stroke(width = 5.0.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        )
+
+                        // Layer 3 Primary Outer Soft Glow
+                        drawPath(
+                            path = pathContour3,
+                            brush = Brush.horizontalGradient(
+                                colors = contour3OuterColors,
+                                startX = 0f,
+                                endX = activeWidth,
+                            ),
+                            style = Stroke(width = 6.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        )
+
+                        // Layer 3 Primary Inner Focused Halo
+                        drawPath(
+                            path = pathContour3,
+                            brush = Brush.horizontalGradient(
+                                colors = contour3InnerColors,
+                                startX = 0f,
+                                endX = activeWidth,
+                            ),
+                            style = Stroke(width = 3.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                        )
+
+                        // ── Crisp Contour Line Strokes ──
+
+                        // Layer 1: Soft organic contour stroke
+                        drawPath(
+                            path = pathContour1,
+                            brush = Brush.horizontalGradient(
+                                colors = crispContour1Colors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
                             style = Stroke(width = 1.0.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                         )
 
-                        // Layer 2: Medium harmonic wave
+                        // Layer 2: Medium harmonic contour stroke
                         drawPath(
                             path = pathContour2,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer2Dark.copy(alpha = if (isTranslucent) 0.72f else 0.66f),
-                                    layer2Light.copy(alpha = if (isTranslucent) 0.62f else 0.56f),
-                                ),
+                                colors = crispContour2Colors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
                             style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                         )
 
-                        // Layer 3: Vibrant primary wave
+                        // Layer 3: Vibrant primary contour stroke
                         drawPath(
                             path = pathContour3,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer3Light.copy(alpha = if (isTranslucent) 0.98f else 0.95f),
-                                    layer3Dark.copy(alpha = if (isTranslucent) 0.92f else 0.88f),
-                                ),
+                                colors = crispContour3Colors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
-                            style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                            style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                         )
 
-                        // 3. Crisp Baseline Bar with Light -> Dark dynamic gradient
+                        // 3. Baseline Bar Subtle Glow & Crisp Core Bar
                         drawLine(
                             brush = Brush.horizontalGradient(
-                                colors = listOf(layer3Light, layer3Dark),
+                                colors = baselineGlowColors,
+                                startX = 0f,
+                                endX = activeWidth,
+                            ),
+                            start = Offset(0f, centerY),
+                            end = Offset(thumbX, centerY),
+                            strokeWidth = baseTrackThicknessPx + 3.dp.toPx(),
+                            cap = StrokeCap.Round,
+                        )
+                        drawLine(
+                            brush = Brush.horizontalGradient(
+                                colors = baselineCoreColors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -358,7 +477,7 @@ fun WavySeekBar(
                 }
 
                 // 4. Leading Thumb Indicator (At current playing position)
-                if (boundedDurationMs > 0) {
+                if (durationState > 0) {
                     // Soft glow halo
                     drawCircle(
                         color = thumbColor.copy(alpha = 0.28f),
@@ -378,10 +497,10 @@ fun WavySeekBar(
                 value = shownMs.toFloat(),
                 onValueChange = { dragPositionMs = it },
                 onValueChangeFinished = {
-                    onSeek(dragPositionMs.toLong().coerceIn(0L, boundedDurationMs))
+                    onSeek(dragPositionMs.toLong().coerceIn(0L, durationState))
                 },
-                valueRange = 0f..boundedDurationMs.coerceAtLeast(1L).toFloat(),
-                enabled = boundedDurationMs > 0L,
+                valueRange = 0f..durationState.coerceAtLeast(1L).toFloat(),
+                enabled = durationState > 0L,
                 interactionSource = interactionSource,
                 modifier = Modifier
                     .matchParentSize()
@@ -400,12 +519,12 @@ fun WavySeekBar(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = formatTime(shownMs),
+                    text = timeLabelElapsed,
                     style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
                     color = textColor,
                 )
                 Text(
-                    text = "−${formatTime((boundedDurationMs - shownMs).coerceAtLeast(0))}",
+                    text = timeLabelRemaining,
                     style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
                     color = textColor,
                 )
@@ -414,21 +533,306 @@ fun WavySeekBar(
     }
 }
 
+/**
+ * Compact, low-profile Wavy Seekbar specifically proportioned for MiniPlayer cards.
+ * Renders the same multi-depth gradient liquid fills and luminous glow in a streamlined track
+ * with full touch & drag seek control.
+ */
 @Composable
-fun WavySeekBar(
-    state: MusicPlayerState,
-    onSeek: (Long) -> Unit,
+fun MiniWavyProgress(
+    progressState: kotlinx.coroutines.flow.StateFlow<com.lastwave.app.playback.PlaybackProgressState>,
+    isPlaying: Boolean,
+    onSeek: ((Long) -> Unit)? = null,
+    wavyEnabled: Boolean = true,
     modifier: Modifier = Modifier,
-    isTranslucent: Boolean = false,
 ) {
-    WavySeekBar(
-        positionMs = state.positionMs,
-        durationMs = state.durationMs,
-        isPlaying = state.isPlaying,
-        onSeek = onSeek,
-        modifier = modifier,
-        isTranslucent = isTranslucent,
-        trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" },
-    )
-}
+    val state = progressState.collectAsStateWithLifecycle()
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFraction by remember { mutableFloatStateOf(0f) }
 
+    val durationState by remember { derivedStateOf { state.value.durationMs.coerceAtLeast(0L) } }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val secondaryColor = MaterialTheme.colorScheme.secondary
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+    val inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+
+    val layer1Light = remember(tertiaryColor) { tertiaryColor.shiftTonal(lightnessDelta = +0.18f, saturationScale = 0.85f) }
+    val layer1Dark = remember(tertiaryColor) { tertiaryColor.shiftTonal(lightnessDelta = -0.15f, saturationScale = 1.30f) }
+    val layer2Dark = remember(secondaryColor) { secondaryColor.shiftTonal(lightnessDelta = -0.16f, saturationScale = 1.30f) }
+    val layer2Light = remember(secondaryColor) { secondaryColor.shiftTonal(lightnessDelta = +0.18f, saturationScale = 0.85f) }
+    val layer3Light = remember(primaryColor) { primaryColor.shiftTonal(lightnessDelta = +0.20f, saturationScale = 0.90f) }
+    val layer3Dark = remember(primaryColor) { primaryColor.shiftTonal(lightnessDelta = -0.14f, saturationScale = 1.35f) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "MiniWaveAnimation")
+    val phase1 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "MiniPhase1",
+    )
+    val phase2 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "MiniPhase2",
+    )
+    val phase3 by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1300, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "MiniPhase3",
+    )
+
+    val ampMulti by animateFloatAsState(
+        targetValue = if (isPlaying && durationState > 0L) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow),
+        label = "MiniAmp",
+    )
+
+    val pathFilled1 = remember { Path() }
+    val pathFilled2 = remember { Path() }
+    val pathFilled3 = remember { Path() }
+    val pathContour1 = remember { Path() }
+    val pathContour2 = remember { Path() }
+    val pathContour3 = remember { Path() }
+    val clipBounds = remember { Path() }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(18.dp)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    if (durationState <= 0L || onSeek == null) return@awaitEachGesture
+                    val down = awaitFirstDown()
+                    isDragging = true
+                    dragFraction = (down.position.x / size.width).coerceIn(0f, 1f)
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        change.consume()
+                        dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
+                        if (!change.pressed) {
+                            onSeek((dragFraction * durationState).toLong())
+                            break
+                        }
+                    }
+                    isDragging = false
+                }
+            }
+            .clip(RoundedCornerShape(9.dp)),
+    ) {
+        Canvas(
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            val positionMs = state.value.positionMs
+            val durationMs = state.value.durationMs.coerceAtLeast(0L)
+            val boundedPositionMs = if (durationMs > 0L) positionMs.coerceIn(0L, durationMs) else 0L
+            val progressFraction = if (isDragging) {
+                dragFraction
+            } else if (durationMs > 0L) {
+                (boundedPositionMs.toDouble() / durationMs.toDouble()).toFloat().coerceIn(0f, 1f)
+            } else 0f
+            
+            val width = size.width
+            val height = size.height
+            val baseTrackThicknessPx = 2.5.dp.toPx()
+            val halfThickness = baseTrackThicknessPx / 2f
+            val centerY = height - halfThickness - 1.5.dp.toPx()
+            val topBaselineY = centerY - halfThickness
+            val bottomY = centerY + halfThickness
+            val thumbX = (width * progressFraction).coerceIn(0f, width)
+
+            // Inactive background baseline bar
+            drawLine(
+                color = inactiveColor,
+                start = Offset(0f, centerY),
+                end = Offset(width, centerY),
+                strokeWidth = baseTrackThicknessPx,
+                cap = StrokeCap.Round,
+            )
+
+            if (!wavyEnabled) {
+                if (thumbX > 0.5f) {
+                    drawLine(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(primaryColor, secondaryColor),
+                            startX = 0f,
+                            endX = thumbX,
+                        ),
+                        start = Offset(0f, centerY),
+                        end = Offset(thumbX, centerY),
+                        strokeWidth = baseTrackThicknessPx,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            } else if (thumbX > 0.5f) {
+                clipBounds.reset()
+                clipBounds.addRoundRect(
+                    RoundRect(
+                        rect = androidx.compose.ui.geometry.Rect(
+                            left = -halfThickness,
+                            top = 0f,
+                            right = thumbX + halfThickness,
+                            bottom = height,
+                        ),
+                        topLeft = CornerRadius(halfThickness, halfThickness),
+                        bottomLeft = CornerRadius(halfThickness, halfThickness),
+                        topRight = CornerRadius(halfThickness, halfThickness),
+                        bottomRight = CornerRadius(halfThickness, halfThickness),
+                    )
+                )
+
+                clipPath(clipBounds) {
+                    fun smootherstep(t: Float): Float {
+                        val c = t.coerceIn(0f, 1f)
+                        return c * c * c * (c * (c * 6f - 15f) + 10f)
+                    }
+
+                    // Wavelengths widened for clear spacing between crest peaks
+                    val waveLength1Px = 114.dp.toPx()
+                    val waveLength2Px = 88.dp.toPx()
+                    val waveLength3Px = 68.dp.toPx()
+
+                    // Enhanced amplitudes for prominent wave crests
+                    val amp1 = 4.8.dp.toPx() * ampMulti
+                    val amp2 = 3.6.dp.toPx() * ampMulti
+                    val amp3 = 5.8.dp.toPx() * ampMulti
+
+                    val currPhase1 = if (isPlaying) phase1 + 2.2f else 2.2f
+                    val currPhase2 = if (isPlaying) phase2 + 1.2f else 1.2f
+                    val currPhase3 = if (isPlaying) phase3 else 0f
+
+                    val transitionLengthPx = 28.dp.toPx()
+                    val stepPx = 4.0.dp.toPx() // Optimized for lower end devices (was 1.5)
+
+                    fun populateMiniWave(
+                        filled: Path,
+                        contour: Path,
+                        wavelength: Float,
+                        amplitude: Float,
+                        phase: Float,
+                    ) {
+                        filled.reset()
+                        contour.reset()
+                        filled.moveTo(0f, bottomY)
+                        filled.lineTo(0f, topBaselineY)
+                        contour.moveTo(0f, topBaselineY)
+
+                        var x = 0f
+                        val effectiveTransition = minOf(transitionLengthPx, thumbX * 0.48f)
+                        val invTransition = if (effectiveTransition > 0f) 1f / effectiveTransition else 0f
+                        val invWavelength2Pi = (2 * PI / wavelength).toFloat()
+                        while (x < thumbX) {
+                            val startEnv = if (invTransition > 0f) smootherstep(x * invTransition) else 1f
+                            val endEnv = if (invTransition > 0f) smootherstep((thumbX - x) * invTransition) else 1f
+                            val envelope = startEnv * endEnv
+
+                            val angle = x * invWavelength2Pi - phase
+                            val waveHeight = (0.5f + 0.5f * sin(angle)) * amplitude * envelope
+                            val y = topBaselineY - waveHeight
+
+                            filled.lineTo(x, y)
+                            contour.lineTo(x, y)
+                            x += stepPx
+                        }
+                        filled.lineTo(thumbX, topBaselineY)
+                        contour.lineTo(thumbX, topBaselineY)
+                        filled.lineTo(thumbX, bottomY)
+                        filled.close()
+                    }
+
+                    populateMiniWave(pathFilled1, pathContour1, waveLength1Px, amp1, currPhase1)
+                    populateMiniWave(pathFilled2, pathContour2, waveLength2Px, amp2, currPhase2)
+                    populateMiniWave(pathFilled3, pathContour3, waveLength3Px, amp3, currPhase3)
+
+                    val topWaveY = topBaselineY - maxOf(amp1, maxOf(amp2, amp3))
+
+                    // Fills
+                    drawPath(
+                        path = pathFilled1,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(layer1Light.copy(alpha = 0.35f), layer1Dark.copy(alpha = 0.08f)),
+                            startY = topWaveY,
+                            endY = bottomY,
+                        ),
+                    )
+                    drawPath(
+                        path = pathFilled2,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(layer2Light.copy(alpha = 0.45f), layer2Dark.copy(alpha = 0.12f)),
+                            startY = topWaveY,
+                            endY = bottomY,
+                        ),
+                    )
+                    drawPath(
+                        path = pathFilled3,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(layer3Light.copy(alpha = 0.62f), layer3Dark.copy(alpha = 0.24f)),
+                            startY = topWaveY,
+                            endY = bottomY,
+                        ),
+                    )
+                    drawPath(
+                        path = pathFilled3,
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(
+                                layer3Light.copy(alpha = 0.40f),
+                                secondaryColor.copy(alpha = 0.25f),
+                                layer3Dark.copy(alpha = 0.45f)
+                            ),
+                            startX = 0f,
+                            endX = thumbX,
+                        ),
+                    )
+
+                    // Soft Luminous Glow Halo on Crests
+                    drawPath(
+                        path = pathContour3,
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(layer3Light.copy(alpha = 0.35f), layer3Dark.copy(alpha = 0.20f)),
+                            startX = 0f,
+                            endX = thumbX,
+                        ),
+                        style = Stroke(width = 3.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                    )
+
+                    // Luminous Contour Line
+                    drawPath(
+                        path = pathContour3,
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(layer3Light.copy(alpha = 0.65f), layer3Dark.copy(alpha = 0.45f)),
+                            startX = 0f,
+                            endX = thumbX,
+                        ),
+                        style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                    )
+
+                    // Baseline active bar
+                    drawLine(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(primaryColor, secondaryColor),
+                            startX = 0f,
+                            endX = thumbX,
+                        ),
+                        start = Offset(0f, centerY),
+                        end = Offset(thumbX, centerY),
+                        strokeWidth = baseTrackThicknessPx,
+                        cap = StrokeCap.Round,
+                    )
+                }
+            }
+        }
+    }
+}

@@ -38,12 +38,23 @@ local.properties
 # OS & Tooling
 .DS_Store
 Thumbs.db
+# Tooling & Agent files
 .acside/
 .codex/
 .codex*
 *.codex
 *.codex*
 *.pid
+.worktrees/
+.scratch/
+.claude/
+.agents/
+.superpowers/
+skills-lock.json
+CLAUDE.md
+AGENTS.md
+graphify-out/
+*.html
 
 # Credentials & Environment
 Screenshot/release.jks
@@ -53,3 +64,4 @@ keystore_credentials.txt
 .wrangler/
 qobuz-worker-backend/wrangler.toml
 qobuz-worker-backend/.env
+.vscode/

@@ -52,8 +52,10 @@ import androidx.compose.material.icons.filled.Colorize
 import androidx.compose.material.icons.filled.Contrast
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Lyrics
@@ -244,10 +246,15 @@ fun SettingsScreen(
     val eq by viewModel.equalizer.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showQualityDialog by remember { mutableStateOf(false) }
+    var showCacheCapacityDialog by remember { mutableStateOf(false) }
     var showEqSheet by remember { mutableStateOf(false) }
     var showLyricsAnimationSheet by remember { mutableStateOf(false) }
     var showSyncPlaylistsSheet by remember { mutableStateOf(false) }
     var showYtDisconnectConfirm by remember { mutableStateOf(false) }
+
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        viewModel.checkAndConnectYouTube()
+    }
 
     // Sends the user to Android's own Notification Listener access screen
     // — the one permission this feature needs that the app can never grant
@@ -327,7 +334,7 @@ fun SettingsScreen(
                             else if (ytSyncEnabled) "Selected playlists mirror to your account, 24/7" + lastSyncSuffix(ytLastSyncAt)
                             else "Keep your YT Music library in sync with LastWave"
                     }
-                    val ytRowCount = if (ytConnected) 4 else 2
+                    val ytRowCount = if (ytConnected) 5 else 3
                     SettingsGroup(rowCount = ytRowCount) { index, position ->
                         when (index) {
                             0 -> if (ytConnected) {
@@ -375,13 +382,14 @@ fun SettingsScreen(
                                     position = position,
                                 )
                             } else {
-                                SettingsActionCard(
-                                    icon = Icons.Filled.QueueMusic,
+                                SettingsToggleCard(
+                                    icon = Icons.Filled.Favorite,
                                     iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                     iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    title = "Import from YouTube Music",
-                                    subtitle = "Search, browse, or paste playlist links & IDs",
-                                    onClick = onOpenYouTubeImport,
+                                    title = "Sync Liked Songs to YouTube Music",
+                                    subtitle = "Connect account to keep favorites synchronized automatically",
+                                    checked = false,
+                                    onCheckedChange = { onOpenYouTubeLogin() },
                                     position = position,
                                 )
                             }
@@ -392,6 +400,22 @@ fun SettingsScreen(
                                 title = "Your Playlists on YouTube Music",
                                 subtitle = "Browse & import from your YouTube account",
                                 onClick = onOpenYouTubeImport,
+                                position = position,
+                            )
+                            4 -> SettingsToggleCard(
+                                icon = Icons.Filled.Favorite,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Sync Liked Songs to YouTube Music",
+                                subtitle = if (misc.autoSyncLikedSongsToYouTube) "Always keep favorites synchronized automatically" else "Auto-sync disabled",
+                                checked = ytConnected && misc.autoSyncLikedSongsToYouTube,
+                                onCheckedChange = { enabled ->
+                                    if (!ytConnected) {
+                                        onOpenYouTubeLogin()
+                                    } else {
+                                        viewModel.setAutoSyncLikedSongsToYouTube(enabled)
+                                    }
+                                },
                                 position = position,
                             )
                         }
@@ -530,15 +554,20 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Experimental")
-                    SettingsGroup(rowCount = 5) { index, position ->
+                    SettingsGroup(rowCount = 6) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.BubbleChart,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = "Liquid Glass",
-                                subtitle = "iOS-style translucent materials across the app",
-                                checked = theme?.liquidGlass ?: false,
+                                subtitle = if (misc.performanceModeEnabled) {
+                                    "Disabled while Performance Mode is active"
+                                } else {
+                                    "iOS-style translucent materials across the app"
+                                },
+                                checked = if (misc.performanceModeEnabled) false else (theme?.liquidGlass ?: false),
+                                enabled = !misc.performanceModeEnabled,
                                 onCheckedChange = viewModel::setLiquidGlass,
                                 position = position,
                             )
@@ -569,12 +598,15 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = "Wavy Seekbar",
-                                subtitle = if (misc.wavySeekbarEnabled) {
+                                subtitle = if (misc.performanceModeEnabled) {
+                                    "Disabled while Performance Mode is active"
+                                } else if (misc.wavySeekbarEnabled) {
                                     "Multi-layer fluid wavy progress slider"
                                 } else {
                                     "Classic standard progress slider"
                                 },
-                                checked = misc.wavySeekbarEnabled,
+                                checked = if (misc.performanceModeEnabled) false else misc.wavySeekbarEnabled,
+                                enabled = !misc.performanceModeEnabled,
                                 onCheckedChange = viewModel::setWavySeekbarEnabled,
                                 position = position,
                             )
@@ -592,7 +624,21 @@ fun SettingsScreen(
                                 onCheckedChange = viewModel::setStudioMasterClarity,
                                 position = position,
                             )
-                                                    }
+                            5 -> SettingsToggleCard(
+                                icon = Icons.Filled.Bolt,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Performance Mode",
+                                subtitle = if (misc.performanceModeEnabled) {
+                                    "Active \u2022 Disables Liquid Glass & wavy seekbar for smooth framerates"
+                                } else {
+                                    "Optimized for smooth framerates on lower-end devices"
+                                },
+                                checked = misc.performanceModeEnabled,
+                                onCheckedChange = viewModel::setPerformanceModeEnabled,
+                                position = position,
+                            )
+                        }
                     }
                 }
             }
@@ -669,6 +715,58 @@ fun SettingsScreen(
                                 },
                                 checked = misc.downloadLyrics,
                                 onCheckedChange = viewModel::setDownloadLyrics,
+                                position = position,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel("Stream Cache & Storage")
+
+                    val cacheBytes by viewModel.streamCacheSizeBytes.collectAsStateWithLifecycle()
+                    val cacheCount by viewModel.streamCachedSongCount.collectAsStateWithLifecycle()
+                    val cacheMb = (cacheBytes.toDouble() / (1024 * 1024)).let { "%.1f".format(it) }
+
+                    val songLimit = misc.streamCacheSongLimit
+                    val estimatedGb = ((songLimit * 30L).toDouble() / 1024).let { "%.1f".format(it) }
+                    val capacitySubtitle = "$songLimit songs (~$estimatedGb GB max)"
+
+                    val totalCacheRows = if (misc.streamCacheEnabled) 3 else 1
+                    SettingsGroup(rowCount = totalCacheRows) { index, position ->
+                        when (index) {
+                            0 -> SettingsToggleCard(
+                                icon = Icons.Filled.Download,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "Cache Streamed Songs",
+                                subtitle = if (misc.streamCacheEnabled) {
+                                    "Auto-cache played songs for instant offline replay and data savings"
+                                } else {
+                                    "Streaming audio data is discarded immediately after playback"
+                                },
+                                checked = misc.streamCacheEnabled,
+                                onCheckedChange = viewModel::setStreamCacheEnabled,
+                                position = position,
+                            )
+                            1 -> SettingsActionCard(
+                                icon = Icons.Filled.Tune,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Cache Capacity",
+                                subtitle = capacitySubtitle,
+                                onClick = { showCacheCapacityDialog = true },
+                                position = position,
+                            )
+                            2 -> SettingsActionCard(
+                                icon = Icons.Filled.Delete,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Clear Stream Cache",
+                                subtitle = if (cacheBytes > 0) "$cacheMb MB used • $cacheCount cached track(s)" else "Cache is empty",
+                                onClick = viewModel::clearStreamCache,
                                 position = position,
                             )
                         }
@@ -1135,6 +1233,136 @@ fun SettingsScreen(
         }
     }
 
+    if (showCacheCapacityDialog) {
+        val capacityOptions = listOf(
+            Triple(25, "25 Songs", "~750 MB storage ceiling • Ideal for low-storage devices"),
+            Triple(50, "50 Songs (Recommended)", "~1.5 GB storage ceiling • Balanced offline replay"),
+            Triple(100, "100 Songs", "~3.0 GB storage ceiling • Extensive cache buffer"),
+            Triple(200, "200 Songs", "~6.0 GB storage ceiling • Heavy listening cache"),
+            Triple(500, "500 Songs", "~15.0 GB storage ceiling • Maximum offline capacity"),
+        )
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
+        ModalBottomSheet(
+            onDismissRequest = { showCacheCapacityDialog = false },
+            sheetState = sheetState,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            dragHandle = {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .padding(top = 12.dp, bottom = 8.dp)
+                        .size(width = 36.dp, height = 4.dp),
+                ) {}
+            },
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp + safeDrawingBottomPadding()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.Tune,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            "Stream Cache Capacity",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "Maximum song count retained in local cache",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                Text(
+                    "When the limit is reached, older played songs are automatically evicted in Least-Recently-Used (LRU) order.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    capacityOptions.forEach { (limit, title, subtitle) ->
+                        val isSelected = misc.streamCacheSongLimit == limit
+                        Surface(
+                            onClick = {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                viewModel.setStreamCacheSongLimit(limit)
+                                showCacheCapacityDialog = false
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                            shadowElevation = if (isSelected) 3.dp else 0.dp,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        title,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primary),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = "Selected",
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if (showYouTubeImportSheet) {
         YouTubeImportSheet(
             onDismiss = { showYouTubeImportSheet = false },
@@ -1224,6 +1452,7 @@ private fun SettingsToggleCard(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     position: GroupPosition = GroupPosition.SINGLE,
+    enabled: Boolean = true,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val scale = rememberPressScale(interactionSource)
@@ -1231,9 +1460,13 @@ private fun SettingsToggleCard(
     val liquidGlass = LocalLiquidGlass.current
 
     Card(
-        onClick = { onCheckedChange(!checked) },
+        onClick = { if (enabled) onCheckedChange(!checked) },
+        enabled = enabled,
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+        ),
         // Pinned at 0dp: Material3's Card blends an extra primary-tinted
         // alpha layer on top of containerColor whenever tonalElevation is
         // above 0dp (surfaceColorAtElevation) — with a Switch already
@@ -1244,21 +1477,32 @@ private fun SettingsToggleCard(
         interactionSource = interactionSource,
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
+            .scale(if (enabled) scale else 1f)
             .liquidGlassChrome(shape, liquidGlass),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconBadge(icon, iconContainer, iconTint)
+            IconBadge(
+                icon,
+                if (enabled) iconContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                if (enabled) iconTint else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                )
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                     maxLines = 2,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
@@ -1266,7 +1510,8 @@ private fun SettingsToggleCard(
             Spacer(Modifier.width(8.dp))
             Switch(
                 checked = checked,
-                onCheckedChange = onCheckedChange,
+                onCheckedChange = if (enabled) onCheckedChange else null,
+                enabled = enabled,
                 thumbContent = if (checked) {
                     {
                         Icon(

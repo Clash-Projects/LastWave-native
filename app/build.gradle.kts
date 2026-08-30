@@ -80,17 +80,15 @@ android {
             cmake {
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
-                    // Android 15+ can boot with 16 KB memory pages; all native
-                    // libraries must be built/aligned accordingly. Ignored
-                    // harmlessly by NDK toolchains that predate the flag.
                     "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
                 )
-                cFlags += "-Wl,-z,max-page-size=16384"
-                cppFlags += "-Wl,-z,max-page-size=16384"
+                cFlags += listOf("-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384")
+                cppFlags += listOf("-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384")
             }
         }
     }
 
+    var isReleaseSigningConfigured = false
     signingConfigs {
         create("release") {
             val base64Key = resolveSecret("SIGNING_KEY")
@@ -123,8 +121,7 @@ android {
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
-            } else {
-                initWith(getByName("debug"))
+                isReleaseSigningConfigured = true
             }
         }
     }
@@ -133,16 +130,22 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (isReleaseSigningConfigured) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         create("rawRelease") {
             initWith(getByName("release"))
             isMinifyEnabled = false
             isShrinkResources = false
-            // Raw variant — no code/resource shrinking, no ProGuard/R8
-            signingConfig = signingConfigs.getByName("release")
-            // proguardFiles from initWith are ignored when minify is off
+            signingConfig = if (isReleaseSigningConfigured) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         debug {
             isDebuggable = true
@@ -179,7 +182,7 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            useLegacyPackaging = true
+            useLegacyPackaging = false
         }
     }
 
@@ -247,6 +250,7 @@ dependencies {
     // Native in-app audio playback, background service, system media
     // controls, Bluetooth/headset controls and a MediaController-backed UI.
     implementation("androidx.media3:media3-exoplayer:1.2.1")
+    implementation("androidx.media:media:1.7.0")
 
     // GPLv3 Media3-matched FFmpeg software decoder (distribution must comply).
     // The renderer factory prefers FFmpeg for every codec it supports so all
@@ -276,5 +280,3 @@ dependencies {
 tasks.withType<Test> {
     maxHeapSize = "2048m"
 }
-
-

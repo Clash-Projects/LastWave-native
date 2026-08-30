@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Home Screen UI Spec</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Inter:wght@400;500;600&display=swap" />
+  <style>
+    /* --- Token palette --- */
+    :root {
+      /* Light theme */
+      --color-bg: #fafafa;
+      --color-surface: #ffffff;
+      --color-primary: #6366f1; /* Indigo 500 */
+      --color-on-primary: #ffffff;
+      --color-muted: #6b7280; /* Gray 500 */
+      --color-text: #111827; /* Gray 900 */
+      --color-accent: #ff6b6b; /* Coral */
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --color-bg: #0a0a0c;
+        --color-surface: #1a1b1e;
+        --color-primary: #818cf8; /* Lighter indigo */
+        --color-on-primary: #1a1b1e;
+        --color-muted: #9ca3af; /* Gray 400 */
+        --color-text: #f9fafb; /* Gray 50 */
+        --color-accent: #ff6b6b;
+      }
+    }
+    :root[data-theme="dark"] {
+      --color-bg: #0a0a0c;
+      --color-surface: #1a1b1e;
+      --color-primary: #818cf8;
+      --color-on-primary: #1a1b1e;
+      --color-muted: #9ca3af;
+      --color-text: #f9fafb;
+      --color-accent: #ff6b6b;
+    }
+    body {
+      margin: 0;
+      padding: 2rem;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: "Inter", system-ui, sans-serif;
+      line-height: 1.6;
+      max-width: 800px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    h1, h2, h3 {
+      font-family: "Playfair Display", serif;
+      margin-top: 2rem;
+      margin-bottom: 0.5rem;
+    }
+    h1 { font-size: 2.25rem; }
+    h2 { font-size: 1.75rem; }
+    h3 { font-size: 1.5rem; }
+    ul { padding-left: 1.2rem; }
+    li { margin-bottom: 0.5rem; }
+    .section { margin-bottom: 2rem; }
+    a {
+      color: var(--color-primary);
+      text-decoration: underline;
+    }
+    .badge {
+      display: inline-block;
+      background: var(--color-accent);
+      color: var(--color-on-primary);
+      padding: 0.2rem 0.5rem;
+      border-radius: 0.25rem;
+      font-size: 0.85rem;
+    }
+    .note { font-size: 0.9rem; color: var(--color-muted); }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: 0s !important; transition-duration: 0s !important; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Home Screen UI Spec</h1>
+  <section class="section" id="problem-statement">
+    <h2>Problem Statement</h2>
+    <p>Users currently see a home screen that mixes legacy UI patterns with partial dark‑mode support, resulting in visual inconsistency, cramped touch targets, and an unclear hierarchy of information. The experience feels dated compared to modern material‑design conventions and lacks a unified visual language that scales across the app.</p>
+  </section>
+  <section class="section" id="solution">
+    <h2>Solution</h2>
+    <p>Introduce a refreshed home screen that embraces a cohesive, glass‑based aesthetic, introduces clear typographic hierarchy, and provides a single, high‑seam testing point at <code>HomeScreen.kt</code>. The redesign will be driven by a lightweight token system to keep light and dark themes in sync and will expose a <code>onTrackClick</code> callback for future interaction hooks.</p>
+  </section>
+  <section class="section" id="user-stories">
+    <h2>User Stories</h2>
+    <ol>
+      <li>As a music listener, I want a greeting that reflects the time of day, so I feel personally addressed.</li>
+      <li>As a listener, I want a quick‑play grid of my most recent tracks, so I can start playback with a single tap.</li>
+      <li>As a fan of Last.fm, I want a translucent widget that shows my scrobble count and trend, so I can gauge my listening habits at a glance.</li>
+      <li>As a power user, I want a persistent mini‑player at the bottom, so I can control playback without leaving the home screen.</li>
+      <li>As a friend‑viewer, I want a clear visual cue when I’m looking at a friend’s profile, so I don’t mistake their data for my own.</li>
+      <li>As a developer, I want the home screen to expose a single composable seam for testing, so UI tests are reliable and maintainable.</li>
+      <li>As a designer, I want consistent spacing and token‑driven colors, so the UI automatically respects system light/dark modes.</li>
+      <li>As an accessibility advocate, I want large touch targets and sufficient contrast, so the app is usable for all users.</li>
+      <li>As a user with many tracks, I want pagination that loads more rows as I scroll, so the list remains performant.</li>
+      <li>As a user interested in genres, I want a shortcut from the stats card to a genre‑explore screen, so I can discover new music.</li>
+    </ol>
+  </section>
+  <section class="section" id="implementation-decisions">
+    <h2>Implementation Decisions</h2>
+    <ul>
+      <li>Modules: <code>HomeScreen.kt</code>, <code>HomeHeader.kt</code>, <code>QuickPlayGrid.kt</code>, <code>LastFmMiniWidget.kt</code>, and supporting view‑model <code>HomeViewModel</code>.</li>
+      <li>Interfaces: <code>onTrackClick: (HomeTrack) -> Unit</code> exposed from <code>QuickPlayGrid</code>; <code>onSearchClick, onCastClick, onNotificationsClick, onProfileClick</code> from <code>HomeHeader</code>.</li>
+      <li>Architecture: Keep all UI composables pure; UI state lives in <code>HomeViewModel</code> using Kotlin Flow.</li>
+      <li>Theme: Token‑driven palette defined in CSS; surface colors derived from <code>MaterialTheme.colorScheme</code> with slight opacity tweaks for glass effects.</li>
+      <li>Schema: No new backend schema; all data comes from existing <code>HomeTrack</code> repository objects.</li>
+      <li>API contracts: The home screen emits a <code>TrackMenuTarget</code> for context‑menu actions; no change to the public API.</li>
+      <li>Interaction: The quick‑play grid caps rows to six tracks (two rows of three) for visual balance; “View all” opens a full list screen.</li>
+      <li>Design tokens are defined in a separate Kotlin file <code>HomeTheme.kt</code> to keep the Compose layer in sync with the artifact CSS.</li>
+    </ul>
+  </section>
+  <section class="section" id="testing-decisions">
+    <h2>Testing Decisions</h2>
+    <ul>
+      <li>Focus on external behavior: verify that clicking a track invokes <code>onTrackClick</code> with the correct <code>HomeTrack</code> payload.</li>
+      <li>Validate visual hierarchy via screenshot tests (Compose UI testing with Paparazzi).</li>
+      <li>Cover the single seam <code>HomeScreen</code> – mock the view‑model and assert that the header, quick‑play grid, and stats widget render with correct data.</li>
+      <li>Prior art: existing unit tests for <code>HomeViewModel</code> and UI snapshot tests for other screens (e.g., <code>DiscoverScreen</code>).</li>
+    </ul>
+  </section>
+  <section class="section" id="out-of-scope">
+    <h2>Out of Scope</h2>
+    <ul>
+      <li>Full redesign of the discover and genre‑explore screens.</li>
+      <li>Backend changes to scrobble calculations – the widget reads the already‑computed <code>stats.scrobbles</code> value.</li>
+      <li>Custom animations beyond the built‑in Material ripple effects.</li>
+    </ul>
+  </section>
+  <section class="section" id="further-notes">
+    <h2>Further Notes</h2>
+    <p class="note">All colors are derived from the four core tokens (<code>--color-bg</code>, <code>--color-surface</code>, <code>--color-primary</code>, <code>--color-accent</code>) to guarantee a single‑seam theme switch. The design intentionally avoids a heavy hero image; the greeting text serves as the visual anchor, letting the glass widgets breathe.</p>
+  </section>
+</body>
+</html>

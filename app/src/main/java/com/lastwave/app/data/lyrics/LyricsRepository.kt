@@ -182,7 +182,7 @@ class LyricsRepository @Inject constructor(
             }
         }
 
-        // 3. TERTIARY: If both fail, return Empty (no lyrics)
+        // 4. QUATERNARY: If all fail, return Empty (no lyrics)
         val empty = LyricsResult.Empty
         cache[cacheKey] = empty
         empty

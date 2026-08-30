@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home Screen UI Redesign Prototype</title>
+    <style>
+        :root {
+            --bg-base: #0a0a0c;
+            --surface-glass: rgba(255, 255, 255, 0.05);
+            --surface-glass-border: rgba(255, 255, 255, 0.08);
+            --text-primary: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.6);
+            --accent-color: #6366f1;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .phone-frame {
+            width: 375px;
+            height: 812px;
+            background: #000;
+            border-radius: 40px;
+            border: 4px solid #222;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .scroll-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+            padding-bottom: 90px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .header h1 {
+            font-size: 20px;
+            margin: 0;
+            font-weight: 600;
+        }
+
+        /* Quick Play Grid */
+        .section-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin: 16px 0 12px 0;
+            display: flex;
+            justify-content: space-between;
+        }
+        .quick-play-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1f);
+            gap: 10px;
+        }
+        .quick-play-item {
+            background: var(--surface-glass);
+            border: 1px solid var(--surface-glass-border);
+            border-radius: 12px;
+            padding: 8px;
+            text-align: center;
+        }
+        .quick-play-item img {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 8px;
+            object-fit: cover;
+        }
+        .quick-play-item .title {
+            font-size: 12px;
+            font-weight: 500;
+            margin-top: 6px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .quick-play-item .artist {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        /* Last.fm Glass Widget */
+        .lastfm-widget {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--surface-glass-border);
+            border-radius: 16px;
+            padding: 14px;
+            margin-top: 20px;
+        }
+        .lastfm-title {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .lastfm-stats {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .lastfm-number {
+            font-size: 22px;
+            font-weight: 700;
+        }
+        .lastfm-trend {
+            font-size: 12px;
+            color: #4ade80;
+        }
+
+        /* Mini Player */
+        .mini-player {
+            position: absolute;
+            bottom: 20px;
+            left: 12px;
+            right: 12px;
+            background: rgba(20, 20, 25, 0.85);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--surface-glass-border);
+            border-radius: 20px;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .mini-player-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .mini-player-info img {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+        }
+        .mini-player-text .title {
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .mini-player-text .artist {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+<body>
+    <div class="phone-frame">
+        <div class="scroll-content">
+            <div class="header">
+                <h1>Good evening 👋</h1>
+            </div>
+
+            <div class="section-title">
+                <span>Quick play</span>
+                <span style="color: var(--text-secondary); font-size: 12px;">View all</span>
+            </div>
+
+            <!-- 3-Column Quick Play Grid -->
+            <div class="quick-play-grid">
+                <div class="quick-play-item">
+                    <img src="https://picsum.photos/100/100?random=1" alt="Artwork">
+                    <div class="title">Kaise Hua</div>
+                    <div class="artist">Vishal Mishra</div>
+                </div>
+                <div class="quick-play-item">
+                    <img src="https://picsum.photos/100/100?random=2" alt="Artwork">
+                    <div class="title">Round 2</div>
+                    <div class="artist">JaeyBxrd</div>
+                </div>
+                <div class="quick-play-item">
+                    <img src="https://picsum.photos/100/100?random=3" alt="Artwork">
+                    <div class="title">Bewajah</div>
+                    <div class="artist">Sanam</div>
+                </div>
+            </div>
+
+            <!-- Last.fm Translucent Glass Widget -->
+            <div class="lastfm-widget">
+                <div class="lastfm-title">Last.fm</div>
+                <div class="lastfm-stats">
+                    <div>
+                        <div class="lastfm-number">19,588</div>
+                        <div style="font-size: 10px; color: var(--text-secondary);">Scrobbles</div>
+                    </div>
+                    <div class="lastfm-trend">▲ 12% vs last month</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Integrated Translucent Mini Player -->
+        <div class="mini-player">
+            <div class="mini-player-info">
+                <img src="https://picsum.photos/100/100?random=4" alt="Playing">
+                <div class="mini-player-text">
+                    <div class="title">Odysseus</div>
+                    <div class="artist">Ludwig Göransson</div>
+                </div>
+            </div>
+            <div style="font-size: 18px;">⏸</div>
+        </div>
+    </div>
+</body>
+</html>
