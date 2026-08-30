@@ -41,6 +41,7 @@ sealed interface LyricsResult {
 @Singleton
 class LyricsRepository @Inject constructor(
     private val lyricsPlusApi: LyricsPlusApi,
+    private val kugouApi: KugouLyricsApi,
     private val lrclibApi: LrclibLyricsApi,
 ) {
     private val cache = ConcurrentHashMap<String, LyricsResult>()
@@ -105,10 +106,30 @@ class LyricsRepository @Inject constructor(
                 }
             }
         } catch (_: Exception) {
-            // Silently fall back to secondary line-by-line provider
+            // Silently fall back to secondary word-by-word provider
         }
 
-        // 2. SECONDARY: Fall back to LRCLIB line-by-line sync
+        // 2. SECONDARY: Try Kugou KRC word-by-word / syllable sync
+        try {
+            val kugouLines = kugouApi.fetchWordLyrics(title, artist, durationSeconds)
+            if (!kugouLines.isNullOrEmpty()) {
+                val hasWordTiming = kugouLines.any { it.hasSyllables }
+                val result = LyricsResult.Success(
+                    lines = kugouLines,
+                    isSynced = true,
+                    isWordSynced = hasWordTiming,
+                    plainLyrics = kugouLines.joinToString("\n") { it.text },
+                    isInstrumental = false,
+                    source = "Kugou KRC (Word-Sync)",
+                )
+                cache[cacheKey] = result
+                return@withContext result
+            }
+        } catch (_: Exception) {
+            // Silently fall back to LRCLIB
+        }
+
+        // 3. TERTIARY: Fall back to LRCLIB line-by-line sync
         val lrclibRecord = try {
             lrclibApi.fetchLyrics(title, artist, album, durationSeconds)
         } catch (e: Exception) {
@@ -161,7 +182,7 @@ class LyricsRepository @Inject constructor(
             }
         }
 
-        // 3. TERTIARY: If both fail, return Empty (no lyrics)
+        // 4. QUATERNARY: If all fail, return Empty (no lyrics)
         val empty = LyricsResult.Empty
         cache[cacheKey] = empty
         empty

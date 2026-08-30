@@ -1629,9 +1629,9 @@ private fun FullPlayer(
                                     )
                                     Spacer(Modifier.height(14.dp))
                                     MainControls(state, player, isTranslucent = false)
-                                    }
                                     Spacer(Modifier.height(24.dp))
                                     PlayerUtilityControls(state, player, isTranslucent = false)
+                                }
                                 }
                         }
                     }

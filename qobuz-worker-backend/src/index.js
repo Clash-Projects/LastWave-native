@@ -6,6 +6,7 @@
  */
 
 import { QobuzClient } from "./qobuz/client.js";
+import { AccountPool, createAccountPoolFromEnv } from "./qobuz/pool.js";
 import { Downloader } from "./qobuz/downloader.js";
 import { BundleScraper } from "./qobuz/bundle.js";
 import { 
@@ -22,41 +23,46 @@ import { formatTrackFilename, buildAudioTags } from "./qobuz/metadata.js";
 import { renderDashboardHtml } from "./ui.js";
 import { renderDocsHtml } from "./docs.js";
 
-// Cached client instance for worker execution context
-let cachedClient = null;
+// Cached account pool instance for worker execution context
+let cachedPool = null;
 
 function getClient(env, request) {
   const url = request ? new URL(request.url) : null;
   const reqAuthToken = request?.headers?.get("X-User-Auth-Token") || url?.searchParams?.get("token");
   const reqAppId = request?.headers?.get("X-App-Id") || url?.searchParams?.get("app_id");
 
-  const appId = reqAppId || env.QOBUZ_APP_ID || "798273057";
-  const appSecret = env.QOBUZ_APP_SECRET || null;
-  const userAuthToken = reqAuthToken || env.QOBUZ_USER_AUTH_TOKEN || null;
-  const email = env.QOBUZ_EMAIL || null;
-  const password = env.QOBUZ_PASSWORD || null;
-
   // If request provided distinct auth token or app ID, instantiate per-request client
   if (reqAuthToken || reqAppId) {
     return new QobuzClient({
-      appId,
-      appSecret,
-      userAuthToken,
-      email,
-      password
+      appId: reqAppId || env.QOBUZ_APP_ID || "798273057",
+      appSecret: env.QOBUZ_APP_SECRET || null,
+      userAuthToken: reqAuthToken || env.QOBUZ_USER_AUTH_TOKEN || null,
+      email: env.QOBUZ_EMAIL || null,
+      password: env.QOBUZ_PASSWORD || null
     });
   }
 
-  if (!cachedClient) {
-    cachedClient = new QobuzClient({
-      appId,
-      appSecret,
-      userAuthToken,
-      email,
-      password
-    });
+  // Otherwise, use the load-balanced AccountPool
+  if (!cachedPool) {
+    cachedPool = createAccountPoolFromEnv(env);
   }
-  return cachedClient;
+  return cachedPool;
+}
+
+function getRouteCacheTTL(urlPath) {
+  if (urlPath === "/api/pool/status" || urlPath === "/api/pool" || urlPath.startsWith("/api/auth")) {
+    return 0; // Real-time health & auth never cached
+  }
+  if (urlPath.includes("/url") || urlPath.startsWith("/api/stream") || urlPath.startsWith("/stream")) {
+    return 1800; // 30 minutes for signed audio URLs
+  }
+  if (urlPath.startsWith("/api/search") || urlPath.startsWith("/api/track") || urlPath.startsWith("/api/album") || urlPath.startsWith("/api/artist") || urlPath.startsWith("/api/playlist")) {
+    return 86400; // 24 hours for catalog metadata
+  }
+  if (urlPath === "/docs" || urlPath === "/" || urlPath === "/ui" || urlPath === "/playground") {
+    return 604800; // 7 days for UI / Docs
+  }
+  return 3600; // 1 hour default
 }
 
 export default {
@@ -69,6 +75,28 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     const searchParams = url.searchParams;
+    const isGet = ["GET", "HEAD"].includes(request.method);
+    const ttl = getRouteCacheTTL(path);
+
+    // 1b. Check Cloudflare Edge Cache
+    const cache = (typeof caches !== "undefined" && caches.default) ? caches.default : null;
+    const cacheKey = new Request(url.toString(), request);
+    if (isGet && ttl > 0 && cache) {
+      try {
+        const cachedRes = await cache.match(cacheKey);
+        if (cachedRes) {
+          const newHeaders = new Headers(cachedRes.headers);
+          newHeaders.set("X-Cache", "HIT");
+          return new Response(cachedRes.body, {
+            status: cachedRes.status,
+            statusText: cachedRes.statusText,
+            headers: newHeaders
+          });
+        }
+      } catch (e) {
+        // Fallthrough if cache API error
+      }
+    }
 
     // 2. API Key security check
     const activeApiKey = env.API_AUTH_KEY;
@@ -88,15 +116,55 @@ export default {
         if (!isSameOrigin) {
           const authHeader = request.headers.get("X-API-Key") || request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
           const authParam = searchParams.get("key");
-          if (authHeader !== activeApiKey && authParam !== activeApiKey) {
+          const allowedKeys = activeApiKey.split(",").map(k => k.trim()).filter(Boolean);
+          if (!allowedKeys.includes(authHeader) && !allowedKeys.includes(authParam)) {
             return jsonResponse({ success: false, error: "Unauthorized: Invalid or missing API Key" }, 401);
           }
         }
       }
     }
 
+    let response;
     try {
-      // 3. Dedicated In-House Documentation Endpoint
+      response = await handleWorkerRequest(request, env, url, path, searchParams);
+    } catch (err) {
+      console.error("Worker Execution Error:", err);
+      return jsonResponse({
+        success: false,
+        error: err.message || "Internal Server Error",
+        status: err.status || 500,
+        data: err.data || null
+      }, err.status || 500);
+    }
+
+    // Apply Edge & CDN Cache-Control headers if 200 OK
+    if (response.status === 200 && isGet && ttl > 0) {
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set("Cache-Control", `public, max-age=${ttl}, s-maxage=${ttl * 2}, stale-while-revalidate=86400`);
+      newHeaders.set("CDN-Cache-Control", `max-age=${ttl * 2}`);
+      newHeaders.set("X-Cache", "MISS");
+
+      const finalResponse = new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+      });
+
+      if (cache) {
+        try {
+          ctx?.waitUntil?.(cache.put(cacheKey, finalResponse.clone()));
+        } catch (e) {}
+      }
+
+      return finalResponse;
+    }
+
+    return response;
+  }
+};
+
+async function handleWorkerRequest(request, env, url, path, searchParams) {
+  // 3. Dedicated In-House Documentation Endpoint
       if (path === "/docs") {
         return new Response(renderDocsHtml(url.origin), {
           status: 200,
@@ -166,6 +234,15 @@ export default {
       // Initialize client and downloader
       const client = getClient(env, request);
       const downloader = new Downloader(client);
+
+      // 3b. Account Pool Status & Load Balancer Metrics
+      if (path === "/api/pool/status" || path === "/api/pool") {
+        const poolStatus = client.getPoolStatus ? client.getPoolStatus() : { singleAccountMode: true };
+        return jsonResponse({
+          success: true,
+          pool: poolStatus
+        });
+      }
 
       // 4. Token & Scraper Status
       if (path === "/api/tokens") {
@@ -548,15 +625,4 @@ export default {
 
       // 404 Route Not Found
       return jsonResponse({ success: false, error: `Route not found: ${path}` }, 404);
-
-    } catch (err) {
-      console.error("Worker Execution Error:", err);
-      return jsonResponse({
-        success: false,
-        error: err.message || "Internal Server Error",
-        status: err.status || 500,
-        data: err.data || null
-      }, err.status || 500);
-    }
-  }
-};
+}

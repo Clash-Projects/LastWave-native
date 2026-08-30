@@ -78,7 +78,6 @@ import com.lastwave.app.ui.theme.LocalLiquidGlass
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 
-
 sealed interface LyricsUiState {
     data object Idle : LyricsUiState
     data object Loading : LyricsUiState
@@ -135,98 +134,101 @@ fun LyricsPanel(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-            AnimatedContent(
-                targetState = lyricsState,
-                transitionSpec = {
-                    (fadeIn(tween(ExpressiveMotion.Quick)) +
-                        androidx.compose.animation.scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.96f)) togetherWith
-                        (fadeOut(tween(ExpressiveMotion.Quick)) +
-                            androidx.compose.animation.scaleOut(tween(ExpressiveMotion.Quick), targetScale = 0.96f))
-                },
-                label = "lyricsStateContent",
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-            ) { targetState ->
-                when (targetState) {
-                    is LyricsUiState.Loading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center,
+    Column(
+        modifier = modifier.fillMaxSize(),
+    ) {
+        // Weighted layout only: deliberately no card, background, border, or shadow.
+        AnimatedContent(
+            targetState = lyricsState,
+            transitionSpec = {
+                (fadeIn(tween(ExpressiveMotion.Quick)) +
+                    androidx.compose.animation.scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.96f)) togetherWith
+                    (fadeOut(tween(ExpressiveMotion.Quick)) +
+                        androidx.compose.animation.scaleOut(tween(ExpressiveMotion.Quick), targetScale = 0.96f))
+            },
+            label = "lyricsStateContent",
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+        ) { targetState ->
+            when (targetState) {
+                is LyricsUiState.Loading -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
-                            ) {
-                                ExpressiveInlineLoadingIndicator(
-                                    size = 42.dp,
-                                    strokeWidth = 3.5.dp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                                Text(
-                                    "Finding lyrics…",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                            ExpressiveInlineLoadingIndicator(
+                                size = 42.dp,
+                                strokeWidth = 3.5.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                "Finding lyrics…",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
+                }
 
-                    is LyricsUiState.Empty, is LyricsUiState.Error -> {
+                is LyricsUiState.Empty, is LyricsUiState.Error -> {
+                    EmptyLyricsView(
+                        isInstrumental = false,
+                        onRetry = onRetry,
+                    )
+                }
+
+                is LyricsUiState.Success -> {
+                    if (targetState.isInstrumental) {
+                        EmptyLyricsView(
+                            isInstrumental = true,
+                            onRetry = onRetry,
+                        )
+                    } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
+                        SyncedLyricsList(
+                            lines = targetState.lines,
+                            currentPositionMs = smoothedPositionMs,
+                            isPlaying = state.isPlaying,
+                            onSeek = player::seekTo,
+                            animationStyle = lyricsAnimation,
+                            liquidGlass = liquidGlass,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else if (!targetState.plainLyrics.isNullOrBlank()) {
+                        PlainLyricsView(
+                            plainLyrics = targetState.plainLyrics,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
                         EmptyLyricsView(
                             isInstrumental = false,
                             onRetry = onRetry,
                         )
                     }
+                }
 
-                    is LyricsUiState.Success -> {
-                        if (targetState.isInstrumental) {
-                            EmptyLyricsView(
-                                isInstrumental = true,
-                                onRetry = onRetry,
-                            )
-                        } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
-                            SyncedLyricsList(
-                                lines = targetState.lines,
-                                currentPositionMs = smoothedPositionMs,
-                                isPlaying = state.isPlaying,
-                                onSeek = player::seekTo,
-                                animationStyle = lyricsAnimation,
-                                liquidGlass = liquidGlass,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        } else if (!targetState.plainLyrics.isNullOrBlank()) {
-                            PlainLyricsView(
-                                plainLyrics = targetState.plainLyrics,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        } else {
-                            EmptyLyricsView(
-                                isInstrumental = false,
-                                onRetry = onRetry,
-                            )
-                        }
-                    }
-
-                    is LyricsUiState.Idle -> {
-                        Box(Modifier.fillMaxSize())
-                    }
+                is LyricsUiState.Idle -> {
+                    Box(Modifier.fillMaxSize())
                 }
             }
+        }
 
-            // Transparent playback controls; no separate player-bar container.
-            LyricsPlaybackControls(
-                state = state,
-                currentPositionMs = smoothedPositionMs,
-                totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
-                player = player,
-                wavySeekbarEnabled = wavySeekbarEnabled,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(bottom = 16.dp, top = 6.dp),
-            )
+        // Transparent playback controls; no separate player-bar container.
+        LyricsPlaybackControls(
+            state = state,
+            currentPositionMs = smoothedPositionMs,
+            totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
+            player = player,
+            wavySeekbarEnabled = wavySeekbarEnabled,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 16.dp, top = 6.dp),
+        )
     }
 }
 

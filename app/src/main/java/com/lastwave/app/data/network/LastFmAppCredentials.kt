@@ -12,7 +12,15 @@ package com.lastwave.app.data.network
  * Registered at last.fm/api/account/create under the app name "LastWave".
  */
 object LastFmAppCredentials {
-    const val API_KEY = "2e00eb783c677abeab81e99c99be74e1"
-    const val API_SECRET = "b7e562de696f17fdfde7c448f02b599f"
+    val API_KEY: String
+        get() = com.lastwave.app.data.qobuz.QobuzMusicApi.decodeSecretBytes(
+            com.lastwave.app.BuildConfig.LASTFM_API_KEY_BYTES,
+            com.lastwave.app.BuildConfig.SECRET_MASK_BYTES
+        )
 
+    val API_SECRET: String
+        get() = com.lastwave.app.data.qobuz.QobuzMusicApi.decodeSecretBytes(
+            com.lastwave.app.BuildConfig.LASTFM_API_SECRET_BYTES,
+            com.lastwave.app.BuildConfig.SECRET_MASK_BYTES
+        )
 }

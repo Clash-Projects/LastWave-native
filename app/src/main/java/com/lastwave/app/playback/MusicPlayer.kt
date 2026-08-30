@@ -154,6 +154,7 @@ class MusicPlayer @Inject constructor(
     private val settingsPreferences: SettingsPreferences,
     private val discoverRepository: DiscoverRepository,
     private val nativeAudioEngine: dagger.Lazy<NativeAudioEngine>,
+    private val audioEffectsEngine: AudioEffectsEngine,
     private val applicationScope: CoroutineScope,
 ) {
     private val appContext = context.applicationContext
@@ -256,6 +257,9 @@ class MusicPlayer @Inject constructor(
                 errorRetryCount = 0
                 retryMediaId = player.currentMediaItem?.mediaId
             }
+        }
+        override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            audioEffectsEngine.attach(audioSessionId)
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (mediaItem != null) {
@@ -445,6 +449,7 @@ class MusicPlayer @Inject constructor(
                     .build()
                 val engine = runCatching { nativeAudioEngine.get() }.getOrNull()
                 if (engine?.isAvailable != true) {
+                    audioEffectsEngine.setFallbackRequired(true)
                     return fallbackSink
                 }
                 val enhancedSink = try {
@@ -455,15 +460,19 @@ class MusicPlayer @Inject constructor(
                         .build()
                 } catch (error: Exception) {
                     android.util.Log.w("MusicPlayer", "Enhanced audio sink unavailable; using PCM16", error)
+                    audioEffectsEngine.setFallbackRequired(true)
                     return fallbackSink
                 } catch (error: LinkageError) {
                     android.util.Log.w("MusicPlayer", "Enhanced audio sink linkage failed; using PCM16", error)
+                    audioEffectsEngine.setFallbackRequired(true)
                     return fallbackSink
                 }
+                audioEffectsEngine.setFallbackRequired(false)
                 return NativeProcessingAudioSink(
                     enhancedDelegate = enhancedSink,
                     fallbackDelegate = fallbackSink,
                     processor = NativePcmAudioProcessor(engine),
+                    onPlatformEffectsRequired = audioEffectsEngine::setFallbackRequired,
                 )
             }
         }.apply {
@@ -509,6 +518,7 @@ class MusicPlayer @Inject constructor(
         if (restored) {
             runCatching {
                 refresh(player)
+                audioEffectsEngine.attach(player.audioSessionId)
             }.onFailure {
                 android.util.Log.e("MusicPlayer", "Restored player setup failed", it)
                 _state.value = MusicPlayerState()

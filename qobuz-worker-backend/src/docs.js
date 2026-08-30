@@ -371,7 +371,7 @@ request_sig = md5(r_sig).hexdigest()</div>
         In Android Kotlin, play directly via the 302 stream redirect with zero worker bandwidth overhead:
       </p>
       <div class="code-block">// 1. Direct stream redirect URL
-val streamUrl = "https://qobuz-backend.clashgram.workers.dev/api/stream/$trackId?quality=6"
+val streamUrl = "https://your-backend-url.com/api/stream/$trackId?quality=6"
 
 // 2. Play in ExoPlayer
 val player = ExoPlayer.Builder(context).build()

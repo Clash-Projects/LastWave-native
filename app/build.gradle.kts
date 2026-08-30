@@ -1,3 +1,5 @@
+import java.io.File
+import java.util.Base64
 import java.util.Properties
 
 plugins {
@@ -11,7 +13,35 @@ plugins {
 android {
     namespace = "com.lastwave.app"
     compileSdk = 35
-    ndkVersion = "28.2.13676358"
+
+    val localProps = Properties().apply {
+        val localPropsFile = rootProject.file("local.properties")
+        if (localPropsFile.exists()) {
+            localPropsFile.inputStream().use { load(it) }
+        }
+        val envFile = rootProject.file(".env")
+        if (envFile.exists()) {
+            envFile.readLines().forEach { line ->
+                val trimmed = line.trim()
+                if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+                    val parts = trimmed.split("=", limit = 2)
+                    setProperty(parts[0].trim(), parts[1].trim())
+                }
+            }
+        }
+    }
+
+    fun resolveSecret(vararg keys: String): String {
+        for (key in keys) {
+            val fromEnv = System.getenv(key)
+            if (!fromEnv.isNullOrBlank()) return fromEnv.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+            val fromGradle = project.findProperty(key) as? String
+            if (!fromGradle.isNullOrBlank()) return fromGradle.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+            val fromLocal = localProps.getProperty(key)
+            if (!fromLocal.isNullOrBlank()) return fromLocal.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
+        }
+        return ""
+    }
 
     defaultConfig {
         applicationId = "com.lastwave.app"
@@ -20,40 +50,31 @@ android {
         versionCode = 13
         versionName = "3.3.1"
 
-        val localProps = Properties().apply {
-            val localPropsFile = rootProject.file("local.properties")
-            if (localPropsFile.exists()) {
-                localPropsFile.inputStream().use { load(it) }
-            }
-            val envFile = rootProject.file(".env")
-            if (envFile.exists()) {
-                envFile.readLines().forEach { line ->
-                    val trimmed = line.trim()
-                    if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
-                        val parts = trimmed.split("=", limit = 2)
-                        setProperty(parts[0].trim(), parts[1].trim())
-                    }
-                }
-            }
+        val secretMask = listOf(0x5A, 0x3F, 0x7E, 0x1B, 0x92, 0x4C, 0xA1, 0x6D)
+        fun obfuscateSecret(plainText: String): String {
+            if (plainText.isEmpty()) return "new byte[] {}"
+            val bytes = plainText.toByteArray(Charsets.UTF_8)
+            val obfuscated = bytes.mapIndexed { idx, b -> (b.toInt() xor secretMask[idx % secretMask.size]).toByte() }
+            return "new byte[] { " + obfuscated.joinToString(", ") { "(byte) $it" } + " }"
         }
+        val maskLiteral = "new byte[] { " + secretMask.joinToString(", ") { "(byte) $it" } + " }"
 
-        fun resolveSecret(vararg keys: String): String {
-            for (key in keys) {
-                val fromEnv = System.getenv(key)
-                if (!fromEnv.isNullOrBlank()) return fromEnv.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
-                val fromGradle = project.findProperty(key) as? String
-                if (!fromGradle.isNullOrBlank()) return fromGradle.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
-                val fromLocal = localProps.getProperty(key)
-                if (!fromLocal.isNullOrBlank()) return fromLocal.trim().replace("\r", "").replace("\n", "").replace("\"", "").replace("\\", "")
-            }
-            return ""
-        }
+        val qobuzBackendUrl = resolveSecret("QOBUZ_BACKEND_URL", "QOBUZ_BASE_URL", "BACKEND_BASE_URL")
+        buildConfigField("byte[]", "QOBUZ_BACKEND_URL_BYTES", obfuscateSecret(qobuzBackendUrl))
 
         val qobuzApiKey = resolveSecret("QOBUZ_API_KEY", "QOBUZ_AUTH_KEY", "API_AUTH_KEY")
-        buildConfigField("String", "QOBUZ_API_KEY", "\"$qobuzApiKey\"")
+        buildConfigField("byte[]", "QOBUZ_API_KEY_BYTES", obfuscateSecret(qobuzApiKey))
 
         val lyricsApiKey = resolveSecret("LYRICS_API_KEY", "API_KEY", "LYRICS_AUTH_TOKEN")
-        buildConfigField("String", "LYRICS_API_KEY", "\"$lyricsApiKey\"")
+        buildConfigField("byte[]", "LYRICS_API_KEY_BYTES", obfuscateSecret(lyricsApiKey))
+
+        val lastfmApiKey = resolveSecret("LASTFM_API_KEY").ifBlank { "2e00eb783c677abeab81e99c99be74e1" }
+        buildConfigField("byte[]", "LASTFM_API_KEY_BYTES", obfuscateSecret(lastfmApiKey))
+
+        val lastfmApiSecret = resolveSecret("LASTFM_API_SECRET").ifBlank { "b7e562de696f17fdfde7c448f02b599f" }
+        buildConfigField("byte[]", "LASTFM_API_SECRET_BYTES", obfuscateSecret(lastfmApiSecret))
+
+        buildConfigField("byte[]", "SECRET_MASK_BYTES", maskLiteral)
 
         externalNativeBuild {
             cmake {
@@ -72,12 +93,33 @@ android {
 
     signingConfigs {
         create("release") {
-            val keystoreFile = file("release.keystore")
-            if (keystoreFile.exists()) {
+            val base64Key = resolveSecret("SIGNING_KEY")
+            val storeFilePath = resolveSecret("RELEASE_STORE_FILE")
+            val storePasswordProp = resolveSecret("RELEASE_STORE_PASSWORD", "KEY_STORE_PASSWORD")
+            val keyAliasProp = resolveSecret("RELEASE_KEY_ALIAS", "ALIAS").ifBlank { "release_key" }
+            val keyPasswordProp = resolveSecret("RELEASE_KEY_PASSWORD", "KEY_PASSWORD").ifBlank { storePasswordProp }
+
+            val keystoreFile: File? = when {
+                base64Key.isNotBlank() -> {
+                    try {
+                        val decodedBytes = Base64.getDecoder().decode(base64Key.trim())
+                        val tempKeystore = layout.buildDirectory.file("signing/release.keystore").get().asFile
+                        tempKeystore.parentFile.mkdirs()
+                        tempKeystore.writeBytes(decodedBytes)
+                        tempKeystore
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                storeFilePath.isNotBlank() -> file(storeFilePath)
+                else -> null
+            }
+
+            if (keystoreFile != null && keystoreFile.exists() && storePasswordProp.isNotBlank()) {
                 storeFile = keystoreFile
-                storePassword = "lastwave123"
-                keyAlias = "lastwave"
-                keyPassword = "lastwave123"
+                storePassword = storePasswordProp
+                keyAlias = keyAliasProp
+                keyPassword = keyPasswordProp
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
@@ -204,14 +246,14 @@ dependencies {
 
     // Native in-app audio playback, background service, system media
     // controls, Bluetooth/headset controls and a MediaController-backed UI.
-    implementation("androidx.media3:media3-exoplayer:1.5.0")
+    implementation("androidx.media3:media3-exoplayer:1.2.1")
     implementation("androidx.media:media:1.7.0")
 
     // GPLv3 Media3-matched FFmpeg software decoder (distribution must comply).
     // The renderer factory prefers FFmpeg for every codec it supports so all
     // devices decode through one deterministic, OEM-bug-free path; platform
     // decoders remain as automatic fallbacks.
-    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.5.0+1")
+    implementation("org.jellyfin.media3:media3-ffmpeg-decoder:1.2.1+1")
 
     // Core library desugaring required by the FFmpeg decoder AAR metadata.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
@@ -235,5 +277,3 @@ dependencies {
 tasks.withType<Test> {
     maxHeapSize = "2048m"
 }
-
-
