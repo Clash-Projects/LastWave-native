@@ -59,11 +59,10 @@ fun Modifier.liquidGlassChrome(shape: Shape, enabled: Boolean): Modifier =
         val edgeWidth = 0.8.dp.toPx()
 
         onDrawWithContent {
-            clipPath(path) {
-                drawRect(substrate)
-                drawRect(reflection)
-                drawRect(refraction)
-            }
+            // Use drawPath instead of clipPath to avoid expensive GPU stencil buffer ops
+            drawPath(path = path, color = substrate)
+            drawPath(path = path, brush = reflection)
+            drawPath(path = path, brush = refraction)
             drawContent()
             drawPath(path, frostedEdge, style = Stroke(width = edgeWidth))
         }

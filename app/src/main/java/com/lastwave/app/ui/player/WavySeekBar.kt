@@ -28,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -83,8 +84,7 @@ private fun Color.shiftTonal(lightnessDelta: Float, saturationScale: Float = 1.0
  */
 @Composable
 fun WavySeekBar(
-    positionMs: Long,
-    durationMs: Long,
+    progressState: kotlinx.coroutines.flow.StateFlow<com.lastwave.app.playback.PlaybackProgressState>,
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -96,22 +96,19 @@ fun WavySeekBar(
     val dragging by interactionSource.collectIsDraggedAsState()
     var dragPositionMs by remember(trackKey) { mutableFloatStateOf(0f) }
 
-    val boundedDurationMs = durationMs.coerceAtLeast(0L)
-    val boundedPositionMs = if (boundedDurationMs > 0L) {
-        positionMs.coerceIn(0L, boundedDurationMs)
-    } else {
-        0L
+    val state = progressState.collectAsStateWithLifecycle()
+    
+    val durationState by remember { derivedStateOf { state.value.durationMs.coerceAtLeast(0L) } }
+    val positionState by remember { derivedStateOf { if (durationState > 0L) state.value.positionMs.coerceIn(0L, durationState) else 0L } }
+
+    val shownMs by remember { 
+        derivedStateOf { 
+            if (dragging) dragPositionMs.toLong().coerceIn(0L, durationState) else positionState 
+        } 
     }
-    val shownMs = if (dragging) {
-        dragPositionMs.toLong().coerceIn(0L, boundedDurationMs)
-    } else {
-        boundedPositionMs
-    }
-    val shownFraction = if (boundedDurationMs > 0L) {
-        (shownMs.toDouble() / boundedDurationMs.toDouble()).toFloat().coerceIn(0f, 1f)
-    } else {
-        0f
-    }
+    
+    val timeLabelElapsed by remember { derivedStateOf { formatTime(shownMs.coerceAtLeast(0)) } }
+    val timeLabelRemaining by remember { derivedStateOf { "−${formatTime((durationState - shownMs).coerceAtLeast(0))}" } }
 
     // 100% Material Design 3 Harmonized Theme Colors
     val primaryColor = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary
@@ -205,7 +202,7 @@ fun WavySeekBar(
     val baseTrackThicknessPx = with(density) { 4.5.dp.toPx() }
     val thumbRadiusPx = with(density) { 7.5.dp.toPx() }
     val transitionLengthPx = with(density) { 44.dp.toPx() }
-    val waveSampleStepPx = with(density) { 1.5.dp.toPx() }
+    val waveSampleStepPx = with(density) { 4.5.dp.toPx() } // Optimized for lower end devices (was 1.5)
 
     // Reusable Path caches to eliminate garbage collector allocations during frame drawing
     val pathFilled1 = remember { Path() }
@@ -216,6 +213,24 @@ fun WavySeekBar(
     val pathContour3 = remember { Path() }
     val clipPathBounds = remember { Path() }
 
+    // Pre-allocate color lists to eliminate garbage collection churn during 60fps draw loop
+    val gradient1Colors = remember(layer1Light, layer1Dark, isTranslucent) { listOf(layer1Light.copy(alpha = if (isTranslucent) 0.38f else 0.30f), layer1Dark.copy(alpha = if (isTranslucent) 0.12f else 0.08f)) }
+    val gradient2Colors = remember(layer2Light, layer2Dark, isTranslucent) { listOf(layer2Light.copy(alpha = if (isTranslucent) 0.45f else 0.38f), layer2Dark.copy(alpha = if (isTranslucent) 0.18f else 0.12f)) }
+    val gradient3Colors = remember(layer3Light, layer3Dark, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 0.65f else 0.56f), layer3Dark.copy(alpha = if (isTranslucent) 0.28f else 0.22f)) }
+    val gradient3HorizontalColors = remember(layer3Light, layer3Dark, secondaryColor, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 0.40f else 0.32f), secondaryColor.copy(alpha = if (isTranslucent) 0.28f else 0.22f), layer3Dark.copy(alpha = if (isTranslucent) 0.45f else 0.38f)) }
+    
+    val contour1Colors = remember(layer1Light, layer1Dark, isTranslucent) { listOf(layer1Light.copy(alpha = if (isTranslucent) 0.24f else 0.18f), layer1Dark.copy(alpha = if (isTranslucent) 0.16f else 0.12f)) }
+    val contour2Colors = remember(layer2Light, layer2Dark, isTranslucent) { listOf(layer2Dark.copy(alpha = if (isTranslucent) 0.32f else 0.24f), layer2Light.copy(alpha = if (isTranslucent) 0.26f else 0.18f)) }
+    val contour3OuterColors = remember(layer3Light, layer3Dark, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 0.42f else 0.32f), layer3Dark.copy(alpha = if (isTranslucent) 0.32f else 0.22f)) }
+    val contour3InnerColors = remember(layer3Light, layer3Dark, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 0.65f else 0.52f), layer3Dark.copy(alpha = if (isTranslucent) 0.52f else 0.40f)) }
+    
+    val crispContour1Colors = remember(layer1Light, layer1Dark, isTranslucent) { listOf(layer1Light.copy(alpha = if (isTranslucent) 0.50f else 0.45f), layer1Dark.copy(alpha = if (isTranslucent) 0.38f else 0.32f)) }
+    val crispContour2Colors = remember(layer2Light, layer2Dark, isTranslucent) { listOf(layer2Dark.copy(alpha = if (isTranslucent) 0.78f else 0.72f), layer2Light.copy(alpha = if (isTranslucent) 0.68f else 0.62f)) }
+    val crispContour3Colors = remember(layer3Light, layer3Dark, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 1.0f else 0.98f), layer3Dark.copy(alpha = if (isTranslucent) 0.95f else 0.92f)) }
+
+    val baselineGlowColors = remember(layer3Light, layer3Dark, isTranslucent) { listOf(layer3Light.copy(alpha = if (isTranslucent) 0.35f else 0.25f), layer3Dark.copy(alpha = if (isTranslucent) 0.25f else 0.18f)) }
+    val baselineCoreColors = remember(layer3Light, layer3Dark) { listOf(layer3Light, layer3Dark) }
+
     Column(modifier = modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
@@ -223,10 +238,16 @@ fun WavySeekBar(
                 .height(50.dp),
         ) {
             Canvas(modifier = Modifier.matchParentSize()) {
+                val currentFraction = if (durationState > 0L) {
+                    (shownMs.toDouble() / durationState.toDouble()).toFloat().coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+                
                 val width = size.width
                 val height = size.height
                 val centerY = height / 2f + 7.dp.toPx()
-                val thumbX = (shownFraction * width).coerceIn(0f, width)
+                val thumbX = (currentFraction * width).coerceIn(0f, width)
                 val halfThickness = baseTrackThicknessPx / 2f
                 val bottomY = centerY + halfThickness
                 val topBaselineY = centerY - halfThickness
@@ -314,10 +335,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathFilled1,
                             brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    layer1Light.copy(alpha = if (isTranslucent) 0.38f else 0.30f),
-                                    layer1Dark.copy(alpha = if (isTranslucent) 0.12f else 0.08f),
-                                ),
+                                colors = gradient1Colors,
                                 startY = topWaveY,
                                 endY = bottomY,
                             ),
@@ -327,10 +345,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathFilled2,
                             brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    layer2Light.copy(alpha = if (isTranslucent) 0.45f else 0.38f),
-                                    layer2Dark.copy(alpha = if (isTranslucent) 0.18f else 0.12f),
-                                ),
+                                colors = gradient2Colors,
                                 startY = topWaveY,
                                 endY = bottomY,
                             ),
@@ -340,10 +355,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathFilled3,
                             brush = Brush.verticalGradient(
-                                colors = listOf(
-                                    layer3Light.copy(alpha = if (isTranslucent) 0.65f else 0.56f),
-                                    layer3Dark.copy(alpha = if (isTranslucent) 0.28f else 0.22f),
-                                ),
+                                colors = gradient3Colors,
                                 startY = topWaveY,
                                 endY = bottomY,
                             ),
@@ -351,11 +363,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathFilled3,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer3Light.copy(alpha = if (isTranslucent) 0.40f else 0.32f),
-                                    secondaryColor.copy(alpha = if (isTranslucent) 0.28f else 0.22f),
-                                    layer3Dark.copy(alpha = if (isTranslucent) 0.45f else 0.38f),
-                                ),
+                                colors = gradient3HorizontalColors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -367,10 +375,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathContour1,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer1Light.copy(alpha = if (isTranslucent) 0.24f else 0.18f),
-                                    layer1Dark.copy(alpha = if (isTranslucent) 0.16f else 0.12f),
-                                ),
+                                colors = contour1Colors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -381,10 +386,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathContour2,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer2Dark.copy(alpha = if (isTranslucent) 0.32f else 0.24f),
-                                    layer2Light.copy(alpha = if (isTranslucent) 0.26f else 0.18f),
-                                ),
+                                colors = contour2Colors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -395,10 +397,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathContour3,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer3Light.copy(alpha = if (isTranslucent) 0.42f else 0.32f),
-                                    layer3Dark.copy(alpha = if (isTranslucent) 0.32f else 0.22f),
-                                ),
+                                colors = contour3OuterColors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -409,10 +408,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathContour3,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer3Light.copy(alpha = if (isTranslucent) 0.65f else 0.52f),
-                                    layer3Dark.copy(alpha = if (isTranslucent) 0.52f else 0.40f),
-                                ),
+                                colors = contour3InnerColors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -425,10 +421,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathContour1,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer1Light.copy(alpha = if (isTranslucent) 0.50f else 0.45f),
-                                    layer1Dark.copy(alpha = if (isTranslucent) 0.38f else 0.32f),
-                                ),
+                                colors = crispContour1Colors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -439,10 +432,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathContour2,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer2Dark.copy(alpha = if (isTranslucent) 0.78f else 0.72f),
-                                    layer2Light.copy(alpha = if (isTranslucent) 0.68f else 0.62f),
-                                ),
+                                colors = crispContour2Colors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -453,10 +443,7 @@ fun WavySeekBar(
                         drawPath(
                             path = pathContour3,
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer3Light.copy(alpha = if (isTranslucent) 1.0f else 0.98f),
-                                    layer3Dark.copy(alpha = if (isTranslucent) 0.95f else 0.92f),
-                                ),
+                                colors = crispContour3Colors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -466,10 +453,7 @@ fun WavySeekBar(
                         // 3. Baseline Bar Subtle Glow & Crisp Core Bar
                         drawLine(
                             brush = Brush.horizontalGradient(
-                                colors = listOf(
-                                    layer3Light.copy(alpha = if (isTranslucent) 0.35f else 0.25f),
-                                    layer3Dark.copy(alpha = if (isTranslucent) 0.25f else 0.18f),
-                                ),
+                                colors = baselineGlowColors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -480,7 +464,7 @@ fun WavySeekBar(
                         )
                         drawLine(
                             brush = Brush.horizontalGradient(
-                                colors = listOf(layer3Light, layer3Dark),
+                                colors = baselineCoreColors,
                                 startX = 0f,
                                 endX = activeWidth,
                             ),
@@ -493,7 +477,7 @@ fun WavySeekBar(
                 }
 
                 // 4. Leading Thumb Indicator (At current playing position)
-                if (boundedDurationMs > 0) {
+                if (durationState > 0) {
                     // Soft glow halo
                     drawCircle(
                         color = thumbColor.copy(alpha = 0.28f),
@@ -513,10 +497,10 @@ fun WavySeekBar(
                 value = shownMs.toFloat(),
                 onValueChange = { dragPositionMs = it },
                 onValueChangeFinished = {
-                    onSeek(dragPositionMs.toLong().coerceIn(0L, boundedDurationMs))
+                    onSeek(dragPositionMs.toLong().coerceIn(0L, durationState))
                 },
-                valueRange = 0f..boundedDurationMs.coerceAtLeast(1L).toFloat(),
-                enabled = boundedDurationMs > 0L,
+                valueRange = 0f..durationState.coerceAtLeast(1L).toFloat(),
+                enabled = durationState > 0L,
                 interactionSource = interactionSource,
                 modifier = Modifier
                     .matchParentSize()
@@ -535,36 +519,18 @@ fun WavySeekBar(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = formatTime(shownMs),
+                    text = timeLabelElapsed,
                     style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
                     color = textColor,
                 )
                 Text(
-                    text = "−${formatTime((boundedDurationMs - shownMs).coerceAtLeast(0))}",
+                    text = timeLabelRemaining,
                     style = if (isTranslucent) MaterialTheme.typography.labelSmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium) else MaterialTheme.typography.labelMedium,
                     color = textColor,
                 )
             }
         }
     }
-}
-
-@Composable
-fun WavySeekBar(
-    state: MusicPlayerState,
-    onSeek: (Long) -> Unit,
-    modifier: Modifier = Modifier,
-    isTranslucent: Boolean = false,
-) {
-    WavySeekBar(
-        positionMs = state.positionMs,
-        durationMs = state.durationMs,
-        isPlaying = state.isPlaying,
-        onSeek = onSeek,
-        modifier = modifier,
-        isTranslucent = isTranslucent,
-        trackKey = state.current?.let { it.videoId ?: "${it.artist}|${it.title}" },
-    )
 }
 
 /**
@@ -574,23 +540,17 @@ fun WavySeekBar(
  */
 @Composable
 fun MiniWavyProgress(
-    progressState: kotlinx.coroutines.flow.StateFlow<PlaybackProgressState>,
+    progressState: kotlinx.coroutines.flow.StateFlow<com.lastwave.app.playback.PlaybackProgressState>,
     isPlaying: Boolean,
     onSeek: ((Long) -> Unit)? = null,
     wavyEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    val state by progressState.collectAsStateWithLifecycle()
-    val boundedDurationMs = state.durationMs.coerceAtLeast(0L)
+    val state = progressState.collectAsStateWithLifecycle()
     var isDragging by remember { mutableStateOf(false) }
     var dragFraction by remember { mutableFloatStateOf(0f) }
 
-    val boundedPositionMs = if (boundedDurationMs > 0L) state.positionMs.coerceIn(0L, boundedDurationMs) else 0L
-    val progressFraction = if (isDragging) {
-        dragFraction
-    } else if (boundedDurationMs > 0L) {
-        (boundedPositionMs.toDouble() / boundedDurationMs.toDouble()).toFloat().coerceIn(0f, 1f)
-    } else 0f
+    val durationState by remember { derivedStateOf { state.value.durationMs.coerceAtLeast(0L) } }
 
     val primaryColor = MaterialTheme.colorScheme.primary
     val secondaryColor = MaterialTheme.colorScheme.secondary
@@ -634,7 +594,7 @@ fun MiniWavyProgress(
     )
 
     val ampMulti by animateFloatAsState(
-        targetValue = if (isPlaying && boundedDurationMs > 0L) 1f else 0f,
+        targetValue = if (isPlaying && durationState > 0L) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow),
         label = "MiniAmp",
     )
@@ -651,28 +611,20 @@ fun MiniWavyProgress(
         modifier = modifier
             .fillMaxWidth()
             .height(18.dp)
-            .pointerInput(boundedDurationMs, onSeek) {
-                if (boundedDurationMs <= 0L || onSeek == null) return@pointerInput
+            .pointerInput(Unit) {
                 awaitEachGesture {
-                    // Grab the DOWN event. requireUnconsumed=false means we handle
-                    // it even if the parent already saw it.
-                    val down = awaitFirstDown(requireUnconsumed = false)
+                    if (durationState <= 0L || onSeek == null) return@awaitEachGesture
+                    val down = awaitFirstDown()
                     isDragging = true
                     dragFraction = (down.position.x / size.width).coerceIn(0f, 1f)
 
-                    // Track every subsequent pointer event until the finger lifts.
-                    // Consuming each change here (in the Main pass, child-first) means
-                    // the parent's detectDragGestures / awaitTouchSlopOrCancellation
-                    // sees only consumed events and cancels — so the parent cannot
-                    // steal the drag from the seekbar.
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
                         change.consume()
                         dragFraction = (change.position.x / size.width).coerceIn(0f, 1f)
                         if (!change.pressed) {
-                            // Finger lifted — commit the seek (works for both tap and drag)
-                            onSeek((dragFraction * boundedDurationMs).toLong())
+                            onSeek((dragFraction * durationState).toLong())
                             break
                         }
                     }
@@ -684,6 +636,15 @@ fun MiniWavyProgress(
         Canvas(
             modifier = Modifier.fillMaxSize(),
         ) {
+            val positionMs = state.value.positionMs
+            val durationMs = state.value.durationMs.coerceAtLeast(0L)
+            val boundedPositionMs = if (durationMs > 0L) positionMs.coerceIn(0L, durationMs) else 0L
+            val progressFraction = if (isDragging) {
+                dragFraction
+            } else if (durationMs > 0L) {
+                (boundedPositionMs.toDouble() / durationMs.toDouble()).toFloat().coerceIn(0f, 1f)
+            } else 0f
+            
             val width = size.width
             val height = size.height
             val baseTrackThicknessPx = 2.5.dp.toPx()
@@ -754,7 +715,7 @@ fun MiniWavyProgress(
                     val currPhase3 = if (isPlaying) phase3 else 0f
 
                     val transitionLengthPx = 28.dp.toPx()
-                    val stepPx = 1.5.dp.toPx()
+                    val stepPx = 4.0.dp.toPx() // Optimized for lower end devices (was 1.5)
 
                     fun populateMiniWave(
                         filled: Path,

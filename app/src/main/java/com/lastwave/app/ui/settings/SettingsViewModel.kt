@@ -255,6 +255,10 @@ class SettingsViewModel @Inject constructor(
     fun setWavySeekbarEnabled(enabled: Boolean) = launchSettingsAction("update seekbar style") {
         settingsPreferences.setWavySeekbarEnabled(enabled)
     }
+
+    fun setPerformanceModeEnabled(enabled: Boolean) = launchSettingsAction("update performance mode") {
+        settingsPreferences.setPerformanceModeEnabled(enabled)
+    }
     fun setDownloadLyrics(enabled: Boolean) = launchSettingsAction("update download lyrics setting") {
         settingsPreferences.setDownloadLyrics(enabled)
     }

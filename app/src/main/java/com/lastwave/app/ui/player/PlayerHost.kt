@@ -400,7 +400,7 @@ fun PlayerHost(
                     state = state,
                     progressState = viewModel.progressState,
                     isFavorite = miniIsFavorite,
-                    wavySeekbarEnabled = settings.wavySeekbarEnabled,
+                    wavySeekbarEnabled = settings.effectiveWavySeekbar,
                     onToggleFavorite = { miniTrack?.let { viewModel.toggleFavorite(it) } },
                     onExpand = { expanded = true },
                     onToggle = viewModel.player::togglePlayPause,
@@ -488,7 +488,7 @@ private fun ExpandedPlayer(
         player = viewModel.player,
         lyricsState = lyricsState,
         lyricsAnimation = settings.lyricsAnimation,
-        wavySeekbarEnabled = settings.wavySeekbarEnabled,
+        wavySeekbarEnabled = settings.effectiveWavySeekbar,
         currentTab = currentTab,
         onTabChange = onTabChange,
         onRetryLyrics = onRetryLyrics,
@@ -1768,12 +1768,9 @@ private fun SeekBar(
     onSeek: (Long) -> Unit,
     isTranslucent: Boolean = false,
 ) {
-    val progress by progressState.collectAsStateWithLifecycle()
-
     if (wavyEnabled) {
         WavySeekBar(
-            positionMs = progress.positionMs,
-            durationMs = progress.durationMs,
+            progressState = progressState,
             isPlaying = isPlaying,
             onSeek = onSeek,
             isTranslucent = isTranslucent,
@@ -1781,6 +1778,8 @@ private fun SeekBar(
         )
         return
     }
+
+    val progress by progressState.collectAsStateWithLifecycle()
 
     var dragging by remember(trackKey) { mutableStateOf(false) }
     var dragFraction by remember(trackKey) { mutableFloatStateOf(0f) }

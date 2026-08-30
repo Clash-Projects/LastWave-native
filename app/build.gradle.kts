@@ -124,7 +124,10 @@ android {
                 enableV2Signing = true
                 enableV3Signing = true
             } else {
-                initWith(getByName("debug"))
+                val debugKeystore = file(System.getProperty("user.home") + "/.android/debug.keystore")
+                if (debugKeystore.exists()) {
+                    initWith(getByName("debug"))
+                }
             }
         }
     }

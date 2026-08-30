@@ -445,7 +445,6 @@ class MusicPlayer @Inject constructor(
                 val fallbackSink = DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(false)
                     .setEnableAudioTrackPlaybackParams(false)
-                    .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
                     .build()
                 val engine = runCatching { nativeAudioEngine.get() }.getOrNull()
                 if (engine?.isAvailable != true) {
@@ -456,7 +455,6 @@ class MusicPlayer @Inject constructor(
                     DefaultAudioSink.Builder(context)
                         .setEnableFloatOutput(true)
                         .setEnableAudioTrackPlaybackParams(false)
-                        .setAudioCapabilities(AudioCapabilities.getCapabilities(context))
                         .build()
                 } catch (error: Exception) {
                     android.util.Log.w("MusicPlayer", "Enhanced audio sink unavailable; using PCM16", error)
@@ -1418,8 +1416,10 @@ class MusicPlayer @Inject constructor(
         val previous = _state.value
         val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toPlayableTrack() }
         val current = player.currentMediaItem?.toPlayableTrack()
-        val sameTrack = current?.let { it.title == previous.current?.title && it.artist == previous.current?.artist } == true ||
-            (current?.videoId != null && current.videoId == previous.current?.videoId)
+        val sameTrack = current != null && previous.current != null && (
+            (current.title == previous.current.title && current.artist == previous.current.artist) ||
+            (current.videoId != null && current.videoId == previous.current.videoId)
+        )
         val isBuffering = player.playbackState == Player.STATE_BUFFERING ||
             (player.playWhenReady && player.playbackState == Player.STATE_IDLE && player.mediaItemCount > 0)
         val dur = player.duration.takeIf { it > 0 } ?: 0L

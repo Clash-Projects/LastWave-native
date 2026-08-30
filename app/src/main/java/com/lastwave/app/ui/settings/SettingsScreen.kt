@@ -55,6 +55,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Lyrics
@@ -553,15 +554,20 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Experimental")
-                    SettingsGroup(rowCount = 5) { index, position ->
+                    SettingsGroup(rowCount = 6) { index, position ->
                         when (index) {
                             0 -> SettingsToggleCard(
                                 icon = Icons.Filled.BubbleChart,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = "Liquid Glass",
-                                subtitle = "iOS-style translucent materials across the app",
-                                checked = theme?.liquidGlass ?: false,
+                                subtitle = if (misc.performanceModeEnabled) {
+                                    "Disabled while Performance Mode is active"
+                                } else {
+                                    "iOS-style translucent materials across the app"
+                                },
+                                checked = if (misc.performanceModeEnabled) false else (theme?.liquidGlass ?: false),
+                                enabled = !misc.performanceModeEnabled,
                                 onCheckedChange = viewModel::setLiquidGlass,
                                 position = position,
                             )
@@ -592,12 +598,15 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = "Wavy Seekbar",
-                                subtitle = if (misc.wavySeekbarEnabled) {
+                                subtitle = if (misc.performanceModeEnabled) {
+                                    "Disabled while Performance Mode is active"
+                                } else if (misc.wavySeekbarEnabled) {
                                     "Multi-layer fluid wavy progress slider"
                                 } else {
                                     "Classic standard progress slider"
                                 },
-                                checked = misc.wavySeekbarEnabled,
+                                checked = if (misc.performanceModeEnabled) false else misc.wavySeekbarEnabled,
+                                enabled = !misc.performanceModeEnabled,
                                 onCheckedChange = viewModel::setWavySeekbarEnabled,
                                 position = position,
                             )
@@ -615,7 +624,21 @@ fun SettingsScreen(
                                 onCheckedChange = viewModel::setStudioMasterClarity,
                                 position = position,
                             )
-                                                    }
+                            5 -> SettingsToggleCard(
+                                icon = Icons.Filled.Bolt,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Performance Mode",
+                                subtitle = if (misc.performanceModeEnabled) {
+                                    "Active \u2022 Disables Liquid Glass & wavy seekbar for smooth framerates"
+                                } else {
+                                    "Optimized for smooth framerates on lower-end devices"
+                                },
+                                checked = misc.performanceModeEnabled,
+                                onCheckedChange = viewModel::setPerformanceModeEnabled,
+                                position = position,
+                            )
+                        }
                     }
                 }
             }
@@ -1429,6 +1452,7 @@ private fun SettingsToggleCard(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     position: GroupPosition = GroupPosition.SINGLE,
+    enabled: Boolean = true,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val scale = rememberPressScale(interactionSource)
@@ -1436,9 +1460,13 @@ private fun SettingsToggleCard(
     val liquidGlass = LocalLiquidGlass.current
 
     Card(
-        onClick = { onCheckedChange(!checked) },
+        onClick = { if (enabled) onCheckedChange(!checked) },
+        enabled = enabled,
         shape = shape,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+        ),
         // Pinned at 0dp: Material3's Card blends an extra primary-tinted
         // alpha layer on top of containerColor whenever tonalElevation is
         // above 0dp (surfaceColorAtElevation) — with a Switch already
@@ -1449,21 +1477,32 @@ private fun SettingsToggleCard(
         interactionSource = interactionSource,
         modifier = Modifier
             .fillMaxWidth()
-            .scale(scale)
+            .scale(if (enabled) scale else 1f)
             .liquidGlassChrome(shape, liquidGlass),
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconBadge(icon, iconContainer, iconTint)
+            IconBadge(
+                icon,
+                if (enabled) iconContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                if (enabled) iconTint else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                )
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
                     maxLines = 2,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
@@ -1471,7 +1510,8 @@ private fun SettingsToggleCard(
             Spacer(Modifier.width(8.dp))
             Switch(
                 checked = checked,
-                onCheckedChange = onCheckedChange,
+                onCheckedChange = if (enabled) onCheckedChange else null,
+                enabled = enabled,
                 thumbContent = if (checked) {
                     {
                         Icon(

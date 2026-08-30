@@ -810,8 +810,7 @@ private fun LyricsPlaybackControls(
 
         if (wavySeekbarEnabled) {
             WavySeekBar(
-                positionMs = currentPositionMs,
-                durationMs = totalDurationMs,
+                progressState = player.progressState,
                 isPlaying = state.isPlaying,
                 onSeek = player::seekTo,
                 isTranslucent = false,

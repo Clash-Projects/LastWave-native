@@ -315,8 +315,8 @@ fun HomeScreen(
                         },
                         contentType = { _, row ->
                             when (row) {
-                                is HomeRow.DateHeader -> "date"
-                                is HomeRow.Track -> "track"
+                                is HomeRow.DateHeader -> 0
+                                is HomeRow.Track -> 1
                             }
                         },
                     ) { rowIndex, row ->

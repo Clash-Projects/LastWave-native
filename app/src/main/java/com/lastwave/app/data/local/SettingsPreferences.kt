@@ -70,7 +70,13 @@ data class MiscSettings(
     val streamCacheSongLimit: Int = 50,
     /** When true, automatically syncs liked/favorited songs to YouTube Music. */
     val autoSyncLikedSongsToYouTube: Boolean = false,
-)
+    /** When true, optimizes the app for low-end devices by disabling expensive rendering. */
+    val performanceModeEnabled: Boolean = false,
+) {
+    /** Effective wavy seekbar status: returns true only if enabled and performance mode is OFF. */
+    val effectiveWavySeekbar: Boolean
+        get() = wavySeekbarEnabled && !performanceModeEnabled
+}
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
  *  or SessionPreferences semantically — shares the app's single DataStore. */
@@ -93,6 +99,7 @@ class SettingsPreferences @Inject constructor(
         val STREAM_CACHE_ENABLED = booleanPreferencesKey("lw_stream_cache_enabled")
         val STREAM_CACHE_SONG_LIMIT = intPreferencesKey("lw_stream_cache_song_limit")
         val AUTO_SYNC_LIKED_TO_YOUTUBE = booleanPreferencesKey("lw_auto_sync_liked_to_youtube")
+        val PERFORMANCE_MODE_ENABLED = booleanPreferencesKey("lw_performance_mode_enabled")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data
@@ -113,6 +120,7 @@ class SettingsPreferences @Inject constructor(
                 streamCacheEnabled = p.readSafely(Keys.STREAM_CACHE_ENABLED) ?: true,
                 streamCacheSongLimit = p.readSafely(Keys.STREAM_CACHE_SONG_LIMIT) ?: 50,
                 autoSyncLikedSongsToYouTube = p.readSafely(Keys.AUTO_SYNC_LIKED_TO_YOUTUBE) ?: false,
+                performanceModeEnabled = p.readSafely(Keys.PERFORMANCE_MODE_ENABLED) ?: false,
             )
         }
 
@@ -166,6 +174,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setAutoSyncLikedSongsToYouTube(enabled: Boolean) {
         dataStore.edit { it[Keys.AUTO_SYNC_LIKED_TO_YOUTUBE] = enabled }
+    }
+
+    suspend fun setPerformanceModeEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.PERFORMANCE_MODE_ENABLED] = enabled }
     }
 
     suspend fun toggleFriendPinned(username: String) {
