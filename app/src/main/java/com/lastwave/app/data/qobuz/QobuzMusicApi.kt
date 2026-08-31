@@ -1,7 +1,10 @@
 package com.lastwave.app.data.qobuz
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -99,6 +102,9 @@ class QobuzMusicApi @Inject constructor(
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
+    private val resolutionClient = client.newBuilder()
+        .callTimeout(4, TimeUnit.SECONDS)
+        .build()
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -192,10 +198,11 @@ class QobuzMusicApi @Inject constructor(
             urlBuilder.addQueryParameter("quality", preferredQuality.toString())
             urlBuilder.addQueryParameter("fallback", "true")
 
+            currentCoroutineContext().ensureActive()
             val requestBuilder = Request.Builder().url(urlBuilder.build()).get()
             if (BACKEND_API_KEY.isNotBlank()) requestBuilder.addHeader("X-API-Key", BACKEND_API_KEY)
 
-            client.newCall(requestBuilder.build()).execute().use { response ->
+            resolutionClient.newCall(requestBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful) {
                     Log.w(TAG, "Qobuz stream request failed with HTTP ${response.code}")
                     return@withContext null
@@ -227,6 +234,8 @@ class QobuzMusicApi @Inject constructor(
                     trackId = candidate.id,
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.d(TAG, "Qobuz resolution failed gracefully: ${e.message}")
             null
@@ -253,6 +262,7 @@ class QobuzMusicApi @Inject constructor(
         ).distinct()
 
         for (query in queries) {
+            currentCoroutineContext().ensureActive()
             val urlBuilder = "$BACKEND_BASE_URL/api/search".toHttpUrlOrNull()?.newBuilder() ?: continue
             urlBuilder.addQueryParameter("q", query)
             urlBuilder.addQueryParameter("type", "track")
@@ -264,7 +274,7 @@ class QobuzMusicApi @Inject constructor(
             }
 
             val items = try {
-                client.newCall(reqBuilder.build()).execute().use { response ->
+                resolutionClient.newCall(reqBuilder.build()).execute().use { response ->
                     if (!response.isSuccessful) {
                         Log.w(TAG, "Qobuz search failed with HTTP ${response.code}")
                         return@use emptyList<QobuzTrackItem>()

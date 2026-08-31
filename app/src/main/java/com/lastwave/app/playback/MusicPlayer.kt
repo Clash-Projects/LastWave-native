@@ -65,6 +65,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -318,9 +319,10 @@ class MusicPlayer @Inject constructor(
                 return
             }
 
-            // Invalidate stale cache on 403 or network failure
-            if (!videoId.isNullOrBlank()) {
-                innerTube.invalidateCache(videoId)
+            if (failedQobuzStream && failedMediaId != null) {
+                qobuzBypassMediaIds += failedMediaId
+            } else if (!videoId.isNullOrBlank()) {
+                innerTube.reportPlaybackFailure(videoId)
             }
 
             val confirmedWithoutRetry = isExplicitlyUnplayableFailure(error) ||
@@ -350,8 +352,8 @@ class MusicPlayer @Inject constructor(
                         )
                         publishResolvedQuality(stream)
                         val updated = currentTrack.copy(
-                            playbackUrl = stream.url,
-                            playbackMimeType = stream.mimeType,
+                            playbackUrl = null,
+                            playbackMimeType = null,
                         )
                         // The watchdog may have skipped this item while its
                         // retry was resolving. Never replace the new track
@@ -435,7 +437,9 @@ class MusicPlayer @Inject constructor(
                     }
                     resolved
                 }
-                dataSpec.withUri(Uri.parse(stream.url))
+                dataSpec
+                    .withUri(Uri.parse(stream.url))
+                    .withRequestHeaders(stream.requestHeaders)
             }
         }
         val loadControl = DefaultLoadControl.Builder()
@@ -1050,6 +1054,7 @@ class MusicPlayer @Inject constructor(
                 .setPosition(0)
                 .setLength(NEXT_TRACK_PREFETCH_BYTES)
                 .build()
+                .withRequestHeaders(resolved.requestHeaders)
 
             runCatching {
                 val cacheWriter = CacheWriter(
@@ -1146,13 +1151,18 @@ class MusicPlayer @Inject constructor(
         val failedTrack = player.currentMediaItem?.toPlayableTrack() ?: return
         if (failedTrack.playbackUrl != null || failedIndex == C.INDEX_UNSET) return
         val resumePositionMs = player.currentPosition.coerceAtLeast(0L)
-        if (_state.value.isQobuz) qobuzBypassMediaIds += expectedMediaId
+        val failedQobuzStream = _state.value.isQobuz
+        if (failedQobuzStream) qobuzBypassMediaIds += expectedMediaId
 
         preloadJob?.cancel()
         player.stop()
         bufferingRecoveryJob = applicationScope.launch(Dispatchers.Main.immediate) {
             withContext(Dispatchers.IO) {
-                failedTrack.videoId?.takeIf(String::isNotBlank)?.let(innerTube::invalidateCache)
+                if (!failedQobuzStream) {
+                    failedTrack.videoId
+                        ?.takeIf(String::isNotBlank)
+                        ?.let(innerTube::reportPlaybackFailure)
+                }
                 runCatching {
                     mediaCache.keys.toList().forEach(mediaCache::removeResource)
                 }
@@ -1230,6 +1240,7 @@ class MusicPlayer @Inject constructor(
         val mimeType: String,
         val bitrateKbps: Int?,
         val audioCodec: String?,
+        val requestHeaders: Map<String, String> = emptyMap(),
         val isQobuz: Boolean = false,
         val bitDepth: Int? = null,
         val samplingRateKHz: Double? = null,
@@ -1241,40 +1252,65 @@ class MusicPlayer @Inject constructor(
         allowQobuz: Boolean = true,
     ): ResolvedStream = withContext(Dispatchers.IO) {
         val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
-        if (allowQobuz) {
-            // Keep Qobuz primary without making an unavailable catalog entry
-            // visibly delay the YouTube Music fallback.
-            val qobuzStream = withTimeoutOrNull(QOBUZ_RESOLVE_TIMEOUT_MS) {
-                runCatching {
-                    qobuzMusicApi.resolveStream(
-                        title = track.title,
-                        artist = track.artist,
-                        expectedAlbum = track.album,
-                        preferredQuality = misc.qobuzQuality,
-                    )
-                }.getOrNull()
-            }
+        if (!allowQobuz) return@withContext resolveYoutubeTrackAudioStream(track, videoId)
 
-            if (qobuzStream != null) {
-                val codec = when {
-                    qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
-                    qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS"
-                    qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "MP3 320k"
-                    else -> "LOSSLESS"
-                }
-                return@withContext ResolvedStream(
-                    url = qobuzStream.url,
-                    mimeType = qobuzStream.mimeType,
-                    bitrateKbps = qobuzStream.bitrateKbps,
-                    audioCodec = codec,
-                    isQobuz = true,
-                    bitDepth = qobuzStream.bitDepth.takeIf { it > 0 },
-                    samplingRateKHz = qobuzStream.samplingRate.takeIf { it > 0 },
-                )
+        // Resolve both sources together, but always await Qobuz first. If it
+        // fails or times out, the YouTube result is already being prepared.
+        supervisorScope {
+            val qobuzDeferred = async(Dispatchers.IO) {
+                resolveQobuzTrackAudioStream(track, misc)
+            }
+            val youtubeDeferred = async(Dispatchers.IO) {
+                resolveYoutubeTrackAudioStream(track, videoId)
+            }
+            try {
+                qobuzDeferred.await() ?: youtubeDeferred.await()
+            } finally {
+                qobuzDeferred.cancel()
+                youtubeDeferred.cancel()
             }
         }
+    }
 
-        // Fallback to YouTube Music
+    private suspend fun resolveQobuzTrackAudioStream(
+        track: PlayableTrack,
+        misc: MiscSettings,
+    ): ResolvedStream? {
+        val qobuzStream = withTimeoutOrNull(QOBUZ_RESOLVE_TIMEOUT_MS) {
+            try {
+                qobuzMusicApi.resolveStream(
+                    title = track.title,
+                    artist = track.artist,
+                    expectedAlbum = track.album,
+                    preferredQuality = misc.qobuzQuality,
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                null
+            }
+        } ?: return null
+        val codec = when {
+            qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
+            qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS"
+            qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "MP3 320k"
+            else -> "LOSSLESS"
+        }
+        return ResolvedStream(
+            url = qobuzStream.url,
+            mimeType = qobuzStream.mimeType,
+            bitrateKbps = qobuzStream.bitrateKbps,
+            audioCodec = codec,
+            isQobuz = true,
+            bitDepth = qobuzStream.bitDepth.takeIf { it > 0 },
+            samplingRateKHz = qobuzStream.samplingRate.takeIf { it > 0 },
+        )
+    }
+
+    private suspend fun resolveYoutubeTrackAudioStream(
+        track: PlayableTrack,
+        videoId: String?,
+    ): ResolvedStream {
         val targetVideoId = videoId ?: run {
             val match = try {
                 kotlinx.coroutines.withTimeout(3_500L) {
@@ -1294,11 +1330,12 @@ class MusicPlayer @Inject constructor(
             rawCodec.contains("M4A") || rawCodec.contains("MP4") || rawCodec.contains("AAC") -> "AAC"
             else -> rawCodec
         }
-        ResolvedStream(
+        return ResolvedStream(
             url = ytStream.url,
             mimeType = ytStream.mimeType.orEmpty(),
             bitrateKbps = trueBitrate,
             audioCodec = codec,
+            requestHeaders = ytStream.requestHeaders,
             isQobuz = false,
         )
     }

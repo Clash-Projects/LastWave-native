@@ -7,6 +7,8 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -22,6 +24,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -29,6 +32,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.text.Normalizer
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,6 +62,8 @@ data class YouTubeAudioStream(
     val url: String,
     val mimeType: String?,
     val bitrate: Int,
+    val requestHeaders: Map<String, String> = emptyMap(),
+    val expiresAtEpochMs: Long? = null,
 )
 
 data class YtMusicTasteSignals(
@@ -135,13 +142,32 @@ class InnerTubeMusicApi @Inject constructor(
     private val activeStreamRequests = ConcurrentHashMap<String, Deferred<YouTubeAudioStream>>()
     private val apiScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val failedClientsUntil = ConcurrentHashMap<String, Long>()
+    private val streamSources = ConcurrentHashMap<String, String>()
     @Volatile private var webConfig: WebConfig? = null
 
     fun invalidateCache(videoId: String) {
         streamCache.remove(videoId)
+        streamSources.remove(videoId)
         activeStreamRequests.remove(videoId)?.cancel()
         matchCache.values.removeIf { it.videoId == videoId }
         streamExtractor.invalidateCache(videoId)
+    }
+
+    /** Marks the exact extractor/client that produced a rejected URL, then
+     * clears its state so the next attempt cannot pick the same stale result. */
+    fun reportPlaybackFailure(videoId: String) {
+        val source = streamSources.remove(videoId)
+        if (source != null && source != NEWPIPE_SOURCE) {
+            failedClientsUntil[clientFailureKey(videoId, source)] =
+                System.currentTimeMillis() + CLIENT_COOLDOWN_MS
+        }
+        streamCache.remove(videoId)
+        activeStreamRequests.remove(videoId)?.cancel()
+        if (source == NEWPIPE_SOURCE) {
+            streamExtractor.invalidatePlayerState(videoId)
+        } else {
+            streamExtractor.invalidateCache(videoId)
+        }
     }
 
     /** Proactively resolves and seeds the in-memory stream cache in the background */
@@ -1122,30 +1148,30 @@ class InnerTubeMusicApi @Inject constructor(
         null
     }
 
-    /** Resolves a fresh, expiring googlevideo URL immediately before use with PO Token support and in-flight deduplication. */
+    /** Resolves and byte-probes an expiring googlevideo URL immediately before use. */
     suspend fun resolveAudioStream(videoId: String): YouTubeAudioStream = withContext(Dispatchers.IO) {
         require(videoId.isNotBlank()) { "Missing YouTube Music video id" }
         val now = System.currentTimeMillis()
 
-        // 1. In-memory cache hit (0ms)
-        streamCache[videoId]?.let { (cachedAt, stream) ->
-            if (now - cachedAt < 4 * 60 * 60 * 1000L) {
+        streamCache[videoId]?.let { cached ->
+            val (cachedAt, stream) = cached
+            if (stream.isFresh(cachedAt, now) && probeStream(stream)) {
                 return@withContext stream
             }
+            reportPlaybackFailure(videoId)
         }
 
-        // 2. In-flight request deduplication
         val deferred = activeStreamRequests.computeIfAbsent(videoId) { id ->
             apiScope.async {
                 resolveAudioStreamInternal(id)
+            }.also { request ->
+                request.invokeOnCompletion {
+                    activeStreamRequests.remove(id, request)
+                }
             }
         }
 
-        try {
-            deferred.await()
-        } finally {
-            activeStreamRequests.remove(videoId)
-        }
+        deferred.await()
     }
 
     /** Resolves stream specifically optimized for download compatibility (M4A AAC container). */
@@ -1158,113 +1184,99 @@ class InnerTubeMusicApi @Inject constructor(
 
     private suspend fun resolveAudioStreamInternal(videoId: String): YouTubeAudioStream = kotlinx.coroutines.coroutineScope {
         val now = System.currentTimeMillis()
-        
-        // Fast non-blocking PO Token lookup (0-50ms if cached, background mint if not)
-        val poToken = runCatching {
-            kotlinx.coroutines.withTimeoutOrNull(50L) {
-                BotGuardTokenGenerator.mintToken(videoId)
-            }
-        }.getOrNull()?.playerToken ?: run {
-            apiScope.launch { runCatching { BotGuardTokenGenerator.mintToken(videoId) } }
-            null
+        val configDeferred = apiScope.async {
+            getWebConfig()
+        }
+        val signatureTimestampDeferred = apiScope.async {
+            streamExtractor.getSignatureTimestamp(videoId)
+        }
+        val poTokenDeferred = apiScope.async {
+            val visitorData = getWebConfig().visitorData
+            BotGuardTokenGenerator.mintToken(videoId, visitorData ?: FALLBACK_TOKEN_SESSION)
         }
 
-        val channel = kotlinx.coroutines.channels.Channel<YouTubeAudioStream>(2)
+        val channel = kotlinx.coroutines.channels.Channel<ResolvedCandidate>(2)
         val jobs = mutableListOf<kotlinx.coroutines.Job>()
         val confirmedUnavailableReasons = ConcurrentHashMap.newKeySet<String>()
+        val transientFailures = ConcurrentHashMap.newKeySet<String>()
+        val remainingResolvers = AtomicInteger(2)
 
-        // 1. Primary: High-speed NewPipe Extractor (direct audio format with JS signature deciphering)
+        fun resolverFinished() {
+            if (remainingResolvers.decrementAndGet() == 0) channel.close()
+        }
+
         jobs += launch(Dispatchers.IO) {
-            runCatching {
-                val npStream = streamExtractor.resolveAudioStream(videoId)
-                val finalUrl = if (!poToken.isNullOrBlank() && !npStream.url.contains("&pot=")) {
-                    if (npStream.url.contains("?")) "${npStream.url}&pot=$poToken" else "${npStream.url}?pot=$poToken"
-                } else npStream.url
-                channel.trySend(npStream.copy(url = finalUrl))
-            }.onFailure { error ->
-                error.confirmedUnavailableReasonOrNull()?.let(confirmedUnavailableReasons::add)
+            var lastFailure: Throwable? = null
+            try {
+                for (attempt in 0..1) {
+                    try {
+                        val stream = streamExtractor.resolveAudioStream(videoId)
+                        if (!probeStream(stream)) {
+                            throw IOException("NewPipe returned a rejected media URL for $videoId")
+                        }
+                        channel.trySend(ResolvedCandidate(stream, NEWPIPE_SOURCE))
+                        return@launch
+                    } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                        throw cancellation
+                    } catch (error: Throwable) {
+                        lastFailure = error
+                        if (attempt == 0 && error.confirmedUnavailableReasonOrNull() == null) {
+                            streamExtractor.invalidatePlayerState(videoId)
+                        } else {
+                            break
+                        }
+                    }
+                }
+                val confirmedReason = lastFailure?.confirmedUnavailableReasonOrNull()
+                if (confirmedReason != null) confirmedUnavailableReasons += confirmedReason
+                else transientFailures += "NewPipe: ${lastFailure?.message.orEmpty()}"
+            } finally {
+                resolverFinished()
             }
         }
 
-        // 2. Parallel Racer: Direct InnerTube Client
         jobs += launch(Dispatchers.IO) {
-            val client = PLAYER_CLIENTS.firstOrNull { candidate ->
-                val blockedUntil = failedClientsUntil[candidate.name] ?: 0L
-                now >= blockedUntil
-            } ?: return@launch
+            try {
+                val config = configDeferred.await()
+                val signatureTimestamp = kotlinx.coroutines.withTimeoutOrNull(SIGNATURE_TIMESTAMP_TIMEOUT_MS) {
+                    signatureTimestampDeferred.await()
+                }
+                val poTokenResult = kotlinx.coroutines.withTimeoutOrNull(PO_TOKEN_FAST_WAIT_MS) {
+                    poTokenDeferred.await()
+                }
+                val poToken = poTokenResult?.playerToken
+                val gvsPoToken = poTokenResult?.sessionToken?.takeIf { config.visitorData != null }
+                val clients = playerClients(config).filter { candidate ->
+                    now >= (failedClientsUntil[clientFailureKey(videoId, candidate.key)] ?: 0L)
+                }
+                if (clients.isEmpty()) transientFailures += "All player clients are cooling down"
 
-            var delivered = false
-            val outcome = runCatching {
-                val body = buildJsonObject {
-                    put("context", buildJsonObject {
-                        put("client", buildJsonObject {
-                            put("clientName", client.name)
-                            put("clientVersion", client.version)
-                            put("hl", "en")
-                            put("gl", "US")
-                            if (!client.osVersion.isNullOrBlank()) put("osVersion", client.osVersion)
-                        })
-                        if (!poToken.isNullOrBlank()) {
-                            put("serviceIntegrityDimensions", buildJsonObject {
-                                put("poToken", poToken)
-                            })
-                        }
-                    })
-                    put("videoId", videoId)
-                    put("contentCheckOk", true)
-                    put("racyCheckOk", true)
-                    put("playbackContext", buildJsonObject {
-                        put("contentPlaybackContext", buildJsonObject {
-                            put("signatureTimestamp", 19940)
-                        })
-                    })
-                }
-                val root = post(
-                    url = "$YOUTUBE_API/player?key=${client.apiKey}&prettyPrint=false",
-                    body = body,
-                    clientName = client.name,
-                    clientVersion = client.version,
-                    userAgent = client.userAgent,
-                )
-                val status = root.obj("playabilityStatus")
-                val state = status?.string("status")
-                if (state == "OK") {
-                    val streaming = root.obj("streamingData")
-                    val candidates = buildList {
-                        addAll(streaming?.array("adaptiveFormats").orEmpty())
-                        addAll(streaming?.array("formats").orEmpty())
-                    }.mapNotNull { it as? JsonObject }
-                        .mapNotNull { format ->
-                            val url = format.string("url") ?: return@mapNotNull null
-                            val mime = format.string("mimeType")
-                            if (mime?.startsWith("audio/") != true) return@mapNotNull null
-                            val finalUrl = if (!poToken.isNullOrBlank() && !url.contains("&pot=")) {
-                                if (url.contains("?")) "$url&pot=$poToken" else "$url?pot=$poToken"
-                            } else url
-                            YouTubeAudioStream(
-                                url = finalUrl,
-                                mimeType = mime.substringBefore(';'),
-                                bitrate = format.int("bitrate") ?: 0,
-                            )
-                        }
-                    val bestStream = candidates.maxByOrNull { it.bitrate }
-                    if (bestStream != null) {
-                        delivered = channel.trySend(bestStream).isSuccess
+                for (client in clients) {
+                    currentCoroutineContext().ensureActive()
+                    var delivered = false
+                    val outcome = runCatching {
+                        val stream = resolveDirectClientStream(
+                            videoId = videoId,
+                            client = client,
+                            visitorData = config.visitorData,
+                            signatureTimestamp = signatureTimestamp,
+                            playerPoToken = poToken,
+                            gvsPoToken = gvsPoToken,
+                        )
+                        delivered = channel.trySend(ResolvedCandidate(stream, client.key)).isSuccess
                     }
-                } else if (state != null) {
-                    val reason = status?.string("reason").orEmpty()
-                    val confirmedReason = when {
-                        state in PERMANENT_PLAYABILITY_STATES -> reason.ifBlank { state }
-                        else -> IOException(reason).confirmedUnavailableReasonOrNull()
-                    }
-                    confirmedReason?.let(confirmedUnavailableReasons::add)
+                    if (delivered) return@launch
+
+                    failedClientsUntil[clientFailureKey(videoId, client.key)] =
+                        System.currentTimeMillis() + CLIENT_COOLDOWN_MS
+                    val failure = outcome.exceptionOrNull()
+                    if (failure is kotlinx.coroutines.CancellationException) throw failure
+                    val confirmedReason = failure?.confirmedUnavailableReasonOrNull()
+                    if (confirmedReason != null) confirmedUnavailableReasons += confirmedReason
+                    else transientFailures += "${client.key}: ${failure?.message.orEmpty()}"
                 }
-            }
-            // Circuit breaker: a client that threw or produced nothing sits
-            // out for a cooldown so the next resolution falls through to the
-            // following client instead of retrying a dead one every time.
-            if (!delivered || outcome.isFailure) {
-                failedClientsUntil[client.name] = System.currentTimeMillis() + CLIENT_COOLDOWN_MS
+            } finally {
+                resolverFinished()
             }
         }
 
@@ -1272,21 +1284,26 @@ class InnerTubeMusicApi @Inject constructor(
             // Bounded wait — both racers can fail silently (offline, bot-wall,
             // extractor breakage); an unbounded receive() would hang stream
             // resolution (and therefore playback) forever.
-            val winner = kotlinx.coroutines.withTimeoutOrNull(STREAM_RACE_TIMEOUT_MS) { channel.receive() }
+            val winner = kotlinx.coroutines.withTimeoutOrNull(STREAM_RACE_TIMEOUT_MS) {
+                channel.receiveCatching().getOrNull()
+            }
             if (winner != null) {
-                pruneStreamCache()
-                streamCache[videoId] = Pair(now, winner)
-                winner
+                cacheResolvedStream(videoId, winner, now)
+                winner.stream
             } else {
                 val confirmedReason = confirmedUnavailableReasons.firstOrNull()
-                if (confirmedReason != null) {
+                if (confirmedReason != null && transientFailures.isEmpty()) {
                     throw ConfirmedUnplayableMediaException(confirmedReason)
                 }
-                throw IOException("Timed out resolving an audio stream for $videoId")
+                val details = transientFailures.firstOrNull()?.take(160).orEmpty()
+                val suffix = details.takeIf(String::isNotBlank)?.let { ": $it" }.orEmpty()
+                throw IOException("Unable to resolve a playable audio stream for $videoId$suffix")
             }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             if (e is ConfirmedUnplayableMediaException) throw e
+            jobs.forEach { it.cancel() }
+            streamExtractor.invalidatePlayerState(videoId)
             // Last-resort direct NewPipe extraction — bounded as well so a
             // stalled socket can never wedge the player's loader thread.
             val npStream = runCatching {
@@ -1294,30 +1311,187 @@ class InnerTubeMusicApi @Inject constructor(
                     streamExtractor.resolveAudioStream(videoId)
                 } ?: throw IOException("Timed out during fallback extraction for $videoId")
             }.getOrElse { fallbackFailure ->
-                fallbackFailure.confirmedUnavailableReasonOrNull()
-                    ?.let(confirmedUnavailableReasons::add)
+                val fallbackConfirmed = fallbackFailure.confirmedUnavailableReasonOrNull()
+                if (fallbackConfirmed != null) confirmedUnavailableReasons += fallbackConfirmed
+                else transientFailures += "Fallback NewPipe: ${fallbackFailure.message.orEmpty()}"
                 val confirmedReason = confirmedUnavailableReasons.firstOrNull()
-                if (confirmedReason != null) {
+                if (confirmedReason != null && transientFailures.isEmpty()) {
                     throw ConfirmedUnplayableMediaException(confirmedReason, fallbackFailure)
                 }
                 throw IOException("Unable to resolve audio stream for $videoId", fallbackFailure)
             }
-            val result = npStream.copy(
-                url = if (!poToken.isNullOrBlank() && !npStream.url.contains("&pot=")) {
-                    if (npStream.url.contains("?")) "${npStream.url}&pot=$poToken" else "${npStream.url}?pot=$poToken"
-                } else npStream.url,
-            )
-            pruneStreamCache()
-            streamCache[videoId] = Pair(now, result)
-            result
+            if (!probeStream(npStream)) {
+                streamExtractor.invalidatePlayerState(videoId)
+                throw IOException("Fallback extraction returned a rejected media URL for $videoId")
+            }
+            cacheResolvedStream(videoId, ResolvedCandidate(npStream, NEWPIPE_SOURCE), now)
+            npStream
         } finally {
-            runCatching { channel.close() }
-            jobs.forEach { runCatching { it.cancel() } }
+            channel.close()
+            jobs.forEach { it.cancel() }
+        }
+    }
+
+    private suspend fun resolveDirectClientStream(
+        videoId: String,
+        client: PlayerClient,
+        visitorData: String?,
+        signatureTimestamp: Int?,
+        playerPoToken: String?,
+        gvsPoToken: String?,
+    ): YouTubeAudioStream {
+        val body = buildJsonObject {
+            put("context", buildJsonObject {
+                put("client", buildJsonObject {
+                    put("clientName", client.name)
+                    put("clientVersion", client.version)
+                    put("hl", "en")
+                    put("gl", "US")
+                    if (!visitorData.isNullOrBlank()) put("visitorData", visitorData)
+                    if (!client.osName.isNullOrBlank()) put("osName", client.osName)
+                    if (!client.osVersion.isNullOrBlank()) put("osVersion", client.osVersion)
+                    if (!client.deviceMake.isNullOrBlank()) put("deviceMake", client.deviceMake)
+                    if (!client.deviceModel.isNullOrBlank()) put("deviceModel", client.deviceModel)
+                    if (!client.androidSdkVersion.isNullOrBlank()) {
+                        put("androidSdkVersion", client.androidSdkVersion)
+                    }
+                })
+                if (!playerPoToken.isNullOrBlank()) {
+                    put("serviceIntegrityDimensions", buildJsonObject {
+                        put("poToken", playerPoToken)
+                    })
+                }
+            })
+            put("videoId", videoId)
+            put("contentCheckOk", true)
+            put("racyCheckOk", true)
+            if (signatureTimestamp != null) {
+                put("playbackContext", buildJsonObject {
+                    put("contentPlaybackContext", buildJsonObject {
+                        put("signatureTimestamp", signatureTimestamp)
+                    })
+                })
+            }
+        }
+        val playerApi = if (client.name == "WEB_REMIX") MUSIC_API else YOUTUBE_API
+        val root = post(
+            url = "$playerApi/player?key=${client.apiKey}&prettyPrint=false",
+            body = body,
+            clientName = client.name,
+            clientVersion = client.version,
+            userAgent = client.userAgent,
+            authenticated = client.name == "WEB_REMIX" && ytAuth.connection.value.isConnected,
+            origin = client.origin,
+            referer = client.referer,
+            visitorData = visitorData,
+            maxAttempts = 1,
+            callTimeoutMs = PLAYER_REQUEST_TIMEOUT_MS,
+        )
+        val status = root.obj("playabilityStatus")
+        val state = status?.string("status")
+        if (state != "OK") {
+            val reason = status?.string("reason").orEmpty()
+            if (state != null && state in PERMANENT_PLAYABILITY_STATES) {
+                throw ConfirmedUnplayableMediaException(reason.ifBlank { state.orEmpty() })
+            }
+            throw IOException(reason.ifBlank { "Player status ${state ?: "missing"}" })
+        }
+
+        val streaming = root.obj("streamingData")
+        val candidates = buildList {
+            addAll(streaming?.array("adaptiveFormats").orEmpty())
+            addAll(streaming?.array("formats").orEmpty())
+        }.mapNotNull { it as? JsonObject }
+            .mapNotNull { format ->
+                val url = format.string("url")
+                    ?: (format.string("signatureCipher") ?: format.string("cipher"))
+                        ?.let { streamExtractor.decipherStreamUrl(videoId, it) }
+                    ?: return@mapNotNull null
+                val mime = format.string("mimeType")
+                if (mime?.startsWith("audio/") != true) return@mapNotNull null
+                val finalUrl = appendPoToken(url, gvsPoToken)
+                YouTubeAudioStream(
+                    url = finalUrl,
+                    mimeType = mime.substringBefore(';'),
+                    bitrate = format.int("bitrate") ?: 0,
+                    requestHeaders = client.streamRequestHeaders,
+                    expiresAtEpochMs = streamExpiryEpochMs(finalUrl),
+                )
+            }
+        return candidates
+            .sortedByDescending { it.bitrate }
+            .take(MAX_FORMAT_PROBES_PER_CLIENT)
+            .firstOrNull(::probeStream)
+            ?: throw IOException("${client.key} returned no usable audio URL")
+    }
+
+    private data class ResolvedCandidate(
+        val stream: YouTubeAudioStream,
+        val source: String,
+    )
+
+    private fun cacheResolvedStream(videoId: String, candidate: ResolvedCandidate, cachedAt: Long) {
+        pruneStreamCache()
+        streamCache[videoId] = Pair(cachedAt, candidate.stream)
+        streamSources[videoId] = candidate.source
+    }
+
+    private fun probeStream(stream: YouTubeAudioStream): Boolean {
+        val now = System.currentTimeMillis()
+        if (stream.expiresAtEpochMs != null && stream.expiresAtEpochMs - now <= URL_EXPIRY_MARGIN_MS) {
+            return false
+        }
+        val request = Request.Builder()
+            .url(stream.url)
+            .header("Range", "bytes=0-1")
+            .header("Accept-Encoding", "identity")
+            .apply {
+                stream.requestHeaders.forEach { (name, value) -> header(name, value) }
+            }
+            .build()
+        return runCatching {
+            http.newCall(request).apply {
+                timeout().timeout(STREAM_PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            }.execute().use { response ->
+                (response.code == 200 || response.code == 206) &&
+                    response.body?.source()?.request(1L) == true
+            }
+        }.getOrDefault(false)
+    }
+
+    private fun YouTubeAudioStream.isFresh(cachedAt: Long, now: Long): Boolean =
+        now - cachedAt < STREAM_TTL_MS &&
+            (expiresAtEpochMs == null || expiresAtEpochMs - now > URL_EXPIRY_MARGIN_MS)
+
+    private fun appendPoToken(url: String, token: String?): String {
+        if (token.isNullOrBlank()) return url
+        val parsed = url.toHttpUrlOrNull() ?: return url
+        if (parsed.queryParameter("pot") != null) return url
+        return parsed.newBuilder().addQueryParameter("pot", token).build().toString()
+    }
+
+    private fun streamExpiryEpochMs(url: String): Long? = url.toHttpUrlOrNull()
+        ?.queryParameter("expire")
+        ?.toLongOrNull()
+        ?.times(1_000L)
+
+    private fun clientFailureKey(videoId: String, clientKey: String): String = "$videoId|$clientKey"
+
+    private fun playerClients(config: WebConfig): List<PlayerClient> = PLAYER_CLIENTS.map { client ->
+        if (client.name == "WEB_REMIX") {
+            client.copy(version = config.clientVersion, apiKey = config.apiKey)
+        } else {
+            client
         }
     }
 
     private fun Throwable.confirmedUnavailableReasonOrNull(): String? {
         val causes = generateSequence(this) { it.cause }.take(10).toList()
+        causes.filterIsInstance<ConfirmedUnplayableMediaException>()
+            .firstOrNull()
+            ?.message
+            ?.takeIf(String::isNotBlank)
+            ?.let { return it }
         val diagnostic = causes.joinToString(" ") {
             "${it::class.java.simpleName} ${it.message.orEmpty()}"
         }.lowercase()
@@ -1341,12 +1515,19 @@ class InnerTubeMusicApi @Inject constructor(
     private fun pruneStreamCache() {
         if (streamCache.size <= MAX_STREAM_CACHE_ENTRIES) return
         val now = System.currentTimeMillis()
-        streamCache.entries.removeIf { now - it.value.first >= STREAM_TTL_MS }
+        streamCache.entries.removeIf { entry ->
+            val expired = !entry.value.second.isFresh(entry.value.first, now)
+            if (expired) streamSources.remove(entry.key)
+            expired
+        }
         if (streamCache.size > MAX_STREAM_CACHE_ENTRIES) {
             streamCache.entries
                 .sortedBy { it.value.first }
                 .take(streamCache.size - MAX_STREAM_CACHE_ENTRIES)
-                .forEach { streamCache.remove(it.key) }
+                .forEach {
+                    streamCache.remove(it.key)
+                    streamSources.remove(it.key)
+                }
         }
     }
 
@@ -1382,37 +1563,73 @@ class InnerTubeMusicApi @Inject constructor(
     suspend fun isPlayable(title: String, artist: String): Boolean =
         findBestMatchOrNull(title, artist) != null
 
-    private fun getWebConfig(): WebConfig {
+    private suspend fun getWebConfig(): WebConfig {
         webConfig?.let { return it }
-        val initial = WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null)
-        webConfig = initial
-        return initial
+        return configMutex.withLock {
+            webConfig?.let { return@withLock it }
+            val config = runCatching { fetchWebConfig() }
+                .getOrElse { WebConfig(FALLBACK_WEB_KEY, FALLBACK_WEB_VERSION, null) }
+            webConfig = config
+            config
+        }
+    }
+
+    private fun fetchWebConfig(): WebConfig {
+        val request = Request.Builder()
+            .url("$YOUTUBE_MUSIC_ORIGIN/")
+            .header("User-Agent", WEB_USER_AGENT)
+            .build()
+        val call = http.newCall(request).apply {
+            timeout().timeout(CONFIG_REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        }
+        val html = call.execute().use { response ->
+            if (!response.isSuccessful) throw IOException("YouTube Music config HTTP ${response.code}")
+            response.body?.string().orEmpty()
+        }
+        return WebConfig(
+            apiKey = findConfig(html, "INNERTUBE_API_KEY") ?: FALLBACK_WEB_KEY,
+            clientVersion = findConfig(html, "INNERTUBE_CONTEXT_CLIENT_VERSION") ?: FALLBACK_WEB_VERSION,
+            visitorData = findConfig(html, "VISITOR_DATA"),
+        )
     }
 
     private fun findConfig(html: String, key: String): String? {
         if (html.isBlank()) return null
         val escaped = Regex("\\\"$key\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"")
             .find(html)?.groupValues?.getOrNull(1)
-        return escaped?.replace("\\u003d", "=")?.replace("\\/", "/")
+        return escaped
+            ?.replace("\\u003d", "=")
+            ?.replace("\\x3d", "=")
+            ?.replace("\\/", "/")
     }
 
-    private fun post(
+    private suspend fun post(
         url: String,
         body: JsonObject,
         clientName: String,
         clientVersion: String,
         userAgent: String,
         authenticated: Boolean = false,
+        origin: String = YOUTUBE_MUSIC_ORIGIN,
+        referer: String = "$YOUTUBE_MUSIC_ORIGIN/",
+        visitorData: String? = null,
+        maxAttempts: Int = 2,
+        callTimeoutMs: Long? = null,
     ): JsonObject {
         val builder = Request.Builder()
             .url(url)
             .header("Content-Type", "application/json")
             .header("User-Agent", userAgent)
-            .header("Origin", "https://music.youtube.com")
-            .header("Referer", "https://music.youtube.com/")
+            .header("Origin", origin)
+            .header("X-Origin", origin)
+            .header("Referer", referer)
             .header("X-Goog-Api-Format-Version", "1")
             .header("X-YouTube-Client-Name", CLIENT_IDS[clientName] ?: clientName)
             .header("X-YouTube-Client-Version", clientVersion)
+
+        if (!visitorData.isNullOrBlank()) {
+            builder.header("X-Goog-Visitor-Id", visitorData)
+        }
 
         // Account-authenticated surface: cookies + per-request SAPISIDHASH.
         // Only applied when explicitly requested AND a connection exists —
@@ -1427,26 +1644,36 @@ class InnerTubeMusicApi @Inject constructor(
             .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
         var lastException: Exception? = null
-        for (attempt in 1..2) {
+        for (attempt in 1..maxAttempts) {
             try {
-                return http.newCall(request).execute().use { response ->
-                    val text = response.body?.string().orEmpty()
-                    if (!response.isSuccessful) {
-                        if (response.code == 400 || response.code == 403 || response.code == 429) {
-                            webConfig = null
-                        }
-                        throw IOException("InnerTube HTTP ${response.code}: ${text.take(180)}")
+                val call = http.newCall(request)
+                callTimeoutMs?.let { call.timeout().timeout(it, TimeUnit.MILLISECONDS) }
+                val cancellationHandle = currentCoroutineContext()[kotlinx.coroutines.Job]
+                    ?.invokeOnCompletion { cause ->
+                        if (cause is kotlinx.coroutines.CancellationException) call.cancel()
                     }
+                return try {
+                    call.execute().use { response ->
+                        val text = response.body?.string().orEmpty()
+                        if (!response.isSuccessful) {
+                            if (response.code == 400 || response.code == 403 || response.code == 429) {
+                                webConfig = null
+                            }
+                            throw IOException("InnerTube HTTP ${response.code}: ${text.take(180)}")
+                        }
                     // A non-JSON body (HTML interstitial / error page) used to
                     // escape the retry loop entirely — treat it like any
                     // other transient failure and retry once.
-                    json.parseToJsonElement(text).jsonObject
+                        json.parseToJsonElement(text).jsonObject
+                    }
+                } finally {
+                    cancellationHandle?.dispose()
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 lastException = e
-                if (attempt < 2) {
+                if (attempt < maxAttempts) {
                     try { Thread.sleep(200L) } catch (_: InterruptedException) {}
                 }
             }
@@ -1764,8 +1991,21 @@ class InnerTubeMusicApi @Inject constructor(
         val version: String,
         val apiKey: String,
         val userAgent: String,
+        val osName: String? = null,
         val osVersion: String? = null,
-    )
+        val deviceMake: String? = null,
+        val deviceModel: String? = null,
+        val androidSdkVersion: String? = null,
+    ) {
+        val key = "$name@$version"
+        val origin = if (name == "WEB_REMIX") YOUTUBE_MUSIC_ORIGIN else YOUTUBE_ORIGIN
+        val referer = when (name) {
+            "WEB_REMIX" -> "$YOUTUBE_MUSIC_ORIGIN/"
+            "TVHTML5" -> "$YOUTUBE_ORIGIN/tv"
+            else -> "$YOUTUBE_ORIGIN/"
+        }
+        val streamRequestHeaders = mapOf("User-Agent" to userAgent)
+    }
 
     private companion object {
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
@@ -1785,8 +2025,11 @@ class InnerTubeMusicApi @Inject constructor(
             "IOS_MUSIC" to "26",
             "ANDROID" to "3",
             "ANDROID_VR" to "28",
-            "TVHTML5" to "85",
+            "TVHTML5" to "7",
+            "VISIONOS" to "101",
         )
+        const val YOUTUBE_MUSIC_ORIGIN = "https://music.youtube.com"
+        const val YOUTUBE_ORIGIN = "https://www.youtube.com"
         const val MUSIC_API = "https://music.youtube.com/youtubei/v1"
         const val YOUTUBE_API = "https://www.youtube.com/youtubei/v1"
         const val LIBRARY_PLAYLISTS_BROWSE_ID = "FEmusic_liked_playlists"
@@ -1799,6 +2042,13 @@ class InnerTubeMusicApi @Inject constructor(
         /** Upper bound on how long both stream-resolution racers combined may
          *  take before falling back to direct extraction. */
         const val STREAM_RACE_TIMEOUT_MS = 15_000L
+        const val STREAM_PROBE_TIMEOUT_MS = 3_000L
+        const val MAX_FORMAT_PROBES_PER_CLIENT = 2
+        const val PLAYER_REQUEST_TIMEOUT_MS = 4_000L
+        const val CONFIG_REQUEST_TIMEOUT_MS = 4_000L
+        const val SIGNATURE_TIMESTAMP_TIMEOUT_MS = 3_000L
+        const val PO_TOKEN_FAST_WAIT_MS = 750L
+        const val URL_EXPIRY_MARGIN_MS = 2 * 60 * 1000L
 
         /** Upper bound for the last-resort direct NewPipe extraction. */
         const val FALLBACK_EXTRACT_TIMEOUT_MS = 12_000L
@@ -1817,50 +2067,90 @@ class InnerTubeMusicApi @Inject constructor(
         const val MAX_STREAM_CACHE_ENTRIES = 64
         const val STREAM_TTL_MS = 4 * 60 * 60 * 1000L
         const val MAX_MATCH_CACHE_ENTRIES = 1024
-        const val WEB_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36"
+        const val FALLBACK_TOKEN_SESSION = "lastwave_session"
+        const val NEWPIPE_SOURCE = "NEWPIPE"
+        const val WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
         const val FALLBACK_WEB_KEY = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
-        const val FALLBACK_WEB_VERSION = "1.20240715.00.00"
+        const val FALLBACK_WEB_VERSION = "1.20260707.12.00"
         const val ARTIST_SEARCH_FILTER = "EgWKAQIgAWoKEAkQBRAKEAMQBA=="
         const val ALBUM_SEARCH_FILTER = "EgWKAQIYAWoKEAkQBRAKEAMQBA=="
         val PLAYER_CLIENTS = listOf(
             PlayerClient(
                 name = "ANDROID_VR",
-                version = "1.65.10",
+                version = "1.37",
                 apiKey = "AIzaSyD-p045F_WzU-vA_YgX20SCx4KAo",
-                userAgent = "Mozilla/5.0 (Linux; Android 12; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/23.1.0.3.38.384668277 SamsungBrowser/4.0 Chrome/104.0.5112.114 Mobile VR Safari/537.36",
+                userAgent = "com.google.android.apps.youtube.vr.oculus/1.37 (Linux; U; Android 12; en_US; Quest 3; Build/SQ3A.220605.009.A1; Cronet/107.0.5284.2)",
+                osName = "Android",
+                osVersion = "12",
+                deviceMake = "Oculus",
+                deviceModel = "Quest 3",
+                androidSdkVersion = "32",
             ),
             PlayerClient(
-                name = "TVHTML5",
-                version = "7.20240715.00.00",
-                apiKey = "AIzaSyAo_F83w5AmL_YgX20SCx4KAo",
-                userAgent = "Mozilla/5.0 (ChromiumStylePlatform; Linux; Android 14) Cobalt/24.lts.4-gold (unlike Gecko) Chrome/124.0.0.0 Safari/537.36",
+                name = "VISIONOS",
+                version = "0.1",
+                apiKey = "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
+                userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+                osName = "visionOS",
+                osVersion = "1.3.21O771",
+                deviceMake = "Apple",
+                deviceModel = "RealityDevice14,1",
+            ),
+            PlayerClient(
+                name = "ANDROID_VR",
+                version = "1.65.10",
+                apiKey = "AIzaSyD-p045F_WzU-vA_YgX20SCx4KAo",
+                userAgent = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+                osName = "Android",
+                osVersion = "12L",
+                deviceMake = "Oculus",
+                deviceModel = "Quest 3",
+                androidSdkVersion = "32",
+            ),
+            PlayerClient(
+                name = "ANDROID_VR",
+                version = "1.61.48",
+                apiKey = "AIzaSyD-p045F_WzU-vA_YgX20SCx4KAo",
+                userAgent = "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12; en_US; Quest 3; Build/SQ3A.220605.009.A1; Cronet/132.0.6808.3)",
+                osName = "Android",
+                osVersion = "12",
+                deviceMake = "Oculus",
+                deviceModel = "Quest 3",
+                androidSdkVersion = "32",
             ),
             PlayerClient(
                 name = "IOS_MUSIC",
-                version = "6.42.1",
+                version = "7.27.0",
                 apiKey = "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
-                userAgent = "com.google.ios.youtubemusic/6.42.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)",
+                userAgent = "com.google.ios.youtubemusic/7.27.0 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)",
+                osName = "iOS",
                 osVersion = "17.5.1.21F90",
+                deviceMake = "Apple",
+                deviceModel = "iPhone16,2",
             ),
             PlayerClient(
                 name = "IOS",
-                version = "19.29.1",
+                version = "21.26.4",
                 apiKey = "AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc",
-                userAgent = "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)",
-                osVersion = "17.5.1.21F90",
+                userAgent = "com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2;)",
+                osName = "iPhone",
+                osVersion = "18.3.2.22D82",
+                deviceMake = "Apple",
+                deviceModel = "iPhone16,2",
             ),
             PlayerClient(
                 name = "ANDROID",
-                version = "19.13.36",
+                version = "21.26.364",
                 apiKey = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w",
-                userAgent = "com.google.android.youtube/19.13.36 (Linux; U; Android 14) gzip",
-                osVersion = "14",
+                userAgent = "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip",
+                osName = "Android",
+                osVersion = "11",
             ),
             PlayerClient(
                 name = "WEB_REMIX",
-                version = "1.20240715.00.00",
+                version = FALLBACK_WEB_VERSION,
                 apiKey = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30",
-                userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+                userAgent = WEB_USER_AGENT,
             ),
         )
     }

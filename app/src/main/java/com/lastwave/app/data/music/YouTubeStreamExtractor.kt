@@ -2,6 +2,7 @@ package com.lastwave.app.data.music
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.schabi.newpipe.extractor.NewPipe
@@ -9,6 +10,7 @@ import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request
 import org.schabi.newpipe.extractor.downloader.Response
+import org.schabi.newpipe.extractor.services.youtube.YoutubeJavaScriptPlayerManager
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
@@ -39,9 +41,10 @@ class YouTubeStreamExtractor @Inject constructor(
         val now = System.currentTimeMillis()
         if (!preferM4a) {
             streamCache[videoId]?.let { (cachedAt, stream) ->
-                if (now - cachedAt < CACHE_EXPIRY_MS) {
+                if (stream.isFresh(cachedAt, now)) {
                     return@withContext stream
                 }
+                streamCache.remove(videoId)
             }
         }
 
@@ -66,6 +69,11 @@ class YouTubeStreamExtractor @Inject constructor(
             // NewPipe reports kbps while raw InnerTube formats report bps;
             // normalize both providers to bps for one truthful UI value.
             bitrate = if (reportedBitrate in 1..9_999) reportedBitrate * 1_000 else reportedBitrate,
+            requestHeaders = mapOf("User-Agent" to YOUTUBE_WEB_USER_AGENT),
+            expiresAtEpochMs = stream.content.toHttpUrlOrNull()
+                ?.queryParameter("expire")
+                ?.toLongOrNull()
+                ?.times(1_000L),
         )
         if (!preferM4a) {
             pruneStreamCache(now)
@@ -74,12 +82,45 @@ class YouTubeStreamExtractor @Inject constructor(
         result
     }
 
+    suspend fun getSignatureTimestamp(videoId: String): Int? = withContext(Dispatchers.IO) {
+        initialize()
+        runCatching { YoutubeJavaScriptPlayerManager.getSignatureTimestamp(videoId) }.getOrNull()
+    }
+
+    fun decipherStreamUrl(videoId: String, signatureCipher: String): String? {
+        initialize()
+        val parameters = "https://cipher.invalid/?$signatureCipher".toHttpUrlOrNull() ?: return null
+        var resolvedUrl = parameters.queryParameter("url") ?: return null
+        val encryptedSignature = parameters.queryParameter("s")
+        if (!encryptedSignature.isNullOrBlank()) {
+            val signature = runCatching {
+                YoutubeJavaScriptPlayerManager.deobfuscateSignature(videoId, encryptedSignature)
+            }.getOrNull() ?: return null
+            val parsedUrl = resolvedUrl.toHttpUrlOrNull() ?: return null
+            resolvedUrl = parsedUrl.newBuilder()
+                .addQueryParameter(parameters.queryParameter("sp") ?: "signature", signature)
+                .build()
+                .toString()
+        }
+        return runCatching {
+            YoutubeJavaScriptPlayerManager.getUrlWithThrottlingParameterDeobfuscated(videoId, resolvedUrl)
+        }.getOrDefault(resolvedUrl)
+    }
+
+    /** A rejected signed URL usually means NewPipe's cached player script is
+     * stale. Clear that state locally so playback can recover without an app
+     * force-stop. */
+    fun invalidatePlayerState(videoId: String) {
+        invalidateCache(videoId)
+        runCatching { YoutubeJavaScriptPlayerManager.clearAllCaches() }
+    }
+
     /** Expired entries used to linger forever (expiry was only checked on
      *  read), so every distinct video ever played stayed resident. Drop them
      *  opportunistically once the cache outgrows its bound. */
     private fun pruneStreamCache(now: Long) {
         if (streamCache.size <= MAX_STREAM_CACHE_ENTRIES) return
-        streamCache.entries.removeIf { now - it.value.first >= CACHE_EXPIRY_MS }
+        streamCache.entries.removeIf { !it.value.second.isFresh(it.value.first, now) }
         if (streamCache.size > MAX_STREAM_CACHE_ENTRIES) {
             streamCache.entries
                 .sortedBy { it.value.first }
@@ -92,6 +133,10 @@ class YouTubeStreamExtractor @Inject constructor(
         initialize()
     }
 
+    private fun YouTubeAudioStream.isFresh(cachedAt: Long, now: Long): Boolean =
+        now - cachedAt < CACHE_EXPIRY_MS &&
+            (expiresAtEpochMs == null || expiresAtEpochMs - now > URL_EXPIRY_MARGIN_MS)
+
     private fun initialize() {
         if (initialized) return
         synchronized(this) {
@@ -103,6 +148,7 @@ class YouTubeStreamExtractor @Inject constructor(
 
     companion object {
         private const val CACHE_EXPIRY_MS = 4 * 60 * 60 * 1000L // 4 hours
+        private const val URL_EXPIRY_MARGIN_MS = 2 * 60 * 1000L
         private const val MAX_STREAM_CACHE_ENTRIES = 64
     }
 }
@@ -136,4 +182,4 @@ private class OkHttpNewPipeDownloader(
 }
 
 internal const val YOUTUBE_WEB_USER_AGENT =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
