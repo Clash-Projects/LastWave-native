@@ -17,6 +17,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -42,10 +44,19 @@ data class SavedPlaylist(
     val discoverSignature: String? = null,
     val customCoverUri: String? = null,
     val isPinned: Boolean = false,
+    /** Non-null only for a connected-account playlist that has not been made local. */
+    val remotePlaylistId: String? = null,
+    val remoteArtworkUrl: String? = null,
+    val remoteTrackCount: Int? = null,
 )
+
+val SavedPlaylist.isYouTubeOnly: Boolean
+    get() = remotePlaylistId != null
 
 private const val MAX_SAVED_PLAYLISTS = 20
 private const val TAG = "PlaylistRepository"
+const val LIKED_SONGS_MODE = "liked"
+const val LIKED_SONGS_TITLE = "Liked Songs"
 
 @Singleton
 class PlaylistRepository @Inject constructor(
@@ -58,6 +69,7 @@ class PlaylistRepository @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true }
     private val _changes = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val changes = _changes.asSharedFlow()
+    private val likedSongsMutex = Mutex()
 
     val playlists: Flow<List<SavedPlaylist>> = flow {
         emit(getAll())
@@ -148,6 +160,7 @@ class PlaylistRepository @Inject constructor(
 
     suspend fun createCustom(title: String): SavedPlaylist {
         val cleanTitle = title.trim()
+        if (cleanTitle.equals(LIKED_SONGS_TITLE, ignoreCase = true)) return ensureLikedSongs()
         getAll().firstOrNull {
             it.mode == "custom" && it.title.equals(cleanTitle, ignoreCase = true)
         }
@@ -164,6 +177,9 @@ class PlaylistRepository @Inject constructor(
         awaitStartupSync()
         val entity = dao.getById(id) ?: return null
         val cleanTitle = title.trim()
+        if (entity.mode == LIKED_SONGS_MODE || cleanTitle.equals(LIKED_SONGS_TITLE, ignoreCase = true)) {
+            return entity.toDomain()
+        }
         if (cleanTitle.isBlank()) return entity.toDomain()
         val updated = entity.copy(title = cleanTitle)
         dao.upsert(updated)
@@ -202,8 +218,8 @@ class PlaylistRepository @Inject constructor(
         awaitStartupSync()
         val entity = dao.getById(id) ?: return null
         val playlist = entity.toDomain()
-        if (playlist.mode != "custom") return playlist
-        if (!allowDuplicate && playlist.tracks.any { it.key == track.key }) return playlist
+        if (playlist.mode != "custom" && playlist.mode != LIKED_SONGS_MODE) return playlist
+        if ((playlist.mode == LIKED_SONGS_MODE || !allowDuplicate) && playlist.tracks.any { it.key == track.key }) return playlist
         if (!innerTube.isPlayable(track.name, track.artist)) return playlist
         val updatedTracksJson = json.encodeToString((playlist.tracks + track).map { it.toStored() })
         val updated = entity.copy(tracksJson = updatedTracksJson)
@@ -220,6 +236,47 @@ class PlaylistRepository @Inject constructor(
         if (index !in playlist.tracks.indices) return playlist
         val updatedTracks = playlist.tracks.toMutableList().apply { removeAt(index) }
         val updated = entity.copy(tracksJson = json.encodeToString(updatedTracks.map { it.toStored() }))
+        dao.upsert(updated)
+        syncPublicMirror()
+        _changes.tryEmit(Unit)
+        return updated.toDomain()
+    }
+
+    suspend fun getLikedSongs(): SavedPlaylist? =
+        getAll().firstOrNull { it.mode == LIKED_SONGS_MODE }
+
+    /** Creates the built-in local playlist only when it is genuinely absent. */
+    suspend fun ensureLikedSongs(): SavedPlaylist = likedSongsMutex.withLock {
+        getLikedSongs()?.let { return@withLock it }
+        getAll().firstOrNull { it.title.equals(LIKED_SONGS_TITLE, ignoreCase = true) }?.let { legacy ->
+            val entity = dao.getById(legacy.id)
+            if (entity != null) {
+                val adopted = entity.copy(
+                    title = LIKED_SONGS_TITLE,
+                    subtitle = "Songs you like in LastWave",
+                    mode = LIKED_SONGS_MODE,
+                    isPinned = true,
+                )
+                dao.upsert(adopted)
+                syncPublicMirror()
+                _changes.tryEmit(Unit)
+                return@withLock adopted.toDomain()
+            }
+        }
+        val created = save(
+            title = LIKED_SONGS_TITLE,
+            subtitle = "Songs you like in LastWave",
+            mode = LIKED_SONGS_MODE,
+            tracks = emptyList(),
+        )
+        setPinned(created.id, true) ?: created.copy(isPinned = true)
+    }
+
+    /** Internal sync write: unlike normal editing, this also updates generated/imported playlists. */
+    suspend fun replaceTracksForSync(id: Long, tracks: List<GeneratedTrack>): SavedPlaylist? {
+        awaitStartupSync()
+        val entity = dao.getById(id) ?: return null
+        val updated = entity.copy(tracksJson = json.encodeToString(tracks.map { it.toStored() }))
         dao.upsert(updated)
         syncPublicMirror()
         _changes.tryEmit(Unit)

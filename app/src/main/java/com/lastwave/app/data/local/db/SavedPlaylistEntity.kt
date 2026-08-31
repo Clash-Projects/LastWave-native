@@ -58,8 +58,8 @@ interface SavedPlaylistDao {
     /** Keeps pinned/generated playlists plus the newest [max] unpinned ones. */
     @Query(
         """DELETE FROM saved_playlists
-           WHERE mode != 'custom' AND isPinned = 0 AND id NOT IN
-           (SELECT id FROM saved_playlists WHERE mode != 'custom' AND isPinned = 0
+           WHERE mode NOT IN ('custom', 'liked') AND isPinned = 0 AND id NOT IN
+           (SELECT id FROM saved_playlists WHERE mode NOT IN ('custom', 'liked') AND isPinned = 0
             ORDER BY createdAtMillis DESC LIMIT :max)""",
     )
     suspend fun trimGeneratedToNewest(max: Int)

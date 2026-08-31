@@ -38,25 +38,36 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must be called before super.onCreate() and before setContent().
-        val splashScreen = installSplashScreen()
+        val splashScreen = runCatching { installSplashScreen() }
+            .onFailure { android.util.Log.e(STARTUP_TAG, "Splash compatibility layer unavailable", it) }
+            .getOrNull()
         super.onCreate(savedInstanceState)
-        lastFmAuthCallback.capture(intent)
+        runCatching { lastFmAuthCallback.capture(intent) }
+            .onFailure { android.util.Log.e(STARTUP_TAG, "Auth callback ignored during startup", it) }
         handlePlaybackIntent(intent)
-        splashScreen.setOnExitAnimationListener { provider ->
-            provider.view.animate()
-                .alpha(0f)
-                .scaleX(1.025f)
-                .scaleY(1.025f)
-                .setDuration(260L)
-                .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f))
-                .withEndAction { provider.remove() }
-                .start()
-        }
+        runCatching {
+            splashScreen?.setOnExitAnimationListener { provider ->
+                runCatching {
+                    provider.view.animate()
+                        .alpha(0f)
+                        .scaleX(1.025f)
+                        .scaleY(1.025f)
+                        .setDuration(260L)
+                        .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f))
+                        .withEndAction { runCatching { provider.remove() } }
+                        .start()
+                }.onFailure {
+                    android.util.Log.w(STARTUP_TAG, "Splash exit animation skipped", it)
+                    runCatching { provider.remove() }
+                }
+            }
+        }.onFailure { android.util.Log.w(STARTUP_TAG, "Splash exit listener unavailable", it) }
         runCatching { enableEdgeToEdge() }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            runCatching { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
+                .onFailure { android.util.Log.w(STARTUP_TAG, "Notification permission request skipped", it) }
         }
 
         setContent {
@@ -144,7 +155,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        lastFmAuthCallback.capture(intent)
+        runCatching { lastFmAuthCallback.capture(intent) }
         handlePlaybackIntent(intent)
+    }
+
+    private companion object {
+        const val STARTUP_TAG = "LastWaveStartup"
     }
 }

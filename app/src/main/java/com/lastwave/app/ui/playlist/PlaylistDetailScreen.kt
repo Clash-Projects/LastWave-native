@@ -5,26 +5,25 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +39,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -48,11 +48,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -62,13 +66,13 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -87,9 +91,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -98,9 +102,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.playlist.LIKED_SONGS_MODE
 import com.lastwave.app.data.playlist.SavedPlaylist
+import com.lastwave.app.data.playlist.isYouTubeOnly
 import com.lastwave.app.ui.common.ArtworkImage
+import com.lastwave.app.ui.common.ExpressiveLoadingIndicator
 import com.lastwave.app.ui.common.PlaylistCover
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
@@ -108,23 +117,10 @@ import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import com.lastwave.app.ui.theme.ArtworkShape
 import com.lastwave.app.ui.theme.ExpressivePillShape
+import dagger.hilt.android.lifecycle.HiltViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material.icons.automirrored.filled.Sort
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SwapVert
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.FilterChip
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 
 enum class PlaylistTrackSort(val label: String) {
@@ -181,7 +177,7 @@ fun PlaylistDetailScreen(
     if (playlist == null) {
         if (state.isLoading || state.isDetailLoading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                com.lastwave.app.ui.common.ExpressiveLoadingIndicator(message = "Loading playlist...")
+                ExpressiveLoadingIndicator(message = "Loading playlist...")
             }
             return
         }
@@ -320,7 +316,12 @@ fun PlaylistDetailScreen(
 
                     // Metadata line (tracks count & date)
                     Text(
-                        text = "${playlist.tracks.size} songs \u2022 ${formatDate(playlist.createdAtMillis)}",
+                        text = if (playlist.isYouTubeOnly) {
+                            val count = playlist.remoteTrackCount ?: playlist.tracks.size
+                            "$count songs • YouTube Music"
+                        } else {
+                            "${playlist.tracks.size} songs \u2022 ${formatDate(playlist.createdAtMillis)}"
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -517,7 +518,7 @@ fun PlaylistDetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
-                                "${playlist.tracks.size} tracks",
+                                "${playlist.remoteTrackCount ?: playlist.tracks.size} tracks",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontWeight = FontWeight.Medium,
@@ -552,11 +553,15 @@ fun PlaylistDetailScreen(
                             .padding(vertical = 48.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(
-                            "No tracks in this playlist yet.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        if (state.isDetailLoading) {
+                            ExpressiveLoadingIndicator(message = "Loading tracks...")
+                        } else {
+                            Text(
+                                "No tracks in this playlist yet.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             } else {
@@ -729,107 +734,126 @@ fun PlaylistDetailScreen(
                             )
                         }
 
-                    DropdownMenu(
-                        expanded = overflowMenuOpen,
-                        onDismissRequest = { overflowMenuOpen = false },
-                        shape = RoundedCornerShape(24.dp),
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        tonalElevation = 6.dp,
-                        shadowElevation = 12.dp,
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(if (playlist.isPinned) "Unpin playlist" else "Pin to top") },
-                            leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
-                            onClick = {
-                                viewModel.togglePinned(playlistId)
-                                overflowMenuOpen = false
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    if (state.regeneratingId == playlistId) "Regenerating…"
-                                    else "Regenerate playlist",
+                        DropdownMenu(
+                            expanded = overflowMenuOpen,
+                            onDismissRequest = { overflowMenuOpen = false },
+                            shape = RoundedCornerShape(24.dp),
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            tonalElevation = 6.dp,
+                            shadowElevation = 12.dp,
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(if (playlist.isPinned) "Unpin playlist" else "Pin to top") },
+                                leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
+                                onClick = {
+                                    viewModel.togglePinned(playlistId)
+                                    overflowMenuOpen = false
+                                },
+                            )
+                            if (playlist.isYouTubeOnly) {
+                                DropdownMenuItem(
+                                    text = { Text("Make available locally") },
+                                    leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                                    onClick = {
+                                        viewModel.makeLocal(playlistId)
+                                        overflowMenuOpen = false
+                                    },
                                 )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Filled.Refresh,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                            },
-                            enabled = state.regeneratingId == null,
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.regenerate(playlistId) { newId ->
-                                    onOpenPlaylist?.invoke(newId)
+                            } else {
+                                if (playlist.mode != LIKED_SONGS_MODE) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (state.regeneratingId == playlistId) "Regenerating…"
+                                                else "Regenerate playlist",
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.Refresh,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        },
+                                        enabled = state.regeneratingId == null,
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.regenerate(playlistId) { newId ->
+                                                onOpenPlaylist?.invoke(newId)
+                                            }
+                                            overflowMenuOpen = false
+                                        },
+                                    )
                                 }
-                                overflowMenuOpen = false
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Change cover image") },
-                            leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
-                            onClick = {
-                                coverEditorOpen = true
-                                overflowMenuOpen = false
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Rename playlist") },
-                            leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                            onClick = {
-                                viewModel.requestRename(playlistId)
-                                overflowMenuOpen = false
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Download all songs") },
-                            leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                downloadViewModel.downloadAll(playlist.tracks)
-                                overflowMenuOpen = false
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Export / Share") },
-                            leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
-                            onClick = {
-                                viewModel.openExportSheet(playlistId)
-                                overflowMenuOpen = false
-                            },
-                        )
-                        val isSyncedToYt = syncedPlaylistIds == null || playlistId in (syncedPlaylistIds ?: emptySet())
-                        DropdownMenuItem(
-                            text = { Text(if (isSyncedToYt) "Syncing to YouTube Music" else "Sync to YouTube Music") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Filled.CloudSync,
-                                    contentDescription = null,
-                                    tint = if (isSyncedToYt) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                DropdownMenuItem(
+                                    text = { Text("Change cover image") },
+                                    leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
+                                    onClick = {
+                                        coverEditorOpen = true
+                                        overflowMenuOpen = false
+                                    },
                                 )
-                            },
-                            onClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                viewModel.toggleYtSync(playlistId)
-                                overflowMenuOpen = false
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete playlist", color = MaterialTheme.colorScheme.error) },
-                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                            onClick = {
-                                viewModel.requestDelete(playlistId)
-                                overflowMenuOpen = false
-                            },
-                        )
+                                if (playlist.mode != LIKED_SONGS_MODE) {
+                                    DropdownMenuItem(
+                                        text = { Text("Rename playlist") },
+                                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                                        onClick = {
+                                            viewModel.requestRename(playlistId)
+                                            overflowMenuOpen = false
+                                        },
+                                    )
+                                }
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Download all songs") },
+                                leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    downloadViewModel.downloadAll(playlist.tracks)
+                                    overflowMenuOpen = false
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Export / Share") },
+                                leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
+                                onClick = {
+                                    viewModel.openExportSheet(playlistId)
+                                    overflowMenuOpen = false
+                                },
+                            )
+                            if (!playlist.isYouTubeOnly && playlist.mode != LIKED_SONGS_MODE) {
+                                val isSyncedToYt = syncedPlaylistIds == null || playlistId in (syncedPlaylistIds ?: emptySet())
+                                DropdownMenuItem(
+                                    text = { Text(if (isSyncedToYt) "Syncing to YouTube Music" else "Sync to YouTube Music") },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Filled.CloudSync,
+                                            contentDescription = null,
+                                            tint = if (isSyncedToYt) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    },
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        viewModel.toggleYtSync(playlistId)
+                                        overflowMenuOpen = false
+                                    },
+                                )
+                            }
+                            if (!playlist.isYouTubeOnly) {
+                                DropdownMenuItem(
+                                    text = { Text("Delete playlist", color = MaterialTheme.colorScheme.error) },
+                                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                    onClick = {
+                                        viewModel.requestDelete(playlistId)
+                                        overflowMenuOpen = false
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
-    }
 
         AnimatedVisibility(
             visible = state.regeneratingId == playlistId,
@@ -861,7 +885,6 @@ fun PlaylistDetailScreen(
                     )
                 }
             }
-
         }
 
         // Toasts
@@ -996,7 +1019,10 @@ fun PlaylistDetailScreen(
             playbackSourceLabel = playlist.title,
             onDismiss = { menuTarget = null },
             onRemoveFromPlaylist = {
-                val realIndex = playlist.tracks.indexOfFirst { it.name == track.name && it.artist == track.artist }
+                val realIndex = playlist.tracks.indexOfFirst {
+                    (it.url.isNotBlank() && it.url == track.url) ||
+                        (it.name.equals(track.name, ignoreCase = true) && it.artist.equals(track.artist, ignoreCase = true))
+                }
                 if (realIndex >= 0) {
                     viewModel.removeTrack(playlistId, realIndex)
                 }

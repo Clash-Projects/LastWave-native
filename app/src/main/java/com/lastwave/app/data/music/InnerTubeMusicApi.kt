@@ -173,7 +173,10 @@ class InnerTubeMusicApi @Inject constructor(
      * owned/private playlists resolve too; it transparently falls back to
      * anonymous for public ones.
      */
-    suspend fun fetchPlaylist(playlistIdOrUrl: String): YouTubePlaylistResult? = withContext(Dispatchers.IO) {
+    suspend fun fetchPlaylist(
+        playlistIdOrUrl: String,
+        onPageLoaded: ((List<YouTubeMusicTrack>) -> Unit)? = null,
+    ): YouTubePlaylistResult? = withContext(Dispatchers.IO) {
         val rawId = extractPlaylistId(playlistIdOrUrl)
         if (rawId.isBlank()) return@withContext null
         val browseId = if (rawId.startsWith("VL")) rawId else "VL$rawId"
@@ -190,21 +193,27 @@ class InnerTubeMusicApi @Inject constructor(
         val header = root.obj("header")?.obj("musicDetailHeaderRenderer")
             ?: root.obj("header")?.obj("musicResponsiveHeaderRenderer")
             ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicResponsiveHeaderRenderer")
+            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicDetailHeaderRenderer")
+            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")
+            ?: root.obj("header")?.obj("musicVisualHeaderRenderer")
+            ?: root.obj("header")?.obj("musicHeaderRenderer")
+            ?: root.obj("header")?.obj("playlistHeaderRenderer")
+            ?: findFirstHeaderRenderer(root)
 
-        val title = header?.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
-            ?.ifBlank { null }
-            ?: header?.string("title")
-            ?: "Imported Playlist"
+        val title = extractTitleFromHeader(header, root)
 
         val author = header?.obj("subtitle")?.array("runs")?.firstOrNull()?.asObject()?.string("text")
             ?: header?.obj("straplineTextOne")?.array("runs")?.firstOrNull()?.asObject()?.string("text")
+            ?: findFirstAuthor(header)
 
-        val thumbs = header?.obj("thumbnail")?.obj("croppedSquareThumbnailRenderer")?.array("thumbnails")
-            ?: header?.obj("thumbnail")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
-        val artworkUrl = thumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
+        val artworkUrl = extractArtworkFromHeader(header, root)
 
         val songs = mutableListOf<YouTubeMusicTrack>()
-        songs += parseSongRenderers(root)
+        val initialSongs = parseSongRenderers(root)
+        songs += initialSongs
+        if (songs.isNotEmpty()) {
+            onPageLoaded?.invoke(songs.toList())
+        }
 
         // Follow continuation pages until gone. Safety cap is enormous on
         // purpose (60k tracks) — it only exists to bound a pathological loop.
@@ -218,7 +227,10 @@ class InnerTubeMusicApi @Inject constructor(
             val pageSongs = parseSongRenderers(nextPage)
             if (pageSongs.isEmpty()) break
             val knownVideoIds = songs.mapTo(mutableSetOf()) { it.videoId }
-            songs += pageSongs.filterNot { it.videoId in knownVideoIds }
+            val newSongs = pageSongs.filterNot { it.videoId in knownVideoIds }
+            if (newSongs.isEmpty()) break
+            songs += newSongs
+            onPageLoaded?.invoke(songs.toList())
             token = playlistShelfContinuationToken(nextPage)
             page++
         }
@@ -226,7 +238,7 @@ class InnerTubeMusicApi @Inject constructor(
         songs.take(3).forEach { prefetchStream(it.videoId) }
         YouTubePlaylistResult(
             id = rawId,
-            title = title,
+            title = title ?: "",
             author = author,
             artworkUrl = artworkUrl,
             trackCount = songs.size,
@@ -234,23 +246,105 @@ class InnerTubeMusicApi @Inject constructor(
         )
     }
 
+    private fun findFirstHeaderRenderer(root: JsonElement): JsonObject? {
+        val renderers = mutableListOf<JsonObject>()
+        collectObjects(root, "musicResponsiveHeaderRenderer", renderers)
+        collectObjects(root, "musicDetailHeaderRenderer", renderers)
+        collectObjects(root, "musicEditablePlaylistDetailHeaderRenderer", renderers)
+        collectObjects(root, "musicVisualHeaderRenderer", renderers)
+        collectObjects(root, "musicHeaderRenderer", renderers)
+        return renderers.firstOrNull()
+    }
+
+    private fun extractTitleFromHeader(header: JsonObject?, root: JsonElement): String? {
+        if (header != null) {
+            val runsText = header.obj("title")?.array("runs")
+                ?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+                ?.trim()?.takeIf { it.isNotBlank() }
+            if (runsText != null) return runsText
+
+            val nestedHeader = header.obj("header")?.obj("musicResponsiveHeaderRenderer")
+                ?: header.obj("header")?.obj("musicDetailHeaderRenderer")
+                ?: header.obj("header")
+            if (nestedHeader != null) {
+                val nestedRuns = nestedHeader.obj("title")?.array("runs")
+                    ?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+                    ?.trim()?.takeIf { it.isNotBlank() }
+                if (nestedRuns != null) return nestedRuns
+            }
+
+            val simpleTitle = header.obj("title")?.string("simpleText")
+                ?: header.string("title")
+            if (!simpleTitle.isNullOrBlank()) return simpleTitle.trim()
+        }
+
+        val titles = mutableListOf<JsonObject>()
+        collectObjects(root, "musicResponsiveHeaderRenderer", titles)
+        for (h in titles) {
+            val t = h.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }?.trim()
+            if (!t.isNullOrBlank()) return t
+        }
+        return null
+    }
+
+    private fun findFirstAuthor(header: JsonObject?): String? {
+        if (header == null) return null
+        return header.obj("subtitle")?.array("runs")?.firstOrNull()?.asObject()?.string("text")
+            ?: header.obj("straplineTextOne")?.array("runs")?.firstOrNull()?.asObject()?.string("text")
+            ?: header.obj("secondSubtitle")?.array("runs")?.firstOrNull()?.asObject()?.string("text")
+    }
+
+    private fun extractArtworkFromHeader(header: JsonObject?, root: JsonElement): String? {
+        fun extractFromThumbnailsArray(arr: JsonArray?): String? {
+            val url = arr?.lastOrNull()?.asObject()?.string("url") ?: return null
+            val formatted = if (url.startsWith("//")) "https:$url" else url
+            return formatted.highResolutionArtwork()
+        }
+
+        if (header != null) {
+            val direct = header.obj("thumbnail")?.obj("croppedSquareThumbnailRenderer")?.array("thumbnails")
+                ?: header.obj("thumbnail")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+                ?: header.obj("thumbnail")?.obj("musicThumbnailRenderer")?.array("thumbnails")
+                ?: header.obj("thumbnail")?.obj("musicCustomThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+                ?: header.obj("thumbnail")?.array("thumbnails")
+                ?: header.obj("thumbnailRenderer")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+            extractFromThumbnailsArray(direct)?.let { return it }
+
+            val nestedHeader = header.obj("header")
+            if (nestedHeader != null) {
+                val nestedThumbs = nestedHeader.obj("thumbnail")?.obj("croppedSquareThumbnailRenderer")?.array("thumbnails")
+                    ?: nestedHeader.obj("thumbnail")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+                    ?: nestedHeader.obj("thumbnail")?.array("thumbnails")
+                extractFromThumbnailsArray(nestedThumbs)?.let { return it }
+            }
+        }
+
+        val thumbObjects = mutableListOf<JsonObject>()
+        if (header != null) collectObjects(header, "musicThumbnailRenderer", thumbObjects)
+        collectObjects(root, "musicResponsiveHeaderRenderer", thumbObjects)
+        for (to in thumbObjects) {
+            val arr = to.array("thumbnails") ?: to.obj("thumbnail")?.array("thumbnails")
+            extractFromThumbnailsArray(arr)?.let { return it }
+        }
+        return null
+    }
+
     /** The account's own library playlists (FEmusic_liked_playlists). */
     suspend fun fetchLibraryPlaylists(): List<YouTubePlaylistSummary> = withContext(Dispatchers.IO) {
-        if (!ytAuth.connection.value.isConnected) return@withContext emptyList()
         val config = getWebConfig()
-        val root = runCatching {
-            post(
-                url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
-                body = buildJsonObject {
-                    put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
-                    put("browseId", LIBRARY_PLAYLISTS_BROWSE_ID)
-                },
-                clientName = "WEB_REMIX",
-                clientVersion = config.clientVersion,
-                userAgent = WEB_USER_AGENT,
-                authenticated = true,
-            )
-        }.getOrNull() ?: return@withContext emptyList()
+        // Let the initial request failure propagate. Treating a network/auth
+        // failure as a real empty library made valid playlists flash away.
+        val root = post(
+            url = "$MUSIC_API/browse?key=${config.apiKey}&prettyPrint=false",
+            body = buildJsonObject {
+                put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
+                put("browseId", LIBRARY_PLAYLISTS_BROWSE_ID)
+            },
+            clientName = "WEB_REMIX",
+            clientVersion = config.clientVersion,
+            userAgent = WEB_USER_AGENT,
+            authenticated = true,
+        )
 
         val summaries = parsePlaylistRenderers(root).toMutableList()
         var token = genericContinuationToken(root)
@@ -445,7 +539,10 @@ class InnerTubeMusicApi @Inject constructor(
     }
 
     /** Reads back an OWNED playlist with each item's setVideoId for diffs/removals. */
-    suspend fun fetchOwnedPlaylist(playlistIdOrUrl: String): YtOwnedPlaylist? = withContext(Dispatchers.IO) {
+    suspend fun fetchOwnedPlaylist(
+        playlistIdOrUrl: String,
+        stopAfterVideoId: String? = null,
+    ): YtOwnedPlaylist? = withContext(Dispatchers.IO) {
         if (!ytAuth.connection.value.isConnected) return@withContext null
         val rawId = extractPlaylistId(playlistIdOrUrl)
         if (rawId.isBlank()) return@withContext null
@@ -467,7 +564,7 @@ class InnerTubeMusicApi @Inject constructor(
         collectObjects(root, "musicPlaylistShelfRenderer", shelves)
 
         val items = mutableListOf<YtOwnedPlaylistItem>()
-        val seen = mutableSetOf<String>()
+        val seenEntries = mutableSetOf<String>()
         fun absorb(element: JsonElement) {
             val renderers = mutableListOf<JsonObject>()
             collectObjects(element, "musicResponsiveListItemRenderer", renderers)
@@ -477,8 +574,9 @@ class InnerTubeMusicApi @Inject constructor(
                     ?: (renderer["videoId"] as? JsonPrimitive)?.contentOrNull
                     ?: findString(renderer, "videoId")
                     ?: continue
-                if (videoId.isBlank() || !seen.add(videoId)) continue
                 val setVideoId = extractSetVideoId(renderer)
+                val entryKey = setVideoId ?: videoId
+                if (videoId.isBlank() || !seenEntries.add(entryKey)) continue
                 items += YtOwnedPlaylistItem(videoId, setVideoId)
             }
         }
@@ -487,7 +585,10 @@ class InnerTubeMusicApi @Inject constructor(
 
         var token = playlistShelfContinuationToken(root)
         var page = 0
-        while (!token.isNullOrBlank() && page < MAX_CONTINUATION_PAGES) {
+        fun targetFound() = stopAfterVideoId != null && items.any {
+            it.videoId == stopAfterVideoId && !it.setVideoId.isNullOrBlank()
+        }
+        while (!targetFound() && !token.isNullOrBlank() && page < MAX_CONTINUATION_PAGES) {
             val currentToken = token ?: break
             val nextPage = runCatching { browseContinuation(browseId, currentToken, authenticated = true) }
                 .getOrNull() ?: break
@@ -502,13 +603,14 @@ class InnerTubeMusicApi @Inject constructor(
     private suspend fun editRemotePlaylist(playlistId: String, actions: List<JsonElement>): Boolean =
         withContext(Dispatchers.IO) {
             if (!ytAuth.connection.value.isConnected) return@withContext false
+            val cleanId = playlistId.removePrefix("VL")
             val config = getWebConfig()
             runCatching {
                 val root = post(
                     url = "$MUSIC_API/browse/edit_playlist?key=${config.apiKey}&prettyPrint=false",
                     body = buildJsonObject {
                         put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
-                        put("playlistId", playlistId)
+                        put("playlistId", cleanId)
                         put("actions", JsonArray(actions))
                     },
                     clientName = "WEB_REMIX",
@@ -517,7 +619,7 @@ class InnerTubeMusicApi @Inject constructor(
                     authenticated = true,
                 )
                 val status = root.string("status").orEmpty()
-                status.isBlank() || status.contains("SUCCEEDED", ignoreCase = true)
+                status.isBlank() || status.contains("SUCCEEDED", ignoreCase = true) || root["actions"] != null
             }.getOrElse { false }
         }
 
@@ -578,12 +680,24 @@ class InnerTubeMusicApi @Inject constructor(
         return legacyItems.firstNotNullOfOrNull { it.string("continuation")?.takeIf(String::isNotBlank) }
     }
 
-    private fun extractSetVideoId(renderer: JsonObject): String? =
-        (renderer["setVideoId"] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
-            ?: renderer.obj("playlistItemData")?.let { data ->
-                data.string("playlistSetVideoId") ?: data.string("videoSetVideoId")
+    private fun extractSetVideoId(renderer: JsonObject): String? {
+        (renderer["setVideoId"] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)?.let { return it }
+        renderer.obj("playlistItemData")?.let { data ->
+            (data.string("playlistSetVideoId") ?: data.string("videoSetVideoId") ?: data.string("setVideoId"))
+                ?.takeIf(String::isNotBlank)?.let { return it }
+        }
+        val editEndpoints = mutableListOf<JsonObject>()
+        collectObjects(renderer, "playlistEditEndpoint", editEndpoints)
+        for (ep in editEndpoints) {
+            val actions = ep.array("actions") ?: continue
+            for (action in actions) {
+                val actObj = action.asObject() ?: continue
+                val svId = actObj.string("setVideoId")
+                if (!svId.isNullOrBlank()) return svId
             }
-            ?: findString(renderer, "playlistSetVideoId")
+        }
+        return findString(renderer, "setVideoId") ?: findString(renderer, "playlistSetVideoId")
+    }
 
     suspend fun searchSongs(query: String, limit: Int = 30): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()

@@ -47,8 +47,8 @@ android {
         applicationId = "com.lastwave.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 13
-        versionName = "3.3.1"
+        versionCode = 14
+        versionName = "3.4.0"
 
         val secretMask = listOf(0x5A, 0x3F, 0x7E, 0x1B, 0x92, 0x4C, 0xA1, 0x6D)
         fun obfuscateSecret(plainText: String): String {
@@ -247,6 +247,9 @@ dependencies {
     // Native in-app audio playback, background service, system media
     // controls, Bluetooth/headset controls and a MediaController-backed UI.
     implementation("androidx.media3:media3-exoplayer:1.2.1")
+    // MediaBrowserServiceCompat/MediaSessionCompat bridge used by Android
+    // Auto to browse the LastWave library and control the same player.
+    implementation("androidx.media:media:1.7.0")
 
     // GPLv3 Media3-matched FFmpeg software decoder (distribution must comply).
     // The renderer factory prefers FFmpeg for every codec it supports so all

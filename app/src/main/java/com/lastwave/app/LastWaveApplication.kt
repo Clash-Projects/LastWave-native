@@ -1,6 +1,8 @@
 package com.lastwave.app
 
 import android.app.Application
+import android.app.ActivityManager
+import android.content.Context
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -25,15 +27,22 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
     @Inject lateinit var okHttpClient: dagger.Lazy<okhttp3.OkHttpClient>
     @Inject lateinit var streamExtractor: dagger.Lazy<com.lastwave.app.data.music.YouTubeStreamExtractor>
     @Inject lateinit var ytMusicSyncManager: dagger.Lazy<com.lastwave.app.data.ytmusic.YtMusicSyncManager>
+    @Inject lateinit var likedSongsManager: dagger.Lazy<com.lastwave.app.data.playlist.LikedSongsManager>
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(base)
+        // Content providers (including AndroidX startup/profile components)
+        // are created before Application.onCreate(). Install diagnostics here
+        // so failures in that earlier device-dependent phase are not lost.
+        CrashGuard.install(this)
+    }
 
     override fun onCreate() {
-        // Installed before anything else (including Hilt's super.onCreate())
-        // so OEM framework threads that throw during startup are contained.
-        CrashGuard.install(this)
         super.onCreate()
-        com.lastwave.app.playback.PlaybackDiagnostics.install(this)
-        com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.initialize(this)
+        runCatching { com.lastwave.app.playback.PlaybackDiagnostics.install(this) }
+        runCatching { com.lastwave.app.data.music.potoken.BotGuardTokenGenerator.initialize(this) }
         applicationScope.launch(Dispatchers.IO) {
+            delay(OPTIONAL_STARTUP_DELAY_MS)
             // A process kill can bypass TrackDownloadManager's finally block
             // and strand a full lossless track in cache. Remove only old temp
             // files so cleanup cannot race a newly started download.
@@ -48,6 +57,8 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
             // NewPipe is optional fallback infrastructure. A broken extractor
             // install must not escape an application-scope coroutine.
             runCatching { streamExtractor.get().preWarm() }
+            runCatching { likedSongsManager.get().start() }
+                .onFailure { android.util.Log.e("LastWaveStartup", "Liked Songs startup disabled", it) }
         }
         // Never create BotGuard's headless WebView during app launch. Some
         // Android 11 OEM devices have a missing/updating WebView provider,
@@ -55,7 +66,7 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
         // YouTube Music playlist sync heartbeat (no-ops until an account is
         // connected AND sync is enabled in Settings).
         applicationScope.launch {
-            delay(1_500)
+            delay(OPTIONAL_STARTUP_DELAY_MS)
             runCatching { ytMusicSyncManager.get().start() }
                 .onFailure { android.util.Log.e("LastWaveStartup", "YT sync startup disabled", it) }
         }
@@ -65,6 +76,7 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
         // dedupe on those — otherwise ANY DataStore settings change (pins,
         // toggles, font) rebuilt every placed widget.
         applicationScope.launch(Dispatchers.IO) {
+            delay(OPTIONAL_STARTUP_DELAY_MS)
             try {
                 themeRepository.get().uiState
                     .map { it.colorScheme.primary to it.colorScheme.onPrimary }
@@ -93,24 +105,35 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
      *  - Hardware acceleration enabled for fast GPU texture uploading.
      */
     override fun newImageLoader(): ImageLoader {
-        val imageClient = okHttpClient.get().newBuilder()
+        val lowRamDevice = runCatching {
+            (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.isLowRamDevice == true
+        }.getOrDefault(false)
+        val imageClient = try {
+            okHttpClient.get().newBuilder()
             .dispatcher(okhttp3.Dispatcher().apply {
                 // Bound decode/network bursts: artwork hosts are shared by
                 // many visible rows, and 128 simultaneous responses can turn
                 // into a GC/decode storm on mobile CPUs.
-                maxRequests = 48
-                maxRequestsPerHost = 8
+                maxRequests = if (lowRamDevice) 16 else 48
+                maxRequestsPerHost = if (lowRamDevice) 4 else 8
             })
-            .connectionPool(okhttp3.ConnectionPool(16, 5, java.util.concurrent.TimeUnit.MINUTES))
+            .connectionPool(okhttp3.ConnectionPool(if (lowRamDevice) 8 else 16, 5, java.util.concurrent.TimeUnit.MINUTES))
             .connectTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .build()
+        } catch (error: Exception) {
+            android.util.Log.e("LastWaveStartup", "Shared artwork client unavailable; using isolated client", error)
+            okhttp3.OkHttpClient.Builder().build()
+        } catch (error: LinkageError) {
+            android.util.Log.e("LastWaveStartup", "Shared artwork client unsupported; using isolated client", error)
+            okhttp3.OkHttpClient.Builder().build()
+        }
 
         return ImageLoader.Builder(this)
             .okHttpClient(imageClient)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.18)
+                    .maxSizePercent(if (lowRamDevice) 0.08 else 0.18)
                     .build()
             }
             .diskCache {
@@ -118,7 +141,7 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
                     .directory(cacheDir.resolve("image_cache"))
                     // Enough for hundreds of compressed covers without
                     // allowing artwork to dominate the app's storage usage.
-                    .maxSizeBytes(IMAGE_DISK_CACHE_BYTES)
+                    .maxSizeBytes(if (lowRamDevice) LOW_RAM_IMAGE_DISK_CACHE_BYTES else IMAGE_DISK_CACHE_BYTES)
                     .build()
             }
             .respectCacheHeaders(false)
@@ -130,6 +153,8 @@ class LastWaveApplication : Application(), ImageLoaderFactory {
 
     private companion object {
         const val IMAGE_DISK_CACHE_BYTES = 32L * 1024 * 1024
+        const val LOW_RAM_IMAGE_DISK_CACHE_BYTES = 16L * 1024 * 1024
         const val ORPHAN_TEMP_MAX_AGE_MS = 6L * 60 * 60 * 1000
+        const val OPTIONAL_STARTUP_DELAY_MS = 2_500L
     }
 }

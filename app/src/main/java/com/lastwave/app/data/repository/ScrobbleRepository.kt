@@ -117,6 +117,16 @@ class ScrobbleRepository @Inject constructor(
         return result
     }
 
+    /** Mirrors LastWave's player heart to the authenticated Last.fm library. */
+    suspend fun setTrackLoved(artist: String, track: String, loved: Boolean): Result =
+        signedCall(
+            method = if (loved) "track.love" else "track.unlove",
+            extra = mapOf(
+                "artist" to artist,
+                "track" to track,
+            ),
+        )
+
     private suspend fun flushPendingScrobbles() {
         if (offlineQueue.isEmpty()) return
         // Don't burn the wait budget of the CURRENT scrobble on flushing old

@@ -65,6 +65,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -73,28 +74,36 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FormatQuote
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -136,6 +145,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -155,6 +165,7 @@ import com.lastwave.app.data.lyrics.LyricsRepository
 import com.lastwave.app.data.lyrics.LyricsResult
 import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.playlist.SavedPlaylist
+import com.lastwave.app.data.playlist.LIKED_SONGS_MODE
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
 import com.lastwave.app.playback.PlaybackChromeState
@@ -203,6 +214,9 @@ class PlayerViewModel @Inject constructor(
     val navigator: com.lastwave.app.ui.navigation.ArtistAlbumNavigator,
     val genreExplorer: com.lastwave.app.ui.genres.GenreExplorer,
     val mixLauncher: com.lastwave.app.ui.generate.MixLauncher,
+    private val ytMusicLibraryManager: com.lastwave.app.data.ytmusic.YtMusicLibraryManager,
+    private val likedSongsManager: com.lastwave.app.data.playlist.LikedSongsManager,
+    private val scrobbleRepository: com.lastwave.app.data.repository.ScrobbleRepository,
 ) : ViewModel() {
     val navEvents = navigator.events
     val state = player.state
@@ -217,6 +231,7 @@ class PlayerViewModel @Inject constructor(
     private val _customPlaylists = MutableStateFlow<List<SavedPlaylist>>(emptyList())
     val customPlaylists = _customPlaylists.asStateFlow()
     private var customPlaylistsLoaded = false
+    val likedTrackKeys = likedSongsManager.likedTrackKeys
 
     fun openArtist(name: String, browseId: String? = null) {
         navigator.openArtist(name, browseId)
@@ -238,6 +253,15 @@ class PlayerViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            ytMusicLibraryManager.playlists.collect { remote ->
+                if (customPlaylistsLoaded) {
+                    _customPlaylists.value = playlistRepository.getAll()
+                        .filter { it.mode == "custom" || it.mode == LIKED_SONGS_MODE }
+                        .sortedByDescending { it.mode == LIKED_SONGS_MODE } + remote
+                }
+            }
+        }
+        viewModelScope.launch {
             player.chromeState.collect { playerState ->
                 val track = playerState.current
                 val key = track?.let { "${it.artist}|${it.title}" }
@@ -254,7 +278,9 @@ class PlayerViewModel @Inject constructor(
     }
 
     private suspend fun refreshCustomPlaylists() {
-        _customPlaylists.value = playlistRepository.getAll().filter { it.mode == "custom" }
+        _customPlaylists.value = playlistRepository.getAll()
+            .filter { it.mode == "custom" || it.mode == LIKED_SONGS_MODE }
+            .sortedByDescending { it.mode == LIKED_SONGS_MODE } + ytMusicLibraryManager.playlists.value
     }
 
     fun prepareCustomPlaylists() {
@@ -296,14 +322,52 @@ class PlayerViewModel @Inject constructor(
         loadLyrics(track, forceRefresh = true)
     }
 
-    fun addToPlaylist(playlistId: Long, track: PlayableTrack, allowDuplicate: Boolean = false) {
+    fun addToPlaylists(
+        playlistIds: Set<Long>,
+        duplicatePlaylistIds: Set<Long>,
+        track: PlayableTrack,
+    ) {
+        if (playlistIds.isEmpty()) return
         viewModelScope.launch {
-            playlistRepository.addTrack(
-                id = playlistId,
-                track = track.toGeneratedTrack(),
-                allowDuplicate = allowDuplicate,
-            )
+            val generatedTrack = track.toGeneratedTrack()
+            var remoteChanged = false
+            playlistIds.forEach { playlistId ->
+                val allowDuplicate = playlistId in duplicatePlaylistIds
+                if (playlistId < 0L) {
+                    val added = ytMusicLibraryManager.addTrack(playlistId, generatedTrack, allowDuplicate)
+                    remoteChanged = remoteChanged || added
+                } else {
+                    playlistRepository.addTrack(
+                        id = playlistId,
+                        track = generatedTrack,
+                        allowDuplicate = allowDuplicate,
+                    )
+                }
+            }
+            if (remoteChanged) {
+                ytMusicLibraryManager.refresh()
+                refreshCustomPlaylists()
+            }
         }
+    }
+
+    suspend fun findDuplicatePlaylistIds(playlistIds: Set<Long>, track: PlayableTrack): Set<Long> {
+        val generatedTrack = track.toGeneratedTrack()
+        val localDuplicates = _customPlaylists.value
+            .filter { playlist ->
+                playlist.id in playlistIds &&
+                    playlist.remotePlaylistId == null &&
+                    playlist.tracks.any { it.key == generatedTrack.key }
+            }
+            .mapTo(mutableSetOf(), SavedPlaylist::id)
+        val remoteIds = playlistIds.filterTo(mutableSetOf()) { it < 0L }
+        return localDuplicates + ytMusicLibraryManager.findDuplicatePlaylistIds(remoteIds, generatedTrack)
+    }
+
+    suspend fun findCachedDuplicatePlaylistIds(playlistIds: Set<Long>, track: PlayableTrack): Set<Long> {
+        val generatedTrack = track.toGeneratedTrack()
+        val remoteIds = playlistIds.filterTo(mutableSetOf()) { it < 0L }
+        return ytMusicLibraryManager.findCachedDuplicatePlaylistIds(remoteIds, generatedTrack)
     }
 
     fun createPlaylistAndAdd(title: String, track: PlayableTrack) {
@@ -311,6 +375,29 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             val playlist = playlistRepository.createCustom(title)
             playlistRepository.addTrack(playlist.id, track.toGeneratedTrack())
+        }
+    }
+
+    fun toggleLiked(track: PlayableTrack) {
+        viewModelScope.launch {
+            val loved = likedSongsManager.toggle(track.toGeneratedTrack())
+            mirrorLastFmLove(track, loved)
+        }
+    }
+
+    fun like(track: PlayableTrack) {
+        viewModelScope.launch {
+            likedSongsManager.like(track.toGeneratedTrack())
+            mirrorLastFmLove(track, loved = true)
+        }
+    }
+
+    private suspend fun mirrorLastFmLove(track: PlayableTrack, loved: Boolean) {
+        when (val result = scrobbleRepository.setTrackLoved(track.artist, track.title, loved)) {
+            com.lastwave.app.data.repository.ScrobbleRepository.Result.Success,
+            com.lastwave.app.data.repository.ScrobbleRepository.Result.NoSessionKey -> Unit
+            is com.lastwave.app.data.repository.ScrobbleRepository.Result.Failed ->
+                android.util.Log.w("PlayerViewModel", "Last.fm love sync failed: ${result.message}")
         }
     }
 }
@@ -423,9 +510,15 @@ fun PlayerHost(
                 viewModel = viewModel,
                 track = track,
                 onDismiss = { playlistTrack = null },
-                onAdd = { playlistId, allowDuplicate ->
-                    viewModel.addToPlaylist(playlistId, track, allowDuplicate)
+                onAdd = { playlistIds, duplicatePlaylistIds ->
+                    viewModel.addToPlaylists(playlistIds, duplicatePlaylistIds, track)
                     playlistTrack = null
+                },
+                onFindDuplicates = { playlistIds ->
+                    viewModel.findDuplicatePlaylistIds(playlistIds, track)
+                },
+                onFindCachedDuplicates = { playlistIds ->
+                    viewModel.findCachedDuplicatePlaylistIds(playlistIds, track)
                 },
                 onCreate = { title ->
                     viewModel.createPlaylistAndAdd(title, track)
@@ -448,6 +541,10 @@ private fun ExpandedPlayer(
     val state by viewModel.fullPlayerState.collectAsStateWithLifecycle()
     val lyricsState by viewModel.lyricsState.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val likedTrackKeys by viewModel.likedTrackKeys.collectAsStateWithLifecycle()
+    val currentTrack = state.current
+    val isLiked = currentTrack != null &&
+        "${currentTrack.title}|${currentTrack.artist}".lowercase() in likedTrackKeys
     FullPlayer(
         state = state,
         progressState = viewModel.progressState,
@@ -460,6 +557,9 @@ private fun ExpandedPlayer(
         onRetryLyrics = onRetryLyrics,
         onCollapse = onCollapse,
         onOpenArtist = onOpenArtist,
+        isLiked = isLiked,
+        onToggleLiked = { currentTrack?.let(viewModel::toggleLiked) },
+        onDoubleTapLike = { currentTrack?.let(viewModel::like) },
     )
 }
 
@@ -468,7 +568,9 @@ private fun AddToPlaylistDialogHost(
     viewModel: PlayerViewModel,
     track: PlayableTrack,
     onDismiss: () -> Unit,
-    onAdd: (Long, Boolean) -> Unit,
+    onAdd: (Set<Long>, Set<Long>) -> Unit,
+    onFindDuplicates: suspend (Set<Long>) -> Set<Long>,
+    onFindCachedDuplicates: suspend (Set<Long>) -> Set<Long>,
     onCreate: (String) -> Unit,
 ) {
     val playlists by viewModel.customPlaylists.collectAsStateWithLifecycle()
@@ -477,6 +579,8 @@ private fun AddToPlaylistDialogHost(
         playlists = playlists,
         onDismiss = onDismiss,
         onAdd = onAdd,
+        onFindDuplicates = onFindDuplicates,
+        onFindCachedDuplicates = onFindCachedDuplicates,
         onCreate = onCreate,
     )
 }
@@ -755,123 +859,342 @@ fun PlayingWaveBars(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddToPlaylistDialog(
     track: PlayableTrack,
     playlists: List<SavedPlaylist>,
     onDismiss: () -> Unit,
-    onAdd: (Long, Boolean) -> Unit,
+    onAdd: (Set<Long>, Set<Long>) -> Unit,
+    onFindDuplicates: suspend (Set<Long>) -> Set<Long>,
+    onFindCachedDuplicates: suspend (Set<Long>) -> Set<Long>,
     onCreate: (String) -> Unit,
 ) {
     var newPlaylistName by remember(track) { mutableStateOf("") }
-    var duplicatePlaylist by remember(track) { mutableStateOf<SavedPlaylist?>(null) }
+    var selectedPlaylistIds by remember(track) { mutableStateOf(emptySet<Long>()) }
+    var duplicateConfirmation by remember(track) { mutableStateOf<Set<Long>?>(null) }
+    var duplicatePlaylistIds by remember(track) { mutableStateOf(emptySet<Long>()) }
+    var knownDuplicatePlaylistIds by remember(track) { mutableStateOf(emptySet<Long>()) }
+    var isCheckingDuplicates by remember(track) { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
     val trackKey = remember(track.title, track.artist) { track.toGeneratedTrack().key }
+    val selectedPlaylists = playlists.filter { it.id in selectedPlaylistIds }
+    val playlistListMaxHeight = (LocalConfiguration.current.screenHeightDp.dp - 360.dp)
+        .coerceIn(180.dp, 410.dp)
 
-    duplicatePlaylist?.let { playlist ->
-        AlertDialog(
-            onDismissRequest = { duplicatePlaylist = null },
-            title = { Text("Song already in playlist") },
-            text = {
-                Text(
-                    "${track.title} by ${track.artist} is already present in ${playlist.title}. " +
-                        "You can leave the playlist unchanged or add another copy.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { onAdd(playlist.id, true) }) {
-                    Text("Add anyway")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { duplicatePlaylist = null }) {
-                    Text("Leave unchanged")
-                }
-            },
-        )
-        return
+    LaunchedEffect(playlists.map(SavedPlaylist::id)) {
+        selectedPlaylistIds = selectedPlaylistIds.intersect(playlists.mapTo(mutableSetOf(), SavedPlaylist::id))
     }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add to playlist") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "${track.title} — ${track.artist}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (playlists.isEmpty()) {
-                    Text("Create your first custom playlist below.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
+    LaunchedEffect(trackKey, playlists.map(SavedPlaylist::id)) {
+        val remoteIds = playlists
+            .filterTo(mutableListOf()) { it.remotePlaylistId != null }
+            .mapTo(mutableSetOf(), SavedPlaylist::id)
+        knownDuplicatePlaylistIds = knownDuplicatePlaylistIds + onFindCachedDuplicates(remoteIds)
+        delay(1_500L)
+        knownDuplicatePlaylistIds = knownDuplicatePlaylistIds + onFindCachedDuplicates(remoteIds)
+    }
+
+    fun requestAdd(playlistIds: Set<Long>) {
+        if (playlistIds.isEmpty() || isCheckingDuplicates) return
+        scope.launch {
+            isCheckingDuplicates = true
+            val duplicates = onFindDuplicates(playlistIds)
+            isCheckingDuplicates = false
+            knownDuplicatePlaylistIds = (knownDuplicatePlaylistIds - playlistIds) + duplicates
+            if (duplicates.isEmpty()) {
+                onAdd(playlistIds, emptySet())
+            } else {
+                duplicatePlaylistIds = emptySet()
+                duplicateConfirmation = duplicates
+            }
+        }
+    }
+
+    duplicateConfirmation?.let { duplicates ->
+        val duplicatePlaylists = playlists.filter { it.id in duplicates }
+        val missingCount = selectedPlaylistIds.size - duplicates.size
+        AlertDialog(
+            onDismissRequest = { duplicateConfirmation = null },
+            title = {
+                Text(if (duplicates.size == 1) "Already in this playlist" else "Already in ${duplicates.size} playlists")
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Existing copies stay unchanged. Select only the playlists where you want another copy.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        itemsIndexed(playlists, key = { _, playlist -> playlist.id }) { _, playlist ->
+                        itemsIndexed(duplicatePlaylists, key = { _, playlist -> playlist.id }) { _, playlist ->
+                            val addAgain = playlist.id in duplicatePlaylistIds
+                            val canAddAnother = playlist.mode != LIKED_SONGS_MODE
                             Surface(
                                 onClick = {
-                                    if (playlist.tracks.any { it.key == trackKey }) {
-                                        duplicatePlaylist = playlist
+                                    duplicatePlaylistIds = if (addAgain) {
+                                        duplicatePlaylistIds - playlist.id
                                     } else {
-                                        onAdd(playlist.id, false)
+                                        duplicatePlaylistIds + playlist.id
                                     }
                                 },
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                enabled = canAddAnother,
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (addAgain) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerHigh
+                                },
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Row(
-                                    Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    PlaylistCover(
-                                        playlist = playlist,
-                                        modifier = Modifier.size(46.dp),
-                                        cornerRadius = 12.dp,
-                                    )
-                                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                                        Text(playlist.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Column(Modifier.weight(1f)) {
                                         Text(
-                                            "${playlist.tracks.size} tracks",
+                                            playlist.title,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            if (canAddAnother) "Add another copy" else "Already liked",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
+                                    Checkbox(checked = addAgain, onCheckedChange = null, enabled = canAddAnother)
                                 }
                             }
                         }
                     }
                 }
-                OutlinedTextField(
-                    value = newPlaylistName,
-                    onValueChange = { newPlaylistName = it },
-                    label = { Text("New playlist name") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val existingPlaylist = playlists.firstOrNull {
-                        it.title.equals(newPlaylistName.trim(), ignoreCase = true)
+            },
+            confirmButton = {
+                TextButton(onClick = { onAdd(selectedPlaylistIds, duplicatePlaylistIds) }) {
+                    Text(
+                        when {
+                            duplicatePlaylistIds.isNotEmpty() -> "Continue"
+                            missingCount > 0 -> "Add missing"
+                            else -> "Keep unchanged"
+                        },
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { duplicateConfirmation = null }) {
+                    Text("Back")
+                }
+            },
+        )
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.size(52.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.PlaylistAdd, contentDescription = null, modifier = Modifier.size(27.dp))
                     }
-                    if (existingPlaylist?.tracks?.any { it.key == trackKey } == true) {
-                        duplicatePlaylist = existingPlaylist
-                    } else {
-                        onCreate(newPlaylistName)
+                }
+                Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                    Text(
+                        "Add to playlist",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        if (selectedPlaylistIds.isEmpty()) "Choose one or more playlists" else "${selectedPlaylistIds.size} selected",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(
+                        track.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        track.artist,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            if (playlists.isEmpty()) {
+                Text(
+                    "No playlists yet. Create your first playlist below.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = playlistListMaxHeight),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    itemsIndexed(playlists, key = { _, playlist -> playlist.id }) { _, playlist ->
+                        val selected = playlist.id in selectedPlaylistIds
+                        val alreadyAdded = playlist.id in knownDuplicatePlaylistIds ||
+                            playlist.tracks.any { it.key == trackKey }
+                        val trackCount = playlist.remoteTrackCount
+                            ?: playlist.tracks.size.takeIf { playlist.remotePlaylistId == null }
+                        val countLabel = when (trackCount) {
+                            null -> "Track count unavailable"
+                            1 -> "1 track"
+                            else -> "$trackCount tracks"
+                        }
+                        val rowColor by animateColorAsState(
+                            targetValue = if (selected) {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                            animationSpec = tween(ExpressiveMotion.Quick),
+                            label = "playlistSelectionColor",
+                        )
+                        Surface(
+                            onClick = {
+                                selectedPlaylistIds = if (selected) {
+                                    selectedPlaylistIds - playlist.id
+                                } else {
+                                    selectedPlaylistIds + playlist.id
+                                }
+                            },
+                            shape = RoundedCornerShape(18.dp),
+                            color = rowColor,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                PlaylistCover(
+                                    playlist = playlist,
+                                    modifier = Modifier.size(52.dp),
+                                    cornerRadius = 14.dp,
+                                )
+                                Column(Modifier.weight(1f).padding(horizontal = 13.dp)) {
+                                    Text(
+                                        playlist.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        when {
+                                            isCheckingDuplicates && selected -> "$countLabel · Checking contents…"
+                                            alreadyAdded -> "$countLabel · Already added"
+                                            else -> countLabel
+                                        },
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (alreadyAdded) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Checkbox(checked = selected, onCheckedChange = null)
+                            }
+                        }
+                    }
+                }
+            }
+
+            OutlinedTextField(
+                value = newPlaylistName,
+                onValueChange = { newPlaylistName = it },
+                label = { Text("New playlist name") },
+                singleLine = true,
+                trailingIcon = {
+                    IconButton(
+                        enabled = newPlaylistName.isNotBlank(),
+                        onClick = {
+                            val cleanName = newPlaylistName.trim()
+                            val existingPlaylist = playlists.firstOrNull {
+                                it.mode == "custom" && it.title.equals(cleanName, ignoreCase = true)
+                            }
+                            if (existingPlaylist == null) {
+                                onCreate(cleanName)
+                            } else {
+                                selectedPlaylistIds = setOf(existingPlaylist.id)
+                                requestAdd(setOf(existingPlaylist.id))
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = "Create playlist and add track")
                     }
                 },
-                enabled = newPlaylistName.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Create and add")
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = { requestAdd(selectedPlaylistIds) },
+                    enabled = selectedPlaylistIds.isNotEmpty() && !isCheckingDuplicates,
+                ) {
+                    if (isCheckingDuplicates) {
+                        ExpressiveInlineLoadingIndicator(
+                            size = 18.dp,
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    } else {
+                        Icon(Icons.Filled.PlaylistAdd, contentDescription = null, modifier = Modifier.size(19.dp))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        when {
+                            selectedPlaylistIds.isEmpty() -> "Add"
+                            isCheckingDuplicates -> "Checking"
+                            else -> "Add to ${selectedPlaylists.size}"
+                        },
+                    )
+                }
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+        }
+    }
 }
 
 private enum class SeekDirection { REWIND, FORWARD }
@@ -889,6 +1212,9 @@ private fun FullPlayer(
     onRetryLyrics: () -> Unit,
     onCollapse: () -> Unit,
     onOpenArtist: (String) -> Unit = {},
+    isLiked: Boolean = false,
+    onToggleLiked: () -> Unit = {},
+    onDoubleTapLike: () -> Unit = {},
 ) {
     val track = state.current ?: return
     var showTrackMenu by remember(track.videoId, track.title) { mutableStateOf(false) }
@@ -899,6 +1225,7 @@ private fun FullPlayer(
     var seekOverlaySeconds by remember(track.videoId, track.title) { mutableIntStateOf(0) }
     var lastTapTimestamp by remember(track.videoId, track.title) { mutableLongStateOf(0L) }
     var lastTapSide by remember(track.videoId, track.title) { mutableStateOf<SeekDirection?>(null) }
+    var lastLikeTapTimestamp by remember(track.videoId, track.title) { mutableLongStateOf(0L) }
     var seekResetJob by remember(track.videoId, track.title) { mutableStateOf<Job?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val shownArtworkX by animateFloatAsState(
@@ -1271,34 +1598,53 @@ private fun FullPlayer(
                                                                     }
                                                                     artworkDragX = 0f
                                                                 } else {
-                                                                    val isLeft = initialX < size.width * 0.5f
-                                                                    val side = if (isLeft) SeekDirection.REWIND else SeekDirection.FORWARD
                                                                     val now = SystemClock.elapsedRealtime()
+                                                                    val side = when {
+                                                                        initialX < size.width * 0.34f -> SeekDirection.REWIND
+                                                                        initialX > size.width * 0.66f -> SeekDirection.FORWARD
+                                                                        else -> null
+                                                                    }
 
-                                                                    if (lastTapSide != side) {
-                                                                        seekResetJob?.cancel()
-                                                                        seekOverlayDirection = null
-                                                                        lastTapSide = side
-                                                                        lastTapTimestamp = now
-                                                                    } else if (now - lastTapTimestamp < 450L) {
-                                                                        val newSeconds = if (seekOverlayDirection == side) seekOverlaySeconds + 5 else 5
-                                                                        seekOverlaySeconds = newSeconds
-                                                                        seekOverlayDirection = side
-                                                                        lastTapTimestamp = now
-                                                                        val deltaMs = if (side == SeekDirection.FORWARD) 5_000L else -5_000L
-                                                                        val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
-                                                                        player.seekTo(newPos)
-
-                                                                        seekResetJob?.cancel()
-                                                                        seekResetJob = coroutineScope.launch {
-                                                                            delay(700L)
-                                                                            seekOverlayDirection = null
-                                                                            lastTapSide = null
+                                                                    if (side == null) {
+                                                                        // The center third owns Like only. Clear any pending
+                                                                        // side sequence so it can never complete a seek.
+                                                                        lastTapSide = null
+                                                                        lastTapTimestamp = 0L
+                                                                        if (lastLikeTapTimestamp != 0L && now - lastLikeTapTimestamp < 450L) {
+                                                                            lastLikeTapTimestamp = 0L
+                                                                            onDoubleTapLike()
+                                                                        } else {
+                                                                            lastLikeTapTimestamp = now
                                                                         }
                                                                     } else {
-                                                                        lastTapTimestamp = now
-                                                                        lastTapSide = side
-                                                                        seekOverlayDirection = null
+                                                                        // Preserve the existing edge double-tap seek behavior.
+                                                                        // An edge tap cannot complete a center Like sequence.
+                                                                        lastLikeTapTimestamp = 0L
+                                                                        if (lastTapSide != side) {
+                                                                            seekResetJob?.cancel()
+                                                                            seekOverlayDirection = null
+                                                                            lastTapSide = side
+                                                                            lastTapTimestamp = now
+                                                                        } else if (now - lastTapTimestamp < 450L) {
+                                                                            val newSeconds = if (seekOverlayDirection == side) seekOverlaySeconds + 5 else 5
+                                                                            seekOverlaySeconds = newSeconds
+                                                                            seekOverlayDirection = side
+                                                                            lastTapTimestamp = now
+                                                                            val deltaMs = if (side == SeekDirection.FORWARD) 5_000L else -5_000L
+                                                                            val newPos = (player.state.value.positionMs + deltaMs).coerceIn(0L, player.state.value.durationMs.coerceAtLeast(0L))
+                                                                            player.seekTo(newPos)
+
+                                                                            seekResetJob?.cancel()
+                                                                            seekResetJob = coroutineScope.launch {
+                                                                                delay(700L)
+                                                                                seekOverlayDirection = null
+                                                                                lastTapSide = null
+                                                                            }
+                                                                        } else {
+                                                                            lastTapTimestamp = now
+                                                                            lastTapSide = side
+                                                                            seekOverlayDirection = null
+                                                                        }
                                                                     }
                                                                 }
                                                                 break
@@ -1306,6 +1652,9 @@ private fun FullPlayer(
 
                                                             if (change.isConsumed) {
                                                                 artworkDragX = 0f
+                                                                lastLikeTapTimestamp = 0L
+                                                                lastTapTimestamp = 0L
+                                                                lastTapSide = null
                                                                 break
                                                             }
 
@@ -1314,6 +1663,9 @@ private fun FullPlayer(
                                                             if (!isDrag) {
                                                                 if (kotlin.math.abs(dx) > touchSlop && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
                                                                     isDrag = true
+                                                                    lastLikeTapTimestamp = 0L
+                                                                    lastTapTimestamp = 0L
+                                                                    lastTapSide = null
                                                                     change.consume()
                                                                 }
                                                             } else {
@@ -1480,21 +1832,48 @@ private fun FullPlayer(
 
                                         Spacer(Modifier.width(12.dp))
 
-                                        Surface(
-                                            onClick = { onTabChange(FullPlayerTab.LYRICS) },
-                                            shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
-                                            contentColor = MaterialTheme.colorScheme.primary,
-                                            tonalElevation = 0.dp,
-                                            shadowElevation = 0.dp,
-                                            modifier = Modifier.size(46.dp),
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Icon(
-                                                    Icons.Filled.FormatQuote,
-                                                    contentDescription = "Show lyrics",
-                                                    modifier = Modifier.size(24.dp),
-                                                )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Surface(
+                                                onClick = onToggleLiked,
+                                                shape = CircleShape,
+                                                color = if (isLiked) {
+                                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+                                                } else {
+                                                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f)
+                                                },
+                                                contentColor = if (isLiked) {
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                                tonalElevation = 0.dp,
+                                                shadowElevation = 0.dp,
+                                                modifier = Modifier.size(46.dp),
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        if (isLiked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+                                                        contentDescription = if (isLiked) "Unlike song" else "Like song",
+                                                        modifier = Modifier.size(24.dp),
+                                                    )
+                                                }
+                                            }
+                                            Surface(
+                                                onClick = { onTabChange(FullPlayerTab.LYRICS) },
+                                                shape = CircleShape,
+                                                color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+                                                contentColor = MaterialTheme.colorScheme.primary,
+                                                tonalElevation = 0.dp,
+                                                shadowElevation = 0.dp,
+                                                modifier = Modifier.size(46.dp),
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        Icons.Filled.FormatQuote,
+                                                        contentDescription = "Show lyrics",
+                                                        modifier = Modifier.size(24.dp),
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -1872,6 +2251,16 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
     } else {
         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.90f)
     }
+    val qualityButtonBackground = if (isTranslucent) {
+        Color.White.copy(alpha = 0.12f)
+    } else {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+    }
+    val qualityButtonContent = if (isTranslucent) {
+        Color.White
+    } else {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    }
 
     Row(
         Modifier.fillMaxWidth(),
@@ -1881,8 +2270,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         Surface(
             onClick = player::toggleShuffle,
             shape = CircleShape,
-            color = edgeButtonBackground,
-            contentColor = edgeButtonContent,
+            color = if (state.shuffleEnabled) qualityButtonBackground else edgeButtonBackground,
+            contentColor = if (state.shuffleEnabled) qualityButtonContent else edgeButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
@@ -1893,14 +2282,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         }
         Surface(
             shape = RoundedCornerShape(24.dp),
-            color = when {
-                isTranslucent -> Color.White.copy(alpha = 0.12f)
-                else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
-            },
-            contentColor = when {
-                isTranslucent -> Color.White
-                else -> MaterialTheme.colorScheme.onPrimaryContainer
-            },
+            color = qualityButtonBackground,
+            contentColor = qualityButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier.weight(1.3f).height(if (isTranslucent) 44.dp else 48.dp),
@@ -1929,8 +2312,8 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
         Surface(
             onClick = player::cycleRepeatMode,
             shape = CircleShape,
-            color = edgeButtonBackground,
-            contentColor = edgeButtonContent,
+            color = if (state.repeatMode != Player.REPEAT_MODE_OFF) qualityButtonBackground else edgeButtonBackground,
+            contentColor = if (state.repeatMode != Player.REPEAT_MODE_OFF) qualityButtonContent else edgeButtonContent,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             modifier = Modifier.weight(1f).height(if (isTranslucent) 44.dp else 48.dp),
@@ -2088,4 +2471,5 @@ private fun PlayableTrack.toGeneratedTrack() = com.lastwave.app.data.generate.Ge
     artist = artist,
     artworkUrl = artworkUrl,
     album = album,
+    url = videoId?.let { "https://music.youtube.com/watch?v=$it" }.orEmpty(),
 )

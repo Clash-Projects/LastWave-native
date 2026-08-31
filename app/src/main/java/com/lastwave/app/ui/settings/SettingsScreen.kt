@@ -68,6 +68,7 @@ import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FormatListBulleted
@@ -146,6 +147,7 @@ import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.theme.ExpressivePillShape
+import kotlin.math.roundToInt
 
 private data class AccentPreset(val name: String, val hex: String)
 private val ACCENT_PRESETS = listOf(
@@ -241,12 +243,15 @@ fun SettingsScreen(
     val ytLastSyncAt by viewModel.ytLastSyncAt.collectAsStateWithLifecycle()
     val syncedPlaylistIds by viewModel.syncedPlaylistIds.collectAsStateWithLifecycle()
     val allPlaylists by viewModel.allPlaylists.collectAsStateWithLifecycle()
+    val ytAccountPlaylists by viewModel.ytAccountPlaylists.collectAsStateWithLifecycle()
+    val hiddenYtLibraryPlaylistIds by viewModel.hiddenYtLibraryPlaylistIds.collectAsStateWithLifecycle()
     val eq by viewModel.equalizer.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showQualityDialog by remember { mutableStateOf(false) }
     var showEqSheet by remember { mutableStateOf(false) }
     var showLyricsAnimationSheet by remember { mutableStateOf(false) }
     var showSyncPlaylistsSheet by remember { mutableStateOf(false) }
+    var showYtLibraryVisibilitySheet by remember { mutableStateOf(false) }
     var showYtDisconnectConfirm by remember { mutableStateOf(false) }
 
     // Sends the user to Android's own Notification Listener access screen
@@ -327,7 +332,7 @@ fun SettingsScreen(
                             else if (ytSyncEnabled) "Selected playlists mirror to your account, 24/7" + lastSyncSuffix(ytLastSyncAt)
                             else "Keep your YT Music library in sync with LastWave"
                     }
-                    val ytRowCount = if (ytConnected) 4 else 2
+                    val ytRowCount = if (ytConnected) 5 else 2
                     SettingsGroup(rowCount = ytRowCount) { index, position ->
                         when (index) {
                             0 -> if (ytConnected) {
@@ -343,7 +348,7 @@ fun SettingsScreen(
                                     iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                     iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                     title = "Connect YouTube Music",
-                                    subtitle = "Sign in to sync & import playlists",
+                                    subtitle = "Sign in to see and sync every playlist",
                                     onClick = onOpenYouTubeLogin,
                                     position = position,
                                 )
@@ -352,7 +357,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.CloudSync,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                title = "Sync Playlists to YouTube Music",
+                                title = "Two-way Playlist Sync",
                                 subtitle = syncSubtitle,
                                 checked = ytConnected && ytSyncEnabled,
                                 onCheckedChange = viewModel::setYtSyncEnabled,
@@ -385,12 +390,29 @@ fun SettingsScreen(
                                     position = position,
                                 )
                             }
-                            3 -> SettingsActionCard(
+                            3 -> if (ytConnected) {
+                                val shownCount = ytAccountPlaylists.count { it.id !in hiddenYtLibraryPlaylistIds }
+                                val visibilitySubtitle = if (shownCount == ytAccountPlaylists.size) {
+                                    "All (${ytAccountPlaylists.size}) account playlists shown"
+                                } else {
+                                    "$shownCount of ${ytAccountPlaylists.size} account playlists shown"
+                                }
+                                SettingsActionCard(
+                                    icon = Icons.Filled.Visibility,
+                                    iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                    iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    title = "YouTube Playlists Shown",
+                                    subtitle = visibilitySubtitle,
+                                    onClick = { showYtLibraryVisibilitySheet = true },
+                                    position = position,
+                                )
+                            }
+                            4 -> SettingsActionCard(
                                 icon = Icons.Filled.QueueMusic,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Your Playlists on YouTube Music",
-                                subtitle = "Browse & import from your YouTube account",
+                                title = "Make YouTube Playlists Local",
+                                subtitle = "Optional: browse and save local copies",
                                 onClick = onOpenYouTubeImport,
                                 position = position,
                             )
@@ -990,6 +1012,16 @@ fun SettingsScreen(
         )
     }
 
+    if (showYtLibraryVisibilitySheet) {
+        YouTubeLibraryVisibilitySheet(
+            playlists = ytAccountPlaylists,
+            hiddenIds = hiddenYtLibraryPlaylistIds,
+            onSetVisible = viewModel::setYtLibraryPlaylistVisible,
+            onSetAllVisible = viewModel::setAllYtLibraryPlaylistsVisible,
+            onDismiss = { showYtLibraryVisibilitySheet = false },
+        )
+    }
+
     if (showQualityDialog) {
         val tiers = listOf(
             Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Lossless Studio FLAC" to "24-BIT / 192k"),
@@ -1170,11 +1202,11 @@ fun SettingsScreen(
 }
 
 private fun appVersionName(context: android.content.Context): String = try {
-    context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
+    context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "3.4.0"
 } catch (error: Exception) {
-    "1.0"
+    "3.4.0"
 } catch (error: LinkageError) {
-    "1.0"
+    "3.4.0"
 }
 
 /** Small tap-scale used across the row-style cards on this screen for a
@@ -1362,8 +1394,13 @@ private fun CrossfadeDurationRow(
             }
             Slider(
                 value = sliderValue,
-                onValueChange = { sliderValue = it },
-                onValueChangeFinished = { onSecondsChange(sliderValue.toInt()) },
+                onValueChange = { value ->
+                    val updatedSeconds = value.roundToInt().coerceIn(1, 10)
+                    if (updatedSeconds.toFloat() != sliderValue) {
+                        sliderValue = updatedSeconds.toFloat()
+                        onSecondsChange(updatedSeconds)
+                    }
+                },
                 valueRange = 1f..10f,
                 steps = 8,
                 modifier = Modifier
@@ -2539,9 +2576,127 @@ private fun EqNativeSlider(
     }
 }
 
-/**
- * Bottom sheet allowing user to select which specific playlists to mirror to YouTube Music.
- */
+/** Controls which connected-account playlists appear in LastWave. This is
+ * intentionally independent from importing and two-way sync. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun YouTubeLibraryVisibilitySheet(
+    playlists: List<com.lastwave.app.data.music.YouTubePlaylistSummary>,
+    hiddenIds: Set<String>,
+    onSetVisible: (String, Boolean) -> Unit,
+    onSetAllVisible: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val allShown = playlists.isNotEmpty() && playlists.all { it.id !in hiddenIds }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp + safeDrawingBottomPadding()),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("YouTube Playlists Shown", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(
+                        "Choose which account playlists appear in LastWave",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                        onSetAllVisible(!allShown)
+                    },
+                ) {
+                    Text(if (allShown) "Hide All" else "Show All", fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (playlists.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("No YouTube playlists found", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(playlists.size, key = { playlists[it].id }) { index ->
+                        val playlist = playlists[index]
+                        val isShown = playlist.id !in hiddenIds
+                        Surface(
+                            onClick = {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                onSetVisible(playlist.id, !isShown)
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isShown) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainer,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isShown) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        Icons.Filled.QueueMusic,
+                                        contentDescription = null,
+                                        tint = if (isShown) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Spacer(Modifier.width(14.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(playlist.title, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    Text(
+                                        playlist.trackCountText ?: playlist.author ?: "YouTube Music playlist",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                    )
+                                }
+                                Checkbox(
+                                    checked = isShown,
+                                    onCheckedChange = { checked -> onSetVisible(playlist.id, checked) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = onDismiss, shape = CircleShape, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                Text("Done", fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+/** Bottom sheet allowing user to select which specific playlists to mirror to YouTube Music. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SyncPlaylistsSheet(

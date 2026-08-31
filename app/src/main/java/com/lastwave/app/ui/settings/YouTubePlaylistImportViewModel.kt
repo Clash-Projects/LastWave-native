@@ -8,15 +8,14 @@ import com.lastwave.app.data.music.YouTubePlaylistSummary
 import com.lastwave.app.data.playlist.PlaylistImportManager
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.data.ytmusic.YtMusicAuthManager
+import com.lastwave.app.data.ytmusic.YtMusicLibraryManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 enum class ImportTab(val title: String) {
@@ -53,12 +52,20 @@ class YouTubePlaylistImportViewModel @Inject constructor(
     private val innerTube: InnerTubeMusicApi,
     private val importManager: PlaylistImportManager,
     private val ytAuthManager: YtMusicAuthManager,
+    private val ytMusicLibraryManager: YtMusicLibraryManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(YouTubeImportUiState())
     val uiState: StateFlow<YouTubeImportUiState> = _uiState.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            ytMusicLibraryManager.accountPlaylists.collect { playlists ->
+                _uiState.update {
+                    it.copy(libraryPlaylists = playlists, isLoadingLibrary = false)
+                }
+            }
+        }
         viewModelScope.launch {
             ytAuthManager.connection.collect { connection ->
                 val wasConnected = _uiState.value.ytConnected
@@ -108,10 +115,8 @@ class YouTubePlaylistImportViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingLibrary = true, errorMessage = null) }
             try {
-                val playlists = withContext(Dispatchers.IO) { innerTube.fetchLibraryPlaylists() }
-                _uiState.update { current ->
-                    current.copy(isLoadingLibrary = false, libraryPlaylists = playlists)
-                }
+                ytMusicLibraryManager.refresh()
+                _uiState.update { it.copy(isLoadingLibrary = false) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -235,11 +240,16 @@ class YouTubePlaylistImportViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isImporting = true, importProgress = "Starting import...") }
             val savedList = mutableListOf<SavedPlaylist>()
+            val ownedIds = _uiState.value.libraryPlaylists.mapTo(mutableSetOf()) { it.id }
 
             try {
                 val preview = _uiState.value.previewPlaylist
                 if (preview != null && selectedIds.contains(preview.id) && selectedIds.size == 1) {
-                    val saved = importManager.importYouTubePlaylist(preview)
+                    val saved = if (preview.id in ownedIds) {
+                        importManager.importOwnedYouTubePlaylist(preview)
+                    } else {
+                        importManager.importYouTubePlaylist(preview)
+                    }
                     savedList.add(saved)
                 } else {
                     var count = 0
@@ -248,7 +258,11 @@ class YouTubePlaylistImportViewModel @Inject constructor(
                         _uiState.update { it.copy(importProgress = "Importing playlist $count of ${selectedIds.size}...") }
                         val playlistResult = innerTube.fetchPlaylist(id)
                         if (playlistResult != null && playlistResult.tracks.isNotEmpty()) {
-                            val saved = importManager.importYouTubePlaylist(playlistResult)
+                            val saved = if (playlistResult.id in ownedIds) {
+                                importManager.importOwnedYouTubePlaylist(playlistResult)
+                            } else {
+                                importManager.importYouTubePlaylist(playlistResult)
+                            }
                             savedList.add(saved)
                         }
                     }

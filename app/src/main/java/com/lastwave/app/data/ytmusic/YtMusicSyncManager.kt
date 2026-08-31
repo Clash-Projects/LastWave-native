@@ -65,6 +65,7 @@ class YtMusicSyncManager @Inject constructor(
     private val innerTube: InnerTubeMusicApi,
     private val ytAuth: YtMusicAuthManager,
     private val preferences: YtMusicPreferences,
+    private val libraryManager: YtMusicLibraryManager,
     private val applicationScope: CoroutineScope,
 ) {
     private val _state = MutableStateFlow<YtSyncState>(YtSyncState.Idle)
@@ -118,12 +119,14 @@ class YtMusicSyncManager @Inject constructor(
 
         try {
             val allPlaylists = playlistRepository.getAll()
+                .filterNot { it.mode == com.lastwave.app.data.playlist.LIKED_SONGS_MODE }
             val syncedIds = preferences.syncedPlaylistIds.first()
             val playlists = if (syncedIds != null) allPlaylists.filter { it.id in syncedIds } else allPlaylists
 
             if (playlists.isEmpty()) {
                 _state.value = YtSyncState.Completed(System.currentTimeMillis(), 0, 0, 0)
                 preferences.setLastSyncAt(System.currentTimeMillis())
+                libraryManager.refresh()
                 return true
             }
 
@@ -133,13 +136,14 @@ class YtMusicSyncManager @Inject constructor(
 
             // Deletion propagation: mappings whose local playlist vanished
             // mean "deleted in LastWave" — delete the remote mirror too.
-            val liveIds = playlists.mapTo(mutableSetOf()) { it.id }
+            val liveIds = allPlaylists.mapTo(mutableSetOf()) { it.id }
             val orphans = mappings.keys.filterNot { it in liveIds }
             var removedAnyMapping = false
             for (orphanId in orphans) {
-                val remoteId = mappings.remove(orphanId)?.remotePlaylistId
+                val removedMapping = mappings.remove(orphanId)
+                val remoteId = removedMapping?.remotePlaylistId
                 removedAnyMapping = true
-                if (remoteId != null) {
+                if (remoteId != null && removedMapping?.deleteRemoteWithLocal == true) {
                     runCatching { innerTube.deleteRemotePlaylist(remoteId) }
                         .onFailure { Log.w(TAG, "Orphan remote delete failed ($remoteId)", it) }
                 }
@@ -164,6 +168,7 @@ class YtMusicSyncManager @Inject constructor(
             val now = System.currentTimeMillis()
             preferences.setLastSyncAt(now)
             _state.value = YtSyncState.Completed(now, playlists.size - failed, failed, unmatchedTotal)
+            libraryManager.refresh()
             Log.d(TAG, "YT sync ($reason): ${playlists.size - failed}/${playlists.size} ok, $unmatchedTotal unmatched")
             return true
         } catch (e: CancellationException) {
@@ -241,32 +246,78 @@ class YtMusicSyncManager @Inject constructor(
         } else {
             remote
         }
-        val desiredSet = desiredVideoIds.toSet()
-        val remoteSet = (currentRemote?.items ?: emptyList()).mapTo(mutableSetOf()) { it.videoId }
+        val remoteItems = currentRemote?.items.orEmpty()
+        val remoteVideoIds = remoteItems.map { it.videoId }
+        val baseline = mapping?.lastSyncedVideoIds.orEmpty().toSet()
+        val localSet = desiredVideoIds.toSet()
+        val remoteSet = remoteVideoIds.toSet()
 
-        val toRemove = (currentRemote?.items ?: emptyList())
-            .filter { it.videoId !in desiredSet }
+        // Three-way merge against the previous successful baseline. Additions
+        // from either app flow to the other; a removal on either side remains
+        // a removal instead of being resurrected by the unchanged copy.
+        val removedLocally = baseline - localSet
+        val removedRemotely = baseline - remoteSet
+        val finalSet = (baseline - removedLocally - removedRemotely) +
+            (localSet - baseline) + (remoteSet - baseline)
+        val finalVideoIds = buildList {
+            desiredVideoIds.filterTo(this) { it in finalSet }
+            remoteVideoIds.filterTo(this) { it in finalSet && it !in this }
+        }
+
+        val toRemove = remoteItems
+            .filter { it.videoId !in finalSet }
             .mapNotNull { item -> item.setVideoId?.let { it to item.videoId } }
-        val toAdd = desiredVideoIds.filter { it !in remoteSet }
+        val toAdd = finalVideoIds.filter { it !in remoteSet }
 
         if (toRemove.isNotEmpty()) {
-            innerTube.removeVideosFromRemotePlaylist(remoteId, toRemove)
+            check(innerTube.removeVideosFromRemotePlaylist(remoteId, toRemove)) {
+                "YouTube Music rejected playlist removals"
+            }
         }
         if (toAdd.isNotEmpty()) {
-            innerTube.addVideosToRemotePlaylist(remoteId, toAdd)
+            check(innerTube.addVideosToRemotePlaylist(remoteId, toAdd)) {
+                "YouTube Music rejected playlist additions"
+            }
+        }
+
+        // Pull account-side additions/removals into the local copy. Unmatched
+        // local tracks are preserved because they have no reliable video ID.
+        if (finalVideoIds != desiredVideoIds) {
+            val remoteMetadata = innerTube.fetchPlaylist(remoteId)?.tracks.orEmpty()
+                .associateBy { it.videoId }
+            val localByVideoId = resolvedVideoIds.mapIndexedNotNull { index, videoId ->
+                videoId?.let { it to playlist.tracks[index] }
+            }.toMap()
+            val mergedTracks = buildList {
+                playlist.tracks.forEachIndexed { index, track ->
+                    val videoId = resolvedVideoIds[index]
+                    if (videoId == null || videoId in finalSet) add(track)
+                }
+                val represented = resolvedVideoIds.filterNotNull().toSet()
+                finalVideoIds.filterNot { it in represented }.forEach { videoId ->
+                    val track = localByVideoId[videoId]
+                        ?: remoteMetadata[videoId]?.toGeneratedTrack()
+                    if (track != null) add(track)
+                }
+            }
+            playlistRepository.replaceTracksForSync(playlist.id, mergedTracks)
         }
 
         allMappings[playlist.id] = (allMappings[playlist.id] ?: YtPlaylistMapping(remoteId, playlist.title))
-            .copy(remoteTitle = playlist.title, lastSyncAtMillis = now)
+            .copy(
+                remoteTitle = playlist.title,
+                lastSyncAtMillis = now,
+                lastSyncedVideoIds = finalVideoIds,
+            )
         preferences.setMappings(allMappings)
         return unmatched
     }
 
     private companion object {
         const val TAG = "YtMusicSyncManager"
-        const val DEBOUNCE_MS = 5_000L
-        const val INITIAL_DELAY_MS = 20_000L
-        const val PERIODIC_INTERVAL_MS = 15 * 60_000L
+        const val DEBOUNCE_MS = 750L
+        const val INITIAL_DELAY_MS = 2_000L
+        const val PERIODIC_INTERVAL_MS = 60_000L
         const val WRITE_PACE_MS = 350L
         const val NEGATIVE_MATCH_TTL_MS = 6 * 60 * 60_000L
         const val MATCH_CONCURRENCY = 6

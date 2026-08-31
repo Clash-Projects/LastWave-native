@@ -3,7 +3,10 @@ package com.lastwave.app.data.playlist
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubePlaylistResult
+import com.lastwave.app.data.ytmusic.YtMusicPreferences
+import com.lastwave.app.data.ytmusic.YtPlaylistMapping
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.io.InputStream
 import javax.inject.Inject
@@ -14,6 +17,7 @@ class PlaylistImportManager @Inject constructor(
     private val playlistRepository: PlaylistRepository,
     private val innerTube: InnerTubeMusicApi,
     private val csvPlaylistImporter: CsvPlaylistImporter,
+    private val ytMusicPreferences: YtMusicPreferences,
 ) {
 
     suspend fun importYouTubePlaylist(
@@ -26,6 +30,7 @@ class PlaylistImportManager @Inject constructor(
                 artist = yt.artist,
                 album = yt.album,
                 artworkUrl = yt.artworkUrl,
+                url = "https://music.youtube.com/watch?v=${yt.videoId}",
             )
         }
 
@@ -36,6 +41,26 @@ class PlaylistImportManager @Inject constructor(
             tracks = tracks,
         )
     }
+
+    /** Makes an owned account playlist local while retaining its live two-way mapping. */
+    suspend fun importOwnedYouTubePlaylist(playlist: YouTubePlaylistResult): SavedPlaylist =
+        withContext(Dispatchers.IO) {
+            val saved = importYouTubePlaylist(playlist)
+            val mappings = ytMusicPreferences.mappings().toMutableMap()
+            mappings[saved.id] = YtPlaylistMapping(
+                remotePlaylistId = playlist.id,
+                remoteTitle = playlist.title,
+                lastSyncAtMillis = System.currentTimeMillis(),
+                lastSyncedVideoIds = playlist.tracks.map { it.videoId },
+                deleteRemoteWithLocal = false,
+            )
+            ytMusicPreferences.setMappings(mappings)
+            val selectedIds = ytMusicPreferences.syncedPlaylistIds.first()
+            if (selectedIds != null && saved.id !in selectedIds) {
+                ytMusicPreferences.setSyncedPlaylistIds(selectedIds + saved.id)
+            }
+            saved
+        }
 
     suspend fun importCsvStream(
         inputStream: InputStream,

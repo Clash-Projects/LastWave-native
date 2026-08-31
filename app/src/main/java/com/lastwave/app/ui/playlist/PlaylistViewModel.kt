@@ -11,6 +11,8 @@ import com.lastwave.app.data.naming.PlaylistNamer
 import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.playlist.PlaylistExportEvents
 import com.lastwave.app.data.playlist.SavedPlaylist
+import com.lastwave.app.data.playlist.LIKED_SONGS_MODE
+import com.lastwave.app.data.playlist.isYouTubeOnly
 import com.lastwave.app.data.repository.AuthRepository
 import com.lastwave.app.util.FileExportHelper
 import com.lastwave.app.util.PlaylistExportFormat
@@ -71,6 +73,7 @@ class PlaylistViewModel @Inject constructor(
     private val exportEvents: PlaylistExportEvents,
     private val ytMusicPreferences: com.lastwave.app.data.ytmusic.YtMusicPreferences,
     private val ytMusicSyncManager: com.lastwave.app.data.ytmusic.YtMusicSyncManager,
+    private val ytMusicLibraryManager: com.lastwave.app.data.ytmusic.YtMusicLibraryManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlaylistUiState())
@@ -114,6 +117,29 @@ class PlaylistViewModel @Inject constructor(
         viewModelScope.launch {
             playlistRepository.changes.collect { load() }
         }
+        viewModelScope.launch {
+            ytMusicLibraryManager.playlists.collect { remote ->
+                val openRemoteId = _uiState.value.detailPlaylist
+                    ?.takeIf { it.isYouTubeOnly }
+                    ?.id
+                _uiState.update { current ->
+                    val local = current.playlists.filterNot { it.isYouTubeOnly }
+                    current.copy(playlists = sortPlaylists(local + remote, current.sortMode))
+                }
+                if (openRemoteId != null && remote.any { it.id == openRemoteId }) {
+                    ytMusicLibraryManager.loadDetail(openRemoteId)?.let { refreshed ->
+                        _uiState.update { current ->
+                            current.copy(
+                                detailPlaylist = refreshed,
+                                playlists = current.playlists.map { playlist ->
+                                    if (playlist.id == refreshed.id) refreshed else playlist
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /** Re-reads from Room. Called on first composition and again whenever
@@ -122,11 +148,16 @@ class PlaylistViewModel @Inject constructor(
     fun load(justGeneratedId: Long? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            val all = sortPlaylists(playlistRepository.getAll(), _uiState.value.sortMode)
+            val local = playlistRepository.getAll()
+            val all = sortPlaylists(local + ytMusicLibraryManager.playlists.value, _uiState.value.sortMode)
             val newest = justGeneratedId ?: all.maxByOrNull { it.createdAtMillis }?.id
             _uiState.update { current ->
                 val currentDetailId = current.detailPlaylist?.id
-                val updatedDetail = if (currentDetailId != null) all.firstOrNull { pl -> pl.id == currentDetailId } else current.detailPlaylist
+                val updatedDetail = if (currentDetailId != null && currentDetailId >= 0L) {
+                    all.firstOrNull { pl -> pl.id == currentDetailId }
+                } else {
+                    current.detailPlaylist
+                }
                 current.copy(
                     isLoading = false,
                     playlists = all,
@@ -141,6 +172,8 @@ class PlaylistViewModel @Inject constructor(
                     artworkRepository.enrichBatch(pl.tracks.take(6).map { it.name to it.artist })
                 }
             }
+            ytMusicLibraryManager.refresh()
+            runCatching { ytMusicSyncManager.syncNow("playlist_open") }
         }
     }
 
@@ -148,17 +181,38 @@ class PlaylistViewModel @Inject constructor(
     fun loadDetail(playlistId: Long) {
         viewModelScope.launch {
             _uiState.update { it.copy(isDetailLoading = true) }
-            val pl = playlistRepository.getById(playlistId)
+            val pl = if (playlistId < 0L) {
+                ytMusicLibraryManager.loadDetail(playlistId) { updated ->
+                    _uiState.update { current ->
+                        current.copy(
+                            isDetailLoading = updated.tracks.isEmpty(),
+                            detailPlaylist = updated,
+                            playlists = current.playlists.map { existing ->
+                                if (existing.id == updated.id) updated else existing
+                            },
+                        )
+                    }
+                    if (updated.tracks.isNotEmpty()) {
+                        viewModelScope.launch {
+                            artworkRepository.enrichBatch(updated.tracks.take(10).map { t -> t.name to t.artist })
+                        }
+                    }
+                }
+            } else {
+                playlistRepository.getById(playlistId)
+            }
             _uiState.update {
                 it.copy(
                     isDetailLoading = false,
-                    detailPlaylist = pl,
-                    playlists = if (pl != null && it.playlists.none { existing -> existing.id == pl.id }) {
-                        it.playlists + pl
+                    detailPlaylist = pl ?: it.detailPlaylist,
+                    playlists = if (pl != null) {
+                        if (it.playlists.any { existing -> existing.id == pl.id }) {
+                            it.playlists.map { existing -> if (existing.id == pl.id) pl else existing }
+                        } else it.playlists + pl
                     } else it.playlists,
                 )
             }
-            if (pl != null) {
+            if (pl != null && pl.tracks.isNotEmpty()) {
                 artworkRepository.enrichBatch(pl.tracks.take(10).map { t -> t.name to t.artist })
             }
         }
@@ -174,14 +228,18 @@ class PlaylistViewModel @Inject constructor(
     private fun sortPlaylists(playlists: List<SavedPlaylist>, mode: PlaylistSortMode): List<SavedPlaylist> =
         playlists.sortedWith(
             when (mode) {
-                PlaylistSortMode.DATE_DESC -> compareByDescending<SavedPlaylist> { it.isPinned }
+                PlaylistSortMode.DATE_DESC -> compareByDescending<SavedPlaylist> { it.mode == LIKED_SONGS_MODE && it.isPinned }
+                    .thenByDescending { it.isPinned }
                     .thenByDescending { it.createdAtMillis }
-                PlaylistSortMode.DATE_ASC -> compareByDescending<SavedPlaylist> { it.isPinned }
+                PlaylistSortMode.DATE_ASC -> compareByDescending<SavedPlaylist> { it.mode == LIKED_SONGS_MODE && it.isPinned }
+                    .thenByDescending { it.isPinned }
                     .thenBy { it.createdAtMillis }
-                PlaylistSortMode.NAME -> compareByDescending<SavedPlaylist> { it.isPinned }
+                PlaylistSortMode.NAME -> compareByDescending<SavedPlaylist> { it.mode == LIKED_SONGS_MODE && it.isPinned }
+                    .thenByDescending { it.isPinned }
                     .thenBy { it.title.lowercase() }
-                PlaylistSortMode.TRACK_COUNT -> compareByDescending<SavedPlaylist> { it.isPinned }
-                    .thenByDescending { it.tracks.size }
+                PlaylistSortMode.TRACK_COUNT -> compareByDescending<SavedPlaylist> { it.mode == LIKED_SONGS_MODE && it.isPinned }
+                    .thenByDescending { it.isPinned }
+                    .thenByDescending { it.remoteTrackCount ?: it.tracks.size }
             },
         )
 
@@ -231,6 +289,19 @@ class PlaylistViewModel @Inject constructor(
         }
     }
 
+    fun makeLocal(id: Long) {
+        viewModelScope.launch {
+            val saved = ytMusicLibraryManager.makeLocal(id)
+            _uiState.update {
+                it.copy(
+                    toastMessage = if (saved != null) "${saved.title} is now available locally" else "Couldn't make playlist local",
+                    detailPlaylist = saved ?: it.detailPlaylist,
+                )
+            }
+            if (saved != null) load(justGeneratedId = saved.id)
+        }
+    }
+
     fun setCustomCover(id: Long, uri: String?) {
         viewModelScope.launch {
             playlistRepository.setCustomCover(id, uri)
@@ -242,26 +313,55 @@ class PlaylistViewModel @Inject constructor(
     }
 
     fun togglePinned(id: Long) {
-        val playlist = _uiState.value.playlists.firstOrNull { it.id == id } ?: return
+        val playlist = _uiState.value.playlists.firstOrNull { it.id == id }
+            ?: _uiState.value.detailPlaylist?.takeIf { it.id == id }
+            ?: return
         viewModelScope.launch {
-            playlistRepository.setPinned(id, !playlist.isPinned)
-            _uiState.update {
-                it.copy(toastMessage = if (playlist.isPinned) "Playlist unpinned" else "Playlist pinned")
+            val willBePinned = !playlist.isPinned
+            if (id < 0L) {
+                ytMusicLibraryManager.togglePinned(id, willBePinned)
+            } else {
+                playlistRepository.setPinned(id, willBePinned)
             }
-            load()
+            _uiState.update { current ->
+                val updatedPlaylists = current.playlists.map { if (it.id == id) it.copy(isPinned = willBePinned) else it }
+                val sorted = sortPlaylists(updatedPlaylists, current.sortMode)
+                current.copy(
+                    playlists = sorted,
+                    detailPlaylist = if (current.detailPlaylist?.id == id) current.detailPlaylist?.copy(isPinned = willBePinned) else current.detailPlaylist,
+                    toastMessage = if (willBePinned) "Playlist pinned to top" else "Playlist unpinned",
+                )
+            }
+            if (id >= 0L) load()
         }
     }
 
     fun removeTrack(playlistId: Long, index: Int) {
-        viewModelScope.launch {
-            val updated = playlistRepository.removeTrack(playlistId, index)
+        val before = _uiState.value.detailPlaylist?.takeIf { it.id == playlistId }
+        if (playlistId < 0L && before != null && index in before.tracks.indices) {
             _uiState.update { current ->
                 current.copy(
-                    detailPlaylist = if (current.detailPlaylist?.id == playlistId) updated else current.detailPlaylist,
-                    toastMessage = "Song removed from playlist",
+                    detailPlaylist = before.copy(
+                        tracks = before.tracks.filterIndexed { trackIndex, _ -> trackIndex != index },
+                        remoteTrackCount = (before.remoteTrackCount ?: before.tracks.size).let { maxOf(0, it - 1) },
+                    ),
                 )
             }
-            load()
+        }
+        viewModelScope.launch {
+            val updated = if (playlistId < 0L) {
+                ytMusicLibraryManager.removeTrack(playlistId, index)
+            } else {
+                playlistRepository.removeTrack(playlistId, index)
+            }
+            _uiState.update { current ->
+                val removed = before != null && updated != null && updated.tracks.size < before.tracks.size
+                current.copy(
+                    detailPlaylist = if (current.detailPlaylist?.id == playlistId) updated ?: before else current.detailPlaylist,
+                    toastMessage = if (removed || playlistId >= 0L) "Song removed from playlist" else "Couldn't remove song",
+                )
+            }
+            if (playlistId >= 0L) load()
         }
     }
 

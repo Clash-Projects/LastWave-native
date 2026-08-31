@@ -28,6 +28,18 @@ data class YtPlaylistMapping(
     val remotePlaylistId: String,
     val remoteTitle: String,
     val lastSyncAtMillis: Long = 0L,
+    val lastSyncedVideoIds: List<String> = emptyList(),
+    /** Imported account playlists stay on YouTube when their optional local copy is deleted. */
+    val deleteRemoteWithLocal: Boolean = true,
+)
+
+@Serializable
+data class YtCachedLibraryPlaylist(
+    val id: String,
+    val title: String,
+    val author: String? = null,
+    val trackCountText: String? = null,
+    val artworkUrl: String? = null,
 )
 
 data class YtConnection(
@@ -83,11 +95,17 @@ class YtMusicPreferences @Inject constructor(
      *  must hold before any background write to the account happens. */
     suspend fun isSyncActive(): Boolean =
         connection.first().isConnected &&
-            dataStore.data.recoverPreferences("YtMusicPreferences").first().readSafely(SYNC_ENABLED_KEY) == true
+            dataStore.data.recoverPreferences("YtMusicPreferences").first().let { prefs ->
+                prefs.readSafely(SYNC_ENABLED_KEY)
+                    ?: !prefs.readSafely(COOKIES_KEY).isNullOrBlank()
+            }
 
     val syncEnabled: Flow<Boolean> = dataStore.data
         .recoverPreferences("YtMusicPreferences")
-        .map { it.readSafely(SYNC_ENABLED_KEY) == true }
+        .map { prefs ->
+            prefs.readSafely(SYNC_ENABLED_KEY)
+                ?: !prefs.readSafely(COOKIES_KEY).isNullOrBlank()
+        }
 
     val lastSyncAt: Flow<Long> = dataStore.data
         .recoverPreferences("YtMusicPreferences")
@@ -118,6 +136,22 @@ class YtMusicPreferences @Inject constructor(
         }
     }
 
+    suspend fun cachedLibraryPlaylists(): List<YtCachedLibraryPlaylist> =
+        withContext(Dispatchers.IO) {
+            dataStore.data.recoverPreferences("YtMusicPreferences").first()
+                .readSafely(LIBRARY_CACHE_KEY)
+                ?.let { raw ->
+                    runCatching { json.decodeFromString<List<YtCachedLibraryPlaylist>>(raw) }.getOrNull()
+                }
+                .orEmpty()
+        }
+
+    suspend fun setCachedLibraryPlaylists(playlists: List<YtCachedLibraryPlaylist>) {
+        withContext(Dispatchers.IO) {
+            dataStore.edit { prefs -> prefs[LIBRARY_CACHE_KEY] = json.encodeToString(playlists) }
+        }
+    }
+
     suspend fun saveConnection(
         cookies: Map<String, String>,
         accountName: String,
@@ -130,6 +164,8 @@ class YtMusicPreferences @Inject constructor(
             if (channelHandle != null) prefs[CHANNEL_HANDLE_KEY] = channelHandle else prefs.remove(CHANNEL_HANDLE_KEY)
             if (photoUrl != null) prefs[PHOTO_URL_KEY] = photoUrl else prefs.remove(PHOTO_URL_KEY)
             prefs[CONNECTED_AT_KEY] = System.currentTimeMillis()
+            // A newly connected account is live by default; no separate auto-sync setup step.
+            prefs[SYNC_ENABLED_KEY] = true
         }
     }
 
@@ -141,6 +177,8 @@ class YtMusicPreferences @Inject constructor(
             prefs.remove(PHOTO_URL_KEY)
             prefs.remove(CONNECTED_AT_KEY)
             prefs.remove(MAPPINGS_KEY)
+            prefs.remove(LIBRARY_CACHE_KEY)
+            prefs.remove(HIDDEN_LIBRARY_PLAYLIST_IDS_KEY)
             prefs[SYNC_ENABLED_KEY] = false
         }
     }
@@ -152,6 +190,39 @@ class YtMusicPreferences @Inject constructor(
                 runCatching { json.decodeFromString<Set<Long>>(raw) }.getOrNull()
             }
         }
+
+    /** IDs explicitly hidden from LastWave. Empty means show every account playlist. */
+    val hiddenLibraryPlaylistIds: Flow<Set<String>> = dataStore.data
+        .recoverPreferences("YtMusicPreferences")
+        .map { prefs ->
+            prefs.readSafely(HIDDEN_LIBRARY_PLAYLIST_IDS_KEY)?.let { raw ->
+                runCatching { json.decodeFromString<Set<String>>(raw) }.getOrNull()
+            }.orEmpty()
+        }
+
+    suspend fun setLibraryPlaylistVisible(playlistId: String, visible: Boolean) {
+        dataStore.edit { prefs ->
+            val hidden = prefs.readSafely(HIDDEN_LIBRARY_PLAYLIST_IDS_KEY)?.let { raw ->
+                runCatching { json.decodeFromString<Set<String>>(raw) }.getOrNull()
+            }.orEmpty()
+            val updated = if (visible) hidden - playlistId else hidden + playlistId
+            if (updated.isEmpty()) {
+                prefs.remove(HIDDEN_LIBRARY_PLAYLIST_IDS_KEY)
+            } else {
+                prefs[HIDDEN_LIBRARY_PLAYLIST_IDS_KEY] = json.encodeToString(updated)
+            }
+        }
+    }
+
+    suspend fun setAllLibraryPlaylistsVisible(playlistIds: Set<String>, visible: Boolean) {
+        dataStore.edit { prefs ->
+            if (visible) {
+                prefs.remove(HIDDEN_LIBRARY_PLAYLIST_IDS_KEY)
+            } else {
+                prefs[HIDDEN_LIBRARY_PLAYLIST_IDS_KEY] = json.encodeToString(playlistIds)
+            }
+        }
+    }
 
     suspend fun setSyncedPlaylistIds(ids: Set<Long>?) {
         dataStore.edit { prefs ->
@@ -184,6 +255,30 @@ class YtMusicPreferences @Inject constructor(
         dataStore.edit { it[LAST_SYNC_KEY] = millis }
     }
 
+    val pinnedLibraryPlaylistIds: Flow<Set<String>> = dataStore.data
+        .recoverPreferences("YtMusicPreferences")
+        .map { prefs ->
+            prefs.readSafely(PINNED_LIBRARY_PLAYLIST_IDS_KEY)?.let { raw ->
+                runCatching { json.decodeFromString<Set<String>>(raw) }.getOrNull()
+            }.orEmpty()
+        }
+
+    suspend fun setPinned(remotePlaylistId: String, isPinned: Boolean) {
+        withContext(Dispatchers.IO) {
+            dataStore.edit { prefs ->
+                val current = prefs.readSafely(PINNED_LIBRARY_PLAYLIST_IDS_KEY)?.let { raw ->
+                    runCatching { json.decodeFromString<Set<String>>(raw) }.getOrNull()
+                }.orEmpty()
+                val updated = if (isPinned) current + remotePlaylistId else current - remotePlaylistId
+                if (updated.isEmpty()) {
+                    prefs.remove(PINNED_LIBRARY_PLAYLIST_IDS_KEY)
+                } else {
+                    prefs[PINNED_LIBRARY_PLAYLIST_IDS_KEY] = json.encodeToString(updated)
+                }
+            }
+        }
+    }
+
     private companion object {
         const val TAG = "YtMusicPreferences"
         val COOKIES_KEY = stringPreferencesKey("ytm_cookies")
@@ -194,6 +289,9 @@ class YtMusicPreferences @Inject constructor(
         val SYNC_ENABLED_KEY = booleanPreferencesKey("ytm_sync_enabled")
         val SYNCED_PLAYLIST_IDS_KEY = stringPreferencesKey("ytm_synced_playlist_ids")
         val MAPPINGS_KEY = stringPreferencesKey("ytm_playlist_mappings")
+        val LIBRARY_CACHE_KEY = stringPreferencesKey("ytm_library_playlist_cache")
+        val HIDDEN_LIBRARY_PLAYLIST_IDS_KEY = stringPreferencesKey("ytm_hidden_library_playlist_ids")
+        val PINNED_LIBRARY_PLAYLIST_IDS_KEY = stringPreferencesKey("ytm_pinned_library_playlist_ids")
         val LAST_SYNC_KEY = longPreferencesKey("ytm_last_sync_at")
     }
 }

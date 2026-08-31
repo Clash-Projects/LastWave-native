@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -84,6 +85,7 @@ class SettingsViewModel @Inject constructor(
     private val ytAuthManager: com.lastwave.app.data.ytmusic.YtMusicAuthManager,
     private val ytMusicSyncManager: com.lastwave.app.data.ytmusic.YtMusicSyncManager,
     private val ytMusicPreferences: com.lastwave.app.data.ytmusic.YtMusicPreferences,
+    private val ytMusicLibraryManager: com.lastwave.app.data.ytmusic.YtMusicLibraryManager,
     private val downloadedTrackDao: com.lastwave.app.data.local.db.DownloadedTrackDao,
     val playlistImportManager: com.lastwave.app.data.playlist.PlaylistImportManager,
     val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
@@ -104,7 +106,12 @@ class SettingsViewModel @Inject constructor(
     val syncedPlaylistIds: StateFlow<Set<Long>?> = ytMusicPreferences.syncedPlaylistIds
         .withSettingsFallback("YouTube playlist selection", null)
         .stateIn(viewModelScope, SettingsSharing, null)
+    val ytAccountPlaylists = ytMusicLibraryManager.accountPlaylists
+    val hiddenYtLibraryPlaylistIds: StateFlow<Set<String>> = ytMusicPreferences.hiddenLibraryPlaylistIds
+        .withSettingsFallback("YouTube library visibility", emptySet())
+        .stateIn(viewModelScope, SettingsSharing, emptySet())
     val allPlaylists: StateFlow<List<com.lastwave.app.data.playlist.SavedPlaylist>> = playlistRepository.playlists
+        .map { playlists -> playlists.filterNot { it.mode == com.lastwave.app.data.playlist.LIKED_SONGS_MODE } }
         .withSettingsFallback("playlists", emptyList())
         .stateIn(viewModelScope, SettingsSharing, emptyList())
 
@@ -517,6 +524,21 @@ class SettingsViewModel @Inject constructor(
             if (ytSyncEnabled.value) {
                 runCatching { ytMusicSyncManager.syncNow("selection_change") }
             }
+        }
+    }
+
+    fun setYtLibraryPlaylistVisible(playlistId: String, visible: Boolean) {
+        launchSettingsAction("update YouTube playlist visibility") {
+            ytMusicPreferences.setLibraryPlaylistVisible(playlistId, visible)
+        }
+    }
+
+    fun setAllYtLibraryPlaylistsVisible(visible: Boolean) {
+        launchSettingsAction("update YouTube playlist visibility") {
+            ytMusicPreferences.setAllLibraryPlaylistsVisible(
+                playlistIds = ytAccountPlaylists.value.mapTo(mutableSetOf()) { it.id },
+                visible = visible,
+            )
         }
     }
 

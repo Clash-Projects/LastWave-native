@@ -90,6 +90,8 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.playlist.SavedPlaylist
+import com.lastwave.app.data.playlist.LIKED_SONGS_MODE
+import com.lastwave.app.data.playlist.isYouTubeOnly
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.PlaylistCover
@@ -148,7 +150,7 @@ fun PlaylistScreen(
             var sortMenuExpanded by remember { mutableStateOf(false) }
             ExpressiveHeader(
                 title = "Playlist",
-                subtitle = "${state.playlists.size} Playlists \u00b7 ${state.playlists.sumOf { it.tracks.size }} Tracks",
+                subtitle = "${state.playlists.size} Playlists \u00b7 ${state.playlists.sumOf { it.remoteTrackCount ?: it.tracks.size }} Tracks",
                 actions = {
                     IconButton(
                         onClick = viewModel::openCreateDialog,
@@ -263,6 +265,7 @@ fun PlaylistScreen(
                                         }
                                     },
                                     onDelete = { viewModel.requestDelete(playlist.id) },
+                                    onMakeLocal = { viewModel.makeLocal(playlist.id) },
                                     onPlay = {
                                         musicPlayer.playQueue(
                                             playlist.tracks.map { track ->
@@ -504,6 +507,7 @@ private fun PlaylistCard(
     onTogglePin: () -> Unit,
     onRegenerate: () -> Unit,
     onDelete: () -> Unit,
+    onMakeLocal: () -> Unit,
     onPlay: () -> Unit,
 ) {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -598,7 +602,11 @@ private fun PlaylistCard(
                 }
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "${playlist.tracks.size} tracks \u00b7 ${formatDate(playlist.createdAtMillis)}",
+                    if (playlist.isYouTubeOnly) {
+                        "YouTube Music • ${playlist.remoteTrackCount?.let { "$it tracks" } ?: "Connected account"}"
+                    } else {
+                        "${playlist.tracks.size} tracks \u00b7 ${formatDate(playlist.createdAtMillis)}"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -663,32 +671,48 @@ private fun PlaylistCard(
                         leadingIcon = { Icon(Icons.Filled.PushPin, contentDescription = null) },
                         onClick = { onTogglePin(); menuExpanded = false },
                     )
-                    DropdownMenuItem(
-                        text = { Text(if (isRegenerating) "Regenerating…" else "Regenerate") },
-                        leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
-                        enabled = !isRegenerating,
-                        onClick = { onRegenerate(); menuExpanded = false },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Change cover") },
-                        leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
-                        onClick = { onEditCover(); menuExpanded = false },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Rename") },
-                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
-                        onClick = { onRename(); menuExpanded = false },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Export") },
-                        leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
-                        onClick = { onExport(); menuExpanded = false },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                        onClick = { onDelete(); menuExpanded = false },
-                    )
+                    if (playlist.isYouTubeOnly) {
+                        DropdownMenuItem(
+                            text = { Text("Make available locally") },
+                            leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                            onClick = { onMakeLocal(); menuExpanded = false },
+                        )
+                    } else {
+                        if (playlist.mode != LIKED_SONGS_MODE) {
+                            DropdownMenuItem(
+                                text = { Text(if (isRegenerating) "Regenerating…" else "Regenerate") },
+                                leadingIcon = { Icon(Icons.Filled.Refresh, contentDescription = null) },
+                                enabled = !isRegenerating,
+                                onClick = { onRegenerate(); menuExpanded = false },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Change cover") },
+                            leadingIcon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = null) },
+                            onClick = { onEditCover(); menuExpanded = false },
+                        )
+                        if (playlist.mode != LIKED_SONGS_MODE) {
+                            DropdownMenuItem(
+                                text = { Text("Rename") },
+                                leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                                onClick = { onRename(); menuExpanded = false },
+                            )
+                        }
+                    }
+                    if (!playlist.isYouTubeOnly) {
+                        DropdownMenuItem(
+                            text = { Text("Export") },
+                            leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                            onClick = { onExport(); menuExpanded = false },
+                        )
+                    }
+                    if (!playlist.isYouTubeOnly) {
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                            onClick = { onDelete(); menuExpanded = false },
+                        )
+                    }
                 }
             }
         }

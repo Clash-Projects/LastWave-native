@@ -1,22 +1,26 @@
-name: Build LastWave APK
+name: Build LastWave Beta APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ beta ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ beta ]
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build Release APKs
+  build-beta:
+    name: Build & Package Beta APKs
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -28,7 +32,7 @@ jobs:
       - name: Grant Gradle execute permission
         run: chmod +x gradlew
 
-      - name: Build Release APKs (compressed + raw)
+      - name: Build Beta Release APKs
         env:
           QOBUZ_BACKEND_URL: ${{ secrets.QOBUZ_BACKEND_URL }}
           QOBUZ_API_KEY: ${{ secrets.QOBUZ_API_KEY }}
@@ -39,7 +43,7 @@ jobs:
           RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
         run: ./gradlew assembleRelease assembleRawRelease --stacktrace
 
-      - name: Sign Release APK with Custom Key (Optional)
+      - name: Sign Beta Release APK with Custom Key (Optional)
         if: env.SIGNING_KEY != ''
         uses: r0adkll/sign-android-release@v1
         id: sign_app
@@ -52,7 +56,7 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
-      - name: Sign Raw APK with Custom Key (Optional)
+      - name: Sign Beta Raw APK with Custom Key (Optional)
         if: env.SIGNING_KEY != ''
         uses: r0adkll/sign-android-release@v1
         id: sign_app_raw
@@ -65,7 +69,7 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: "34.0.0"
 
-      - name: Prepare Final APKs
+      - name: Prepare Beta APKs
         id: prep_apk
         run: |
           mkdir -p final_apk
@@ -75,28 +79,24 @@ jobs:
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "APP_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Building APKs for LastWave v$VERSION"
+          echo "Building Beta APKs for LastWave v${VERSION}-beta"
           # Compressed release (R8 + ProGuard + shrinkResources)
           if [ -f "app/build/outputs/apk/release/app-release-signed.apk" ]; then
-            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v${VERSION}-release.apk
+            cp app/build/outputs/apk/release/app-release-signed.apk final_apk/LastWave-v${VERSION}-beta.apk
           else
-            cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v${VERSION}-release.apk
+            cp app/build/outputs/apk/release/app-release.apk final_apk/LastWave-v${VERSION}-beta.apk
           fi
-          # Raw release (no minify, no shrink, no ProGuard)
+          # Raw release (uncompressed / unminified)
           if [ -f "app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk" ]; then
-            cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/LastWave-v${VERSION}-raw.apk
+            cp app/build/outputs/apk/rawRelease/app-rawRelease-signed.apk final_apk/LastWave-v${VERSION}-beta-raw.apk
           else
-            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/LastWave-v${VERSION}-raw.apk
+            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk final_apk/LastWave-v${VERSION}-beta-raw.apk
           fi
           ls -lh final_apk/
-          echo "--- release (compressed) ---"
-          ls -lh final_apk/LastWave-v${VERSION}-release.apk
-          echo "--- raw (uncompressed) ---"
-          ls -lh final_apk/LastWave-v${VERSION}-raw.apk
 
-      - name: Upload Release APKs
+      - name: Upload Beta APK Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: LastWave-v${{ steps.prep_apk.outputs.version }}-APKs
+          name: LastWave-v${{ steps.prep_apk.outputs.version }}-Beta-APKs
           path: final_apk/*.apk
           if-no-files-found: error

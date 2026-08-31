@@ -6,8 +6,8 @@ Security fixes are provided for the latest stable release of LastWave.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 3.3.x   | Yes                |
-| < 3.3.0 | No                 |
+| 3.4.x   | Yes                |
+| < 3.4.0 | No                 |
 
 ## Reporting a Vulnerability
 

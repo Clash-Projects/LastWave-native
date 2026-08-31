@@ -23,7 +23,7 @@ import coil.compose.AsyncImage
 import com.lastwave.app.data.artwork.ArtworkNormalizer
 import com.lastwave.app.data.playlist.SavedPlaylist
 
-/** Custom cover first, then the earliest track carrying real artwork metadata. */
+/** Custom/remote cover first, then the earliest track carrying real artwork metadata. */
 @Composable
 fun PlaylistCover(
     playlist: SavedPlaylist,
@@ -31,7 +31,8 @@ fun PlaylistCover(
     cornerRadius: Dp = 14.dp,
 ) {
     val shape = RoundedCornerShape(cornerRadius)
-    var customCoverFailed by remember(playlist.customCoverUri) { mutableStateOf(false) }
+    val directCover = playlist.customCoverUri ?: playlist.remoteArtworkUrl
+    var customCoverFailed by remember(directCover) { mutableStateOf(false) }
     val automaticTrack = remember(playlist.tracks) {
         playlist.tracks.firstOrNull { ArtworkNormalizer.isRealImage(it.artworkUrl) }
             ?: playlist.tracks.firstOrNull()
@@ -43,9 +44,9 @@ fun PlaylistCover(
             .background(MaterialTheme.colorScheme.surfaceContainerHighest),
         contentAlignment = Alignment.Center,
     ) {
-        if (!playlist.customCoverUri.isNullOrBlank() && !customCoverFailed) {
+        if (!directCover.isNullOrBlank() && !customCoverFailed) {
             AsyncImage(
-                model = playlist.customCoverUri,
+                model = directCover,
                 contentDescription = "${playlist.title} cover",
                 contentScale = ContentScale.Crop,
                 onError = { customCoverFailed = true },

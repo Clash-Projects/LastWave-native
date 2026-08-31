@@ -56,6 +56,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -165,6 +166,7 @@ class MusicPlayer @Inject constructor(
     private val persistenceJson = Json { ignoreUnknownKeys = true }
     private var lastPersistedSignature = ""
     private var playbackPersistenceJob: Job? = null
+    private var pendingRestoredSession: PersistedPlaybackSession? = null
     @Volatile private var persistenceGeneration = 0L
     private val playbackPersistenceLock = Any()
     private var ticker: Job? = null
@@ -181,6 +183,8 @@ class MusicPlayer @Inject constructor(
     private var crossfadeEnabled = false
     @Volatile
     private var crossfadeDurationMs = 5_000L
+    private var incomingCrossfadeMediaId: String? = null
+    private var incomingCrossfadeStartVolume = 0f
     private val _state = MutableStateFlow(MusicPlayerState())
     val state: StateFlow<MusicPlayerState> = _state.asStateFlow()
     val chromeState: StateFlow<PlaybackChromeState> = state
@@ -202,6 +206,13 @@ class MusicPlayer @Inject constructor(
 
     private var errorRetryCount = 0
     private var retryMediaId: String? = null
+    private var bufferingWatchMediaId: String? = null
+    private var bufferingWatchStartedMs = 0L
+    private var bufferingWatchPositionMs = -1L
+    private var bufferingWatchBufferedMs = -1L
+    private var bufferingRecoveryCount = 0
+    private var bufferingRecoveryJob: Job? = null
+    private val qobuzBypassMediaIds = ConcurrentHashMap.newKeySet<String>()
 
     private val mediaCache: Cache by lazy {
         val cacheDir = java.io.File(appContext.cacheDir, "media_stream_cache")
@@ -232,6 +243,9 @@ class MusicPlayer @Inject constructor(
                 unavailableSkipJob?.cancel()
                 unavailableSkipJob = null
                 unavailableMediaIds.clear()
+                bufferingWatchStartedMs = 0L
+                bufferingWatchPositionMs = player.currentPosition.coerceAtLeast(0L)
+                bufferingWatchBufferedMs = player.bufferedPosition.coerceAtLeast(0L)
                 errorRetryCount = 0
                 retryMediaId = player.currentMediaItem?.mediaId
             }
@@ -241,6 +255,10 @@ class MusicPlayer @Inject constructor(
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             if (mediaItem != null) {
+                if (bufferingWatchMediaId != mediaItem.mediaId) {
+                    resetBufferingWatch(mediaItem.mediaId)
+                    qobuzBypassMediaIds.retainAll(setOf(mediaItem.mediaId))
+                }
                 if (retryMediaId != mediaItem.mediaId) {
                     retryMediaId = mediaItem.mediaId
                     errorRetryCount = 0
@@ -257,8 +275,18 @@ class MusicPlayer @Inject constructor(
                         error = null,
                     )
                 }
-                if (crossfadeEnabled && crossfadeDurationMs > 0L) {
-                    player.volume = 0f
+                val isNaturalTransition = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
+                if (crossfadeEnabled && crossfadeDurationMs > 0L && isNaturalTransition) {
+                    incomingCrossfadeMediaId = mediaItem.mediaId
+                    incomingCrossfadeStartVolume = player.volume
+                        .coerceIn(0f, 1f)
+                        .takeIf { it < 0.99f }
+                        ?: 0f
+                    player.volume = incomingCrossfadeStartVolume
+                } else {
+                    incomingCrossfadeMediaId = null
+                    player.volume = 1f
                 }
                 if (currentTrack.playbackUrl != null) {
                     applicationScope.launch(Dispatchers.IO) {
@@ -366,8 +394,8 @@ class MusicPlayer @Inject constructor(
 
     // Do not initialize ExoPlayer/audio/cache merely to draw the launcher.
     // Several Android 11 OEM audio stacks are fragile during cold start; the
-    // engine is needed only when restoring a real queue or starting playback.
-    private val player: ExoPlayer by lazy {
+    // engine is needed only when the user actually operates playback.
+    private val playerDelegate = lazy {
         val resolving = ResolvingDataSource.Factory(cacheDataSourceFactory) { dataSpec ->
             val requested = dataSpec.uri
             if (requested.scheme != "lastwave") {
@@ -394,7 +422,13 @@ class MusicPlayer @Inject constructor(
                     // Timing out surfaces a normal playback error that the
                     // auto-skip path already knows how to recover from.
                     val resolved = withTimeoutOrNull(RESOLVE_DATA_SPEC_TIMEOUT_MS) {
-                        resolveTrackAudioStream(track, track.videoId)
+                        val mediaId = track.videoId
+                            ?: "query:${track.artist.lowercase()}|${track.title.lowercase()}"
+                        resolveTrackAudioStream(
+                            track = track,
+                            videoId = track.videoId,
+                            allowQobuz = mediaId !in qobuzBypassMediaIds,
+                        )
                     } ?: error("Timed out resolving audio for ${track.title}")
                     applicationScope.launch(Dispatchers.Main.immediate) {
                         publishResolvedQuality(resolved)
@@ -481,11 +515,36 @@ class MusicPlayer @Inject constructor(
                 setHandleAudioBecomingNoisy(true)
                 setWakeMode(C.WAKE_MODE_NETWORK)
                 addListener(listener)
+            }.also { restoredPlayer ->
+                // A persisted queue is UI state, not a reason to touch the
+                // device's codec/audio stack during process launch. Hydrate
+                // ExoPlayer only when an actual player operation first asks
+                // for it. The renderer, sink, DSP and fallback graph above is
+                // otherwise identical on every device.
+                val restoredSession = pendingRestoredSession
+                pendingRestoredSession = null
+                if (restoredSession != null && restoredSession.queue.isNotEmpty()) {
+                    val restoredIndex = restoredSession.currentIndex.coerceIn(restoredSession.queue.indices)
+                    restoredPlayer.setMediaItems(
+                        restoredSession.queue.map(PlayableTrack::toMediaItem),
+                        restoredIndex,
+                        restoredSession.positionMs.coerceAtLeast(0),
+                    )
+                    restoredPlayer.shuffleModeEnabled = restoredSession.shuffleEnabled
+                    restoredPlayer.repeatMode = restoredSession.repeatMode.takeIf {
+                        it in Player.REPEAT_MODE_OFF..Player.REPEAT_MODE_ALL
+                    } ?: Player.REPEAT_MODE_OFF
+                    restoredPlayer.setPlaybackSpeed(restoredSession.speed.coerceIn(0.5f, 2f))
+                    restoredPlayer.pause()
+                }
             }
     }
 
+    private val player: ExoPlayer
+        get() = playerDelegate.value
+
     init {
-        val restored = runCatching { restorePlaybackSession() }.getOrElse { error ->
+        runCatching { restorePlaybackSession() }.getOrElse { error ->
             // A corrupt session or OEM media-stack failure must not become a
             // permanent launch-crash loop. Discard only the resumable session.
             android.util.Log.e("MusicPlayer", "Playback restore disabled", error)
@@ -493,20 +552,10 @@ class MusicPlayer @Inject constructor(
             clearPersistedPlaybackSession()
             false
         }
-        if (restored) {
-            runCatching {
-                refresh(player)
-                audioEffectsEngine.attach(player.audioSessionId)
-            }.onFailure {
-                android.util.Log.e("MusicPlayer", "Restored player setup failed", it)
-                _state.value = MusicPlayerState()
-                clearPersistedPlaybackSession()
-            }
-        }
         ticker = applicationScope.launch(Dispatchers.Main.immediate) {
             var lastTickerPersistMs = 0L
             while (true) {
-                if (_state.value.current != null) {
+                if (_state.value.current != null && playerDelegate.isInitialized()) {
                     val remaining = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())
                     if (remaining != null && remaining <= 0) {
                         sleepTimerDeadlineMs = null
@@ -518,6 +567,8 @@ class MusicPlayer @Inject constructor(
                     val pos = if (dur > 0) rawPos.coerceIn(0L, dur) else rawPos
                     val buf = player.bufferedPosition.coerceAtLeast(0)
                     val sleepRemaining = remaining?.coerceAtLeast(0)
+
+                    watchBufferingStall(pos, buf)
 
                     val targetVolume = calculateCrossfadeVolume(pos, dur)
                     if (kotlin.math.abs(player.volume - targetVolume) > 0.008f) {
@@ -552,16 +603,28 @@ class MusicPlayer @Inject constructor(
                 }
                 // Preserve lazy player startup when there is no restored or
                 // active queue. The short-circuit avoids touching ExoPlayer.
-                delay(if (_state.value.current != null && player.isPlaying) 60L else 500L)
+                delay(
+                    if (_state.value.current != null &&
+                        playerDelegate.isInitialized() &&
+                        player.isPlaying
+                    ) 60L else 500L,
+                )
             }
         }
 
         applicationScope.launch {
             settingsPreferences.settings.collect { settings ->
                 crossfadeEnabled = settings.crossfadeEnabled
-                crossfadeDurationMs = settings.crossfadeSeconds * 1000L
-                if (!settings.crossfadeEnabled) {
+                crossfadeDurationMs = settings.crossfadeSeconds.coerceIn(1, 10) * 1000L
+                if (playerDelegate.isInitialized()) {
                     onMain {
+                        if (settings.crossfadeEnabled) {
+                            val duration = player.duration.takeIf { it > 0L } ?: _state.value.durationMs
+                            val position = player.currentPosition.coerceAtLeast(0L)
+                            player.volume = calculateCrossfadeVolume(position, duration)
+                            return@onMain
+                        }
+                        incomingCrossfadeMediaId = null
                         if (player.volume < 0.99f) player.volume = 1.0f
                     }
                 }
@@ -576,6 +639,7 @@ class MusicPlayer @Inject constructor(
     }
 
     fun play(track: PlayableTrack, sourceLabel: String = "LastWave") {
+        pendingRestoredSession = null
         disableDiscoverQueue()
         playRequest?.cancel()
         unavailableSkipJob?.cancel()
@@ -585,6 +649,7 @@ class MusicPlayer @Inject constructor(
         }
         onMain {
             ensureForegroundService()
+            resetBufferingWatch()
             _state.value = MusicPlayerState(
                 current = track,
                 queue = listOf(track),
@@ -626,6 +691,7 @@ class MusicPlayer @Inject constructor(
         startShuffled: Boolean = false,
     ) {
         if (tracks.isEmpty()) return
+        pendingRestoredSession = null
         discoverQueueLoadJob?.cancel()
         discoverQueueActive = endlessDiscover
         val selectedIndex = startIndex.coerceIn(tracks.indices)
@@ -641,6 +707,7 @@ class MusicPlayer @Inject constructor(
 
         onMain {
             ensureForegroundService()
+            resetBufferingWatch()
             if (startShuffled) {
                 player.shuffleModeEnabled = true
             }
@@ -778,22 +845,32 @@ class MusicPlayer @Inject constructor(
     }
 
     private fun calculateCrossfadeVolume(positionMs: Long, durationMs: Long): Float {
-        if (!crossfadeEnabled || crossfadeDurationMs <= 0L || durationMs <= 0L) return 1.0f
+        if (!crossfadeEnabled || crossfadeDurationMs <= 0L) return 1.0f
+        val isIncomingCrossfade = incomingCrossfadeMediaId == player.currentMediaItem?.mediaId
+        if (isIncomingCrossfade) {
+            val incomingFadeDuration = if (durationMs > 0L) {
+                minOf(crossfadeDurationMs, durationMs / 3).coerceAtLeast(500L)
+            } else {
+                crossfadeDurationMs
+            }
+            if (positionMs < incomingFadeDuration) {
+                val progress = (positionMs.toFloat() / incomingFadeDuration.toFloat()).coerceIn(0f, 1f)
+                val fadeCurve = kotlin.math.sin(progress * (Math.PI.toFloat() / 2f))
+                return (incomingCrossfadeStartVolume +
+                    ((1f - incomingCrossfadeStartVolume) * fadeCurve)).coerceIn(0f, 1f)
+            }
+            incomingCrossfadeMediaId = null
+        }
+        if (durationMs <= 0L) return 1.0f
+
         val effectiveCrossfade = minOf(crossfadeDurationMs, durationMs / 3).coerceAtLeast(500L)
         if (durationMs < effectiveCrossfade * 2) return 1.0f
 
         val remainingMs = durationMs - positionMs
-        return when {
-            positionMs < effectiveCrossfade -> {
-                val progress = (positionMs.toFloat() / effectiveCrossfade.toFloat()).coerceIn(0f, 1f)
-                kotlin.math.sin(progress * (Math.PI.toFloat() / 2f))
-            }
-            remainingMs < effectiveCrossfade -> {
-                val progress = (remainingMs.toFloat() / effectiveCrossfade.toFloat()).coerceIn(0f, 1f)
-                kotlin.math.sin(progress * (Math.PI.toFloat() / 2f))
-            }
-            else -> 1.0f
-        }.coerceIn(0f, 1f)
+        if (remainingMs >= effectiveCrossfade) return 1.0f
+
+        val progress = (remainingMs.toFloat() / effectiveCrossfade.toFloat()).coerceIn(0f, 1f)
+        return kotlin.math.sin(progress * (Math.PI.toFloat() / 2f))
     }
     fun seekToQueueItem(index: Int) = onMain {
         if (index in 0 until player.mediaItemCount) {
@@ -806,18 +883,32 @@ class MusicPlayer @Inject constructor(
         if (player.currentPosition > 5_000) player.seekTo(0) else player.seekToPreviousMediaItem()
     }
     fun next() = onMain { player.seekToNextMediaItem() }
-    fun toggleShuffle() = onMain {
-        val newShuffle = !player.shuffleModeEnabled
-        player.shuffleModeEnabled = newShuffle
-        _state.update { it.copy(shuffleEnabled = newShuffle) }
+    fun toggleShuffle() = setShuffleEnabled(!state.value.shuffleEnabled)
+
+    fun setShuffleEnabled(enabled: Boolean) = onMain {
+        if (player.shuffleModeEnabled == enabled) return@onMain
+        player.shuffleModeEnabled = enabled
+        _state.update { it.copy(shuffleEnabled = enabled) }
         persistPlaybackSession()
     }
-    fun cycleRepeatMode() = onMain {
-        player.repeatMode = when (player.repeatMode) {
+
+    fun cycleRepeatMode() = setRepeatMode(
+        when (state.value.repeatMode) {
             Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
             Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
             else -> Player.REPEAT_MODE_OFF
+        },
+    )
+
+    fun setRepeatMode(mode: Int) = onMain {
+        val supportedMode = when (mode) {
+            Player.REPEAT_MODE_ONE, Player.REPEAT_MODE_ALL -> mode
+            else -> Player.REPEAT_MODE_OFF
         }
+        if (player.repeatMode == supportedMode) return@onMain
+        player.repeatMode = supportedMode
+        _state.update { it.copy(repeatMode = supportedMode) }
+        persistPlaybackSession()
     }
     fun cycleSpeed() = onMain {
         val next = when {
@@ -948,6 +1039,8 @@ class MusicPlayer @Inject constructor(
         if (nextTrack == null) return
         preloadJob?.cancel()
         preloadJob = applicationScope.launch(Dispatchers.IO) {
+            delay(NEXT_TRACK_PREFETCH_DELAY_MS)
+            if (!_state.value.isPlaying) return@launch
             val resolved = runCatching {
                 resolveTrackAudioStream(nextTrack, nextTrack.videoId)
             }.getOrNull() ?: return@launch
@@ -1013,8 +1106,79 @@ class MusicPlayer @Inject constructor(
         discoverQueueLoadJob = null
     }
 
-    /** Skip only after ExoPlayer reports a real failure. Ordinary buffering,
-     * including on weak networks, is intentionally never timed out here. */
+    /** Recover a loader that remains buffered at the same byte and playback
+     * position instead of waiting forever for an error Media3 may never emit. */
+    @MainThread
+    private fun watchBufferingStall(positionMs: Long, bufferedPositionMs: Long) {
+        if (!player.playWhenReady || player.playbackState != Player.STATE_BUFFERING) {
+            bufferingWatchStartedMs = 0L
+            return
+        }
+
+        val mediaId = player.currentMediaItem?.mediaId ?: return
+        val now = SystemClock.elapsedRealtime()
+        val progressed = bufferingWatchMediaId != mediaId ||
+            positionMs > bufferingWatchPositionMs ||
+            bufferedPositionMs > bufferingWatchBufferedMs
+        if (progressed || bufferingWatchStartedMs == 0L) {
+            if (bufferingWatchMediaId != mediaId) resetBufferingWatch(mediaId)
+            bufferingWatchStartedMs = now
+            bufferingWatchPositionMs = positionMs
+            bufferingWatchBufferedMs = bufferedPositionMs
+            return
+        }
+        if (now - bufferingWatchStartedMs < BUFFERING_STALL_TIMEOUT_MS || bufferingRecoveryJob?.isActive == true) return
+
+        bufferingWatchStartedMs = now
+        if (bufferingRecoveryCount >= MAX_BUFFERING_RECOVERY_ATTEMPTS) {
+            _state.update { it.copy(isPlaying = false, isBuffering = false, error = "Playback stalled") }
+            scheduleUnavailableMediaSkip(player.currentMediaItemIndex, mediaId)
+            return
+        }
+
+        bufferingRecoveryCount++
+        recoverStalledPlayback(mediaId)
+    }
+
+    @MainThread
+    private fun recoverStalledPlayback(expectedMediaId: String) {
+        val failedIndex = player.currentMediaItemIndex
+        val failedTrack = player.currentMediaItem?.toPlayableTrack() ?: return
+        if (failedTrack.playbackUrl != null || failedIndex == C.INDEX_UNSET) return
+        val resumePositionMs = player.currentPosition.coerceAtLeast(0L)
+        if (_state.value.isQobuz) qobuzBypassMediaIds += expectedMediaId
+
+        preloadJob?.cancel()
+        player.stop()
+        bufferingRecoveryJob = applicationScope.launch(Dispatchers.Main.immediate) {
+            withContext(Dispatchers.IO) {
+                failedTrack.videoId?.takeIf(String::isNotBlank)?.let(innerTube::invalidateCache)
+                runCatching {
+                    mediaCache.keys.toList().forEach(mediaCache::removeResource)
+                }
+            }
+            if (player.currentMediaItemIndex != failedIndex || player.currentMediaItem?.mediaId != expectedMediaId) return@launch
+
+            val cleanTrack = failedTrack.copy(playbackUrl = null, playbackMimeType = null)
+            player.replaceMediaItem(failedIndex, cleanTrack.toMediaItem())
+            player.seekTo(failedIndex, resumePositionMs)
+            player.prepare()
+            player.play()
+        }
+    }
+
+    @MainThread
+    private fun resetBufferingWatch(mediaId: String? = null) {
+        bufferingRecoveryJob?.cancel()
+        bufferingRecoveryJob = null
+        bufferingWatchMediaId = mediaId
+        bufferingWatchStartedMs = 0L
+        bufferingWatchPositionMs = -1L
+        bufferingWatchBufferedMs = -1L
+        bufferingRecoveryCount = 0
+        if (mediaId == null) qobuzBypassMediaIds.clear()
+    }
+
     @MainThread
     private fun scheduleUnavailableMediaSkip(failedIndex: Int, failedMediaId: String?) {
         if (failedIndex == C.INDEX_UNSET || failedMediaId == null) return
@@ -1267,17 +1431,10 @@ class MusicPlayer @Inject constructor(
             repeatMode = session.repeatMode,
             speed = session.speed,
         )
-        player.setMediaItems(
-            restoredQueue.map(PlayableTrack::toMediaItem),
-            restoredIndex,
-            session.positionMs.coerceAtLeast(0),
+        pendingRestoredSession = session.copy(
+            queue = restoredQueue,
+            currentIndex = restoredIndex,
         )
-        player.shuffleModeEnabled = session.shuffleEnabled
-        player.repeatMode = session.repeatMode.takeIf {
-            it in Player.REPEAT_MODE_OFF..Player.REPEAT_MODE_ALL
-        } ?: Player.REPEAT_MODE_OFF
-        player.setPlaybackSpeed(session.speed.coerceIn(0.5f, 2f))
-        player.pause()
         return true
     }
 
@@ -1357,6 +1514,7 @@ class MusicPlayer @Inject constructor(
     }
 
     private fun clearPersistedPlaybackSession() {
+        pendingRestoredSession = null
         persistenceGeneration++
         playbackPersistenceJob?.cancel()
         playbackPersistenceJob = null
@@ -1408,6 +1566,8 @@ class MusicPlayer @Inject constructor(
         const val DISCOVER_QUEUE_BATCH_SIZE = 16
         const val DISCOVER_QUEUE_REFILL_THRESHOLD = 8
         const val UNAVAILABLE_SKIP_DELAY_MS = 6_000L
+        const val BUFFERING_STALL_TIMEOUT_MS = 25_000L
+        const val MAX_BUFFERING_RECOVERY_ATTEMPTS = 1
         const val POSITION_PERSIST_INTERVAL_MS = 5_000L
         const val MAX_PERSISTED_QUEUE_SIZE = 200
         const val RESTORED_PREVIOUS_TRACKS = 50
@@ -1418,8 +1578,9 @@ class MusicPlayer @Inject constructor(
         /** Hard ceiling for the blocking data-spec stream resolution inside ExoPlayer's loader. */
         const val QOBUZ_RESOLVE_TIMEOUT_MS = 4_000L
         const val RESOLVE_DATA_SPEC_TIMEOUT_MS = 35_000L
-        const val MEDIA_STREAM_CACHE_BYTES = 256L * 1024 * 1024
-        const val NEXT_TRACK_PREFETCH_BYTES = 4L * 1024 * 1024
+        const val MEDIA_STREAM_CACHE_BYTES = 64L * 1024 * 1024
+        const val NEXT_TRACK_PREFETCH_BYTES = 1L * 1024 * 1024
+        const val NEXT_TRACK_PREFETCH_DELAY_MS = 3_000L
         val PERMANENT_HTTP_STATUS_CODES = setOf(401, 404, 410, 451)
         val PERMANENT_PLAYBACK_ERROR_CODES = setOf(
             PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
