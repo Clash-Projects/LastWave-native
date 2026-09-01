@@ -1,6 +1,7 @@
 package com.lastwave.app.data.ytmusic
 
 import android.util.Log
+import com.lastwave.app.data.generate.youtubeVideoIdOrNull
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.playlist.SavedPlaylist
@@ -218,6 +219,7 @@ class YtMusicSyncManager @Inject constructor(
         val resolvedVideoIds = coroutineScope {
             playlist.tracks.map { track ->
                 async {
+                    track.youtubeVideoIdOrNull()?.let { return@async it }
                     matchLimiter.withPermit {
                         val cacheKey = "${track.name}|${track.artist}".lowercase().trim()
                         val negativeUntil = negativeMatchCache[cacheKey] ?: 0L

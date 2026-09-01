@@ -8,6 +8,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import com.lastwave.app.ui.common.PredictiveBackScreen
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -19,12 +20,15 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -475,33 +479,35 @@ fun PlayerHost(
             AnimatedVisibility(
                 visible = expanded && state.current != null,
                 enter = slideInVertically(
-                    animationSpec = ExpressiveMotion.spatialSpring(),
-                    initialOffsetY = { it / 4 },
-                ) + fadeIn(tween(ExpressiveMotion.Standard)),
+                    animationSpec = ExpressiveMotion.smoothSpring(),
+                    initialOffsetY = { it },
+                ) + fadeIn(tween(180)),
                 exit = slideOutVertically(
-                    animationSpec = tween(ExpressiveMotion.Standard),
-                    targetOffsetY = { it / 5 },
-                ) + fadeOut(tween(ExpressiveMotion.Quick)),
+                    animationSpec = ExpressiveMotion.smoothSpring(),
+                    targetOffsetY = { it },
+                ) + fadeOut(tween(150)),
             ) {
-                ExpandedPlayer(
-                    viewModel = viewModel,
-                    currentTab = currentTab,
-                    onTabChange = { currentTab = it },
-                    onRetryLyrics = viewModel::retryLyrics,
-                    onCollapse = { expanded = false },
-                    onOpenArtist = { artist ->
-                        expanded = false
-                        viewModel.openArtist(artist)
+                PredictiveBackScreen(
+                    enabled = expanded && state.current != null,
+                    onBack = {
+                        if (currentTab != FullPlayerTab.NOW_PLAYING) {
+                            currentTab = FullPlayerTab.NOW_PLAYING
+                        } else {
+                            expanded = false
+                        }
                     },
-                )
-            }
-            // Compose this after the underlying screen so the expanded player
-            // owns Back before any route-level handler can navigate away.
-            BackHandler(enabled = expanded && state.current != null) {
-                if (currentTab != FullPlayerTab.NOW_PLAYING) {
-                    currentTab = FullPlayerTab.NOW_PLAYING
-                } else {
-                    expanded = false
+                ) {
+                    ExpandedPlayer(
+                        viewModel = viewModel,
+                        currentTab = currentTab,
+                        onTabChange = { currentTab = it },
+                        onRetryLyrics = viewModel::retryLyrics,
+                        onCollapse = { expanded = false },
+                        onOpenArtist = { artist ->
+                            expanded = false
+                            viewModel.openArtist(artist)
+                        },
+                    )
                 }
             }
         }
@@ -1506,10 +1512,17 @@ private fun FullPlayer(
                     targetState = currentTab,
                     modifier = Modifier.weight(1f),
                     transitionSpec = {
-                        (fadeIn(tween(ExpressiveMotion.Standard)) +
-                            scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.98f)) togetherWith
-                            (fadeOut(tween(ExpressiveMotion.Quick)) +
-                                scaleOut(tween(ExpressiveMotion.Standard), targetScale = 0.98f))
+                        if (targetState != FullPlayerTab.NOW_PLAYING) {
+                            (slideInVertically(animationSpec = ExpressiveMotion.smoothSpring()) { it / 6 } +
+                                fadeIn(tween(ExpressiveMotion.Standard))) togetherWith
+                                (slideOutVertically(animationSpec = tween(ExpressiveMotion.Quick)) { -it / 6 } +
+                                    fadeOut(tween(ExpressiveMotion.Quick)))
+                        } else {
+                            (slideInVertically(animationSpec = ExpressiveMotion.smoothSpring()) { -it / 6 } +
+                                fadeIn(tween(ExpressiveMotion.Standard))) togetherWith
+                                (slideOutVertically(animationSpec = tween(ExpressiveMotion.Quick)) { it / 6 } +
+                                    fadeOut(tween(ExpressiveMotion.Quick)))
+                        }
                     },
                     label = "playerTabContent",
                 ) { tab ->
@@ -1567,14 +1580,25 @@ private fun FullPlayer(
                                                 ),
                                         )
 
+                                        val artworkPlayingScale by animateFloatAsState(
+                                            targetValue = if (state.isPlaying) 1.0f else 0.88f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMediumLow,
+                                            ),
+                                            label = "artworkPlayingScale",
+                                        )
+
                                         Surface(
                                             shape = RoundedCornerShape(32.dp),
                                             color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.88f),
                                             tonalElevation = 6.dp,
-                                            shadowElevation = 24.dp,
+                                            shadowElevation = if (state.isPlaying) 28.dp else 12.dp,
                                             modifier = Modifier
                                                 .size(artworkSize)
                                                 .graphicsLayer {
+                                                    scaleX = artworkPlayingScale
+                                                    scaleY = artworkPlayingScale
                                                     translationX = shownArtworkX
                                                     rotationZ = shownArtworkX / 80f
                                                 }
@@ -1833,8 +1857,19 @@ private fun FullPlayer(
                                         Spacer(Modifier.width(12.dp))
 
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            val likeInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                                            val isLikePressed by likeInteraction.collectIsPressedAsState()
+                                            val likeScale by animateFloatAsState(
+                                                targetValue = if (isLikePressed) 0.78f else 1.0f,
+                                                animationSpec = spring(
+                                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                    stiffness = Spring.StiffnessMediumLow,
+                                                ),
+                                                label = "likeScale",
+                                            )
                                             Surface(
                                                 onClick = onToggleLiked,
+                                                interactionSource = likeInteraction,
                                                 shape = CircleShape,
                                                 color = if (isLiked) {
                                                     MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
@@ -1848,7 +1883,12 @@ private fun FullPlayer(
                                                 },
                                                 tonalElevation = 0.dp,
                                                 shadowElevation = 0.dp,
-                                                modifier = Modifier.size(46.dp),
+                                                modifier = Modifier
+                                                    .size(46.dp)
+                                                    .graphicsLayer {
+                                                        scaleX = likeScale
+                                                        scaleY = likeScale
+                                                    },
                                             ) {
                                                 Box(contentAlignment = Alignment.Center) {
                                                     Icon(
@@ -1858,14 +1898,27 @@ private fun FullPlayer(
                                                     )
                                                 }
                                             }
+                                            val lyricsInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                                            val isLyricsPressed by lyricsInteraction.collectIsPressedAsState()
+                                            val lyricsScale by animateFloatAsState(
+                                                targetValue = if (isLyricsPressed) 0.82f else 1.0f,
+                                                animationSpec = ExpressiveMotion.spatialSpring(),
+                                                label = "lyricsScale",
+                                            )
                                             Surface(
                                                 onClick = { onTabChange(FullPlayerTab.LYRICS) },
+                                                interactionSource = lyricsInteraction,
                                                 shape = CircleShape,
                                                 color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
                                                 contentColor = MaterialTheme.colorScheme.primary,
                                                 tonalElevation = 0.dp,
                                                 shadowElevation = 0.dp,
-                                                modifier = Modifier.size(46.dp),
+                                                modifier = Modifier
+                                                    .size(46.dp)
+                                                    .graphicsLayer {
+                                                        scaleX = lyricsScale
+                                                        scaleY = lyricsScale
+                                                    },
                                             ) {
                                                 Box(contentAlignment = Alignment.Center) {
                                                     Icon(
@@ -2184,6 +2237,25 @@ private fun SeekBar(
 
 @Composable
 private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslucent: Boolean = false) {
+    val prevInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val isPrevPressed by prevInteraction.collectIsPressedAsState()
+    val prevScale by animateFloatAsState(if (isPrevPressed) 0.85f else 1.0f, ExpressiveMotion.spatialSpring(), label = "prevScale")
+
+    val playInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val isPlayPressed by playInteraction.collectIsPressedAsState()
+    val playScale by animateFloatAsState(
+        targetValue = if (isPlayPressed) 0.88f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "playScale",
+    )
+
+    val nextInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val isNextPressed by nextInteraction.collectIsPressedAsState()
+    val nextScale by animateFloatAsState(if (isNextPressed) 0.85f else 1.0f, ExpressiveMotion.spatialSpring(), label = "nextScale")
+
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(if (isTranslucent) 18.dp else 16.dp, Alignment.CenterHorizontally),
@@ -2191,12 +2263,18 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
     ) {
         Surface(
             onClick = player::previous,
+            interactionSource = prevInteraction,
             shape = CircleShape,
             color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
-            modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
+            modifier = Modifier
+                .size(if (isTranslucent) 54.dp else 58.dp)
+                .graphicsLayer {
+                    scaleX = prevScale
+                    scaleY = prevScale
+                },
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.SkipPrevious, "Previous", Modifier.size(if (isTranslucent) 28.dp else 31.dp))
@@ -2204,12 +2282,18 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         }
         Surface(
             onClick = player::togglePlayPause,
+            interactionSource = playInteraction,
             shape = CircleShape,
             color = if (isTranslucent) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
             contentColor = if (isTranslucent) Color.Black else MaterialTheme.colorScheme.onPrimary,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
-            modifier = Modifier.size(if (isTranslucent) 72.dp else 76.dp),
+            modifier = Modifier
+                .size(if (isTranslucent) 72.dp else 76.dp)
+                .graphicsLayer {
+                    scaleX = playScale
+                    scaleY = playScale
+                },
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (state.isBuffering) {
@@ -2225,12 +2309,18 @@ private fun MainControls(state: MusicPlayerState, player: MusicPlayer, isTranslu
         }
         Surface(
             onClick = player::next,
+            interactionSource = nextInteraction,
             shape = CircleShape,
             color = if (isTranslucent) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
             contentColor = if (isTranslucent) Color.White.copy(alpha = 0.94f) else MaterialTheme.colorScheme.onSurface,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
-            modifier = Modifier.size(if (isTranslucent) 54.dp else 58.dp),
+            modifier = Modifier
+                .size(if (isTranslucent) 54.dp else 58.dp)
+                .graphicsLayer {
+                    scaleX = nextScale
+                    scaleY = nextScale
+                },
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(Icons.Filled.SkipNext, "Next", Modifier.size(if (isTranslucent) 28.dp else 31.dp))

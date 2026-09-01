@@ -51,3 +51,22 @@
 -dontwarn java.beans.**
 -dontwarn org.mozilla.javascript.**
 -dontwarn javax.script.**
+
+# InnerTubeX is reached through the Kotlin-compatibility reflection boundary;
+# retain its public constructors/models and the selected Ktor engine in release
+# variants so extraction cannot be removed as unreachable code.
+-keep class com.metrolist.innertubex.** { *; }
+-keep class io.ktor.client.HttpClientJvmKt { *; }
+-keep class io.ktor.client.HttpClientKt { *; }
+-keep class io.ktor.client.engine.cio.** { *; }
+
+# Silence R8 missing-class warnings for Kotlin 2.x standard library and IO additions
+# referenced by InnerTubeX and QuickJS runtime jars.
+-dontwarn kotlin.**
+-dontwarn kotlinx.io.**
+-dontwarn kotlinx.coroutines.**
+-dontwarn kotlinx.serialization.**
+-dontwarn com.dokar.quickjs.**
+-dontwarn com.metrolist.innertubex.**
+-dontwarn io.ktor.**
+

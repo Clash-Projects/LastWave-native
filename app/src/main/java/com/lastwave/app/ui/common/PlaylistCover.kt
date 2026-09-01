@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -17,9 +18,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.lastwave.app.data.artwork.ArtworkNormalizer
 import com.lastwave.app.data.playlist.SavedPlaylist
 
@@ -30,9 +33,18 @@ fun PlaylistCover(
     modifier: Modifier = Modifier,
     cornerRadius: Dp = 14.dp,
 ) {
+    val context = LocalContext.current
     val shape = RoundedCornerShape(cornerRadius)
     val directCover = playlist.customCoverUri ?: playlist.remoteArtworkUrl
-    var customCoverFailed by remember(directCover) { mutableStateOf(false) }
+    var lastValidCover by remember(playlist.id) { mutableStateOf(directCover?.takeIf(String::isNotBlank)) }
+    LaunchedEffect(directCover) {
+        if (!directCover.isNullOrBlank()) {
+            lastValidCover = directCover
+        }
+    }
+    val effectiveCover = directCover?.takeIf(String::isNotBlank) ?: lastValidCover
+    var customCoverFailed by remember(effectiveCover) { mutableStateOf(false) }
+
     val automaticTrack = remember(playlist.tracks) {
         playlist.tracks.firstOrNull { ArtworkNormalizer.isRealImage(it.artworkUrl) }
             ?: playlist.tracks.firstOrNull()
@@ -44,9 +56,16 @@ fun PlaylistCover(
             .background(MaterialTheme.colorScheme.surfaceContainerHighest),
         contentAlignment = Alignment.Center,
     ) {
-        if (!directCover.isNullOrBlank() && !customCoverFailed) {
+        if (!effectiveCover.isNullOrBlank() && !customCoverFailed) {
+            val imageRequest = remember(effectiveCover, context) {
+                ImageRequest.Builder(context)
+                    .data(effectiveCover)
+                    .size(512)
+                    .crossfade(true)
+                    .build()
+            }
             AsyncImage(
-                model = directCover,
+                model = imageRequest,
                 contentDescription = "${playlist.title} cover",
                 contentScale = ContentScale.Crop,
                 onError = { customCoverFailed = true },

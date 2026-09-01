@@ -75,7 +75,7 @@ jobs:
           mkdir -p final_apk
           VERSION=$(grep 'versionName = ' app/build.gradle.kts | head -n1 | sed -E 's/.*"([^"]+)".*/\1/')
           if [ -z "$VERSION" ]; then
-            VERSION="3.4.0"
+            VERSION="3.4.1"
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "APP_VERSION=$VERSION" >> $GITHUB_ENV

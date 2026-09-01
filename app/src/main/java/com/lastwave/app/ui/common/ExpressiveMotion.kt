@@ -24,6 +24,11 @@ object ExpressiveMotion {
         stiffness = Spring.StiffnessMediumLow,
     )
 
+    fun <T> smoothSpring() = spring<T>(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = Spring.StiffnessMediumLow,
+    )
+
     fun forwardEnter(): EnterTransition =
         fadeIn(tween(Standard, easing = FastOutSlowInEasing)) +
             slideInHorizontally(tween(Emphasized, easing = FastOutSlowInEasing)) { it / 10 } +

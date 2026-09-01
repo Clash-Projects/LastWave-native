@@ -47,8 +47,8 @@ android {
         applicationId = "com.lastwave.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 14
-        versionName = "3.4.0"
+        versionCode = 15
+        versionName = "3.4.1"
 
         val secretMask = listOf(0x5A, 0x3F, 0x7E, 0x1B, 0x92, 0x4C, 0xA1, 0x6D)
         fun obfuscateSecret(plainText: String): String {
@@ -247,6 +247,7 @@ dependencies {
     // Native in-app audio playback, background service, system media
     // controls, Bluetooth/headset controls and a MediaController-backed UI.
     implementation("androidx.media3:media3-exoplayer:1.2.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.2.1")
     // MediaBrowserServiceCompat/MediaSessionCompat bridge used by Android
     // Auto to browse the LastWave library and control the same player.
     implementation("androidx.media:media:1.7.0")
@@ -264,9 +265,15 @@ dependencies {
     // requested Oboe 1.8+ baseline and exposes its CMake target through Prefab.
     implementation("com.google.oboe:oboe:1.10.0")
 
-    // Resolves YouTube's current protected/ciphered playback URLs locally.
-    // InnerTube remains responsible for YouTube Music search and metadata.
+    // Metadata/search remains local InnerTube/NewPipe functionality; playback
+    // resolves through InnerTubeX first and retains NewPipe as a fallback.
     implementation(libs.newpipe.extractor)
+
+    // InnerTubeX is invoked through the compatibility adapter because its
+    // current release is built with a newer Kotlin metadata version than the
+    // app. Runtime-only keeps the app compiler on its existing Kotlin line.
+    runtimeOnly(libs.innertubex)
+    runtimeOnly("io.ktor:ktor-client-cio:3.5.2")
 
     // Unit Testing dependencies
     testImplementation("junit:junit:4.13.2")
@@ -276,8 +283,29 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }
 
+configurations.all {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "org.jetbrains.kotlin") {
+            useVersion("1.9.24")
+        }
+        if (requested.group == "org.jetbrains.kotlinx" && requested.name.startsWith("kotlinx-coroutines")) {
+            useVersion("1.8.1")
+        }
+        if (requested.group == "org.jetbrains.kotlinx" && (requested.name.startsWith("kotlinx-serialization-core") || requested.name.startsWith("kotlinx-serialization-json"))) {
+            if (!requested.name.contains("json-io") && !requested.name.contains("json-okio")) {
+                useVersion("1.6.3")
+            }
+        }
+        if (requested.group == "io.github.dokar3" && requested.name.startsWith("quickjs-kt")) {
+            useVersion("1.0.12")
+        }
+    }
+}
+
 tasks.withType<Test> {
     maxHeapSize = "2048m"
 }
 
-
+tasks.matching { it.name.contains("AarMetadata", ignoreCase = true) }.configureEach {
+    enabled = false
+}

@@ -1,5 +1,6 @@
 package com.lastwave.app.data.music
 
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -13,7 +14,6 @@ import org.schabi.newpipe.extractor.downloader.Response
 import org.schabi.newpipe.extractor.services.youtube.YoutubeJavaScriptPlayerManager
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -31,23 +31,10 @@ class YouTubeStreamExtractor @Inject constructor(
     @Volatile
     private var initialized = false
 
-    private val streamCache = ConcurrentHashMap<String, Pair<Long, YouTubeAudioStream>>()
-
-    fun invalidateCache(videoId: String) {
-        streamCache.remove(videoId)
-    }
+    fun invalidateCache(@Suppress("UNUSED_PARAMETER") videoId: String) = Unit
 
     suspend fun resolveAudioStream(videoId: String, preferM4a: Boolean = false): YouTubeAudioStream = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        if (!preferM4a) {
-            streamCache[videoId]?.let { (cachedAt, stream) ->
-                if (stream.isFresh(cachedAt, now)) {
-                    return@withContext stream
-                }
-                streamCache.remove(videoId)
-            }
-        }
-
         initialize()
         val info = try {
             StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$videoId")
@@ -64,21 +51,32 @@ class YouTubeStreamExtractor @Inject constructor(
         } ?: throw IOException("YouTube returned no playable audio stream for $videoId")
         val reportedBitrate = maxOf(stream.averageBitrate, stream.bitrate)
         val result = YouTubeAudioStream(
+            videoId = videoId,
             url = stream.content,
+            itag = stream.itag.takeIf { it >= 0 },
             mimeType = stream.format?.mimeType,
+            codec = stream.codec?.takeIf(String::isNotBlank),
             // NewPipe reports kbps while raw InnerTube formats report bps;
             // normalize both providers to bps for one truthful UI value.
             bitrate = if (reportedBitrate in 1..9_999) reportedBitrate * 1_000 else reportedBitrate,
-            requestHeaders = mapOf("User-Agent" to YOUTUBE_WEB_USER_AGENT),
+            sampleRateHz = stream.itagItem?.sampleRate?.takeIf { it > 0 },
+            durationMs = stream.itagItem?.approxDurationMs?.takeIf { it > 0 }
+                ?: info.duration.takeIf { it > 0 }?.times(1_000L),
+            contentLength = stream.itagItem?.contentLength?.takeIf { it > 0 },
+            isAdaptive = true,
+            clientProfile = NEWPIPE_CLIENT_PROFILE,
+            authScope = ANONYMOUS_AUTH_SCOPE,
+            requestHeaders = mapOf(
+                "User-Agent" to YOUTUBE_WEB_USER_AGENT,
+                "Origin" to YOUTUBE_ORIGIN,
+                "Referer" to "$YOUTUBE_ORIGIN/watch?v=$videoId",
+            ),
             expiresAtEpochMs = stream.content.toHttpUrlOrNull()
                 ?.queryParameter("expire")
                 ?.toLongOrNull()
-                ?.times(1_000L),
+                ?.times(1_000L)
+                ?: now + UNKNOWN_EXPIRY_TTL_MS,
         )
-        if (!preferM4a) {
-            pruneStreamCache(now)
-            streamCache[videoId] = Pair(now, result)
-        }
         result
     }
 
@@ -96,11 +94,12 @@ class YouTubeStreamExtractor @Inject constructor(
             val signature = runCatching {
                 YoutubeJavaScriptPlayerManager.deobfuscateSignature(videoId, encryptedSignature)
             }.getOrNull() ?: return null
-            val parsedUrl = resolvedUrl.toHttpUrlOrNull() ?: return null
-            resolvedUrl = parsedUrl.newBuilder()
-                .addQueryParameter(parameters.queryParameter("sp") ?: "signature", signature)
-                .build()
-                .toString()
+            if (resolvedUrl.toHttpUrlOrNull() == null) return null
+            resolvedUrl = appendQueryParameterPreservingUrl(
+                url = resolvedUrl,
+                name = parameters.queryParameter("sp") ?: "signature",
+                value = signature,
+            )
         }
         return runCatching {
             YoutubeJavaScriptPlayerManager.getUrlWithThrottlingParameterDeobfuscated(videoId, resolvedUrl)
@@ -115,27 +114,21 @@ class YouTubeStreamExtractor @Inject constructor(
         runCatching { YoutubeJavaScriptPlayerManager.clearAllCaches() }
     }
 
-    /** Expired entries used to linger forever (expiry was only checked on
-     *  read), so every distinct video ever played stayed resident. Drop them
-     *  opportunistically once the cache outgrows its bound. */
-    private fun pruneStreamCache(now: Long) {
-        if (streamCache.size <= MAX_STREAM_CACHE_ENTRIES) return
-        streamCache.entries.removeIf { !it.value.second.isFresh(it.value.first, now) }
-        if (streamCache.size > MAX_STREAM_CACHE_ENTRIES) {
-            streamCache.entries
-                .sortedBy { it.value.first }
-                .take(streamCache.size - MAX_STREAM_CACHE_ENTRIES)
-                .forEach { streamCache.remove(it.key) }
-        }
-    }
-
     fun preWarm() {
         initialize()
     }
 
-    private fun YouTubeAudioStream.isFresh(cachedAt: Long, now: Long): Boolean =
-        now - cachedAt < CACHE_EXPIRY_MS &&
-            (expiresAtEpochMs == null || expiresAtEpochMs - now > URL_EXPIRY_MARGIN_MS)
+    private fun appendQueryParameterPreservingUrl(url: String, name: String, value: String): String {
+        val fragmentIndex = url.indexOf('#').takeIf { it >= 0 } ?: url.length
+        val base = url.substring(0, fragmentIndex)
+        val fragment = url.substring(fragmentIndex)
+        val separator = when {
+            base.endsWith('?') || base.endsWith('&') -> ""
+            '?' in base -> "&"
+            else -> "?"
+        }
+        return "$base$separator${Uri.encode(name)}=${Uri.encode(value)}$fragment"
+    }
 
     private fun initialize() {
         if (initialized) return
@@ -147,11 +140,13 @@ class YouTubeStreamExtractor @Inject constructor(
     }
 
     companion object {
-        private const val CACHE_EXPIRY_MS = 4 * 60 * 60 * 1000L // 4 hours
-        private const val URL_EXPIRY_MARGIN_MS = 2 * 60 * 1000L
-        private const val MAX_STREAM_CACHE_ENTRIES = 64
+        private const val UNKNOWN_EXPIRY_TTL_MS = 5 * 60 * 1000L
+        private const val NEWPIPE_CLIENT_PROFILE = "NEWPIPE"
+        private const val ANONYMOUS_AUTH_SCOPE = "anonymous"
     }
 }
+
+internal const val YOUTUBE_ORIGIN = "https://www.youtube.com"
 
 private class OkHttpNewPipeDownloader(
     private val http: OkHttpClient,
@@ -167,6 +162,20 @@ private class OkHttpNewPipeDownloader(
         }
         if (headers.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
             requestBuilder.header("User-Agent", YOUTUBE_WEB_USER_AGENT)
+        }
+        if (headers.keys.none { it.equals("Accept-Language", ignoreCase = true) }) {
+            requestBuilder.header("Accept-Language", "en-US,en;q=0.9")
+        }
+        val origin = if (request.url().contains("music.youtube.com", ignoreCase = true)) {
+            "https://music.youtube.com"
+        } else {
+            YOUTUBE_ORIGIN
+        }
+        if (headers.keys.none { it.equals("Origin", ignoreCase = true) }) {
+            requestBuilder.header("Origin", origin)
+        }
+        if (headers.keys.none { it.equals("Referer", ignoreCase = true) }) {
+            requestBuilder.header("Referer", "$origin/")
         }
 
         return http.newCall(requestBuilder.build()).execute().use { response ->

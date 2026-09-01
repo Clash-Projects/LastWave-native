@@ -92,6 +92,7 @@ import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.data.playlist.LIKED_SONGS_MODE
 import com.lastwave.app.data.playlist.isYouTubeOnly
+import com.lastwave.app.playback.toPlayableTrack
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.PlaylistCover
@@ -268,14 +269,7 @@ fun PlaylistScreen(
                                     onMakeLocal = { viewModel.makeLocal(playlist.id) },
                                     onPlay = {
                                         musicPlayer.playQueue(
-                                            playlist.tracks.map { track ->
-                                                com.lastwave.app.playback.PlayableTrack(
-                                                    title = track.name,
-                                                    artist = track.artist,
-                                                    album = track.album,
-                                                    artworkUrl = track.artworkUrl,
-                                                )
-                                            },
+                                            playlist.tracks.map(GeneratedTrack::toPlayableTrack),
                                             startIndex = 0,
                                             sourceLabel = playlist.title,
                                         )

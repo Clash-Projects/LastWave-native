@@ -118,6 +118,7 @@ class PlaylistViewModel @Inject constructor(
             playlistRepository.changes.collect { load() }
         }
         viewModelScope.launch {
+            ytMusicLibraryManager.libraryReady.first { it }
             ytMusicLibraryManager.playlists.collect { remote ->
                 val openRemoteId = _uiState.value.detailPlaylist
                     ?.takeIf { it.isYouTubeOnly }
@@ -148,6 +149,7 @@ class PlaylistViewModel @Inject constructor(
     fun load(justGeneratedId: Long? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
+            ytMusicLibraryManager.libraryReady.first { it }
             val local = playlistRepository.getAll()
             val all = sortPlaylists(local + ytMusicLibraryManager.playlists.value, _uiState.value.sortMode)
             val newest = justGeneratedId ?: all.maxByOrNull { it.createdAtMillis }?.id
