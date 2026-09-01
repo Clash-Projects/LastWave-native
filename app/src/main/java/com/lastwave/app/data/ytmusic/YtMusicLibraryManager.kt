@@ -20,6 +20,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.dropWhile
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -43,20 +45,21 @@ private data class YtCachedDetail(
     val id: Long,
     val title: String,
     val subtitle: String,
+    val author: String?,
     val remotePlaylistId: String,
-    val remoteArtworkUrl: String? = null,
-    val remoteTrackCount: Int? = null,
-    val tracks: List<StoredTrack> = emptyList(),
-    val cachedAtMillis: Long = 0L,
+    val remoteArtworkUrl: String?,
+    val tracks: List<StoredTrack>,
+    val remoteTrackCount: Int?,
+    val lastSyncTime: Long = 0L,
 )
 
 /** Connected YouTube playlists as live library items; importing is optional. */
 @Singleton
 class YtMusicLibraryManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val innerTube: InnerTubeMusicApi,
     private val auth: YtMusicAuthManager,
     private val preferences: YtMusicPreferences,
+    private val innerTube: InnerTubeMusicApi,
     private val importManager: PlaylistImportManager,
     private val applicationScope: CoroutineScope,
 ) {
@@ -67,6 +70,8 @@ class YtMusicLibraryManager @Inject constructor(
 
     private val _accountPlaylists = MutableStateFlow<List<YouTubePlaylistSummary>>(emptyList())
     val accountPlaylists: StateFlow<List<YouTubePlaylistSummary>> = _accountPlaylists.asStateFlow()
+    private val _libraryReady = MutableStateFlow(false)
+    val libraryReady: StateFlow<Boolean> = _libraryReady.asStateFlow()
     val playlists: StateFlow<List<SavedPlaylist>> = combine(
         _accountPlaylists,
         preferences.hiddenLibraryPlaylistIds,
@@ -105,22 +110,10 @@ class YtMusicLibraryManager @Inject constructor(
             } catch (_: Exception) {}
         }
         applicationScope.launch {
-            auth.connection.collect { connection ->
-                if (connection.isConnected) {
-                    if (_accountPlaylists.value.isEmpty()) {
-                        val cached = preferences.cachedLibraryPlaylists().map { it.toSummary() }
-                        if (cached.isNotEmpty()) publish(cached)
-                    }
-                    refresh()
-                } else {
-                    remoteIdsByLocalId.clear()
-                    details.clear()
-                    knownArtworkByRemoteId.clear()
-                    artworkRetryAfter.clear()
-                    _accountPlaylists.value = emptyList()
-                    clearDiskCache()
-                }
-            }
+            val persistedConnection = preferences.connection.first()
+            auth.connection.first { it == persistedConnection }
+            handleConnection(persistedConnection)
+            auth.connection.dropWhile { it == persistedConnection }.collect(::handleConnection)
         }
         // InnerTube has no push subscription. Short foreground-process polling
         // gives connected playlists near-real-time behavior without importing.
@@ -130,6 +123,32 @@ class YtMusicLibraryManager @Inject constructor(
                 if (auth.connection.value.isConnected) refresh()
             }
         }
+    }
+
+    private suspend fun handleConnection(connection: YtConnection) {
+        if (connection.isConnected) {
+            if (_accountPlaylists.value.isEmpty()) {
+                val cached = preferences.cachedLibraryPlaylists().map { it.toSummary() }
+                if (cached.isNotEmpty()) publish(cached)
+            }
+            val visibleRemoteIds = preferences.hiddenLibraryPlaylistIds.first().let { hiddenIds ->
+                _accountPlaylists.value.mapNotNull { it.id.takeUnless(hiddenIds::contains) }.toSet()
+            }
+            playlists.first { projected ->
+                projected.mapNotNull(SavedPlaylist::remotePlaylistId).toSet() == visibleRemoteIds
+            }
+            _libraryReady.value = true
+            refresh()
+            return
+        }
+
+        remoteIdsByLocalId.clear()
+        details.clear()
+        knownArtworkByRemoteId.clear()
+        artworkRetryAfter.clear()
+        _accountPlaylists.value = emptyList()
+        clearDiskCache()
+        _libraryReady.value = true
     }
 
     suspend fun refresh() = refreshMutex.withLock {
@@ -389,10 +408,17 @@ class YtMusicLibraryManager @Inject constructor(
 
     private fun String?.normalizedRemoteArtwork(): String? {
         val value = this?.trim()?.takeIf(String::isNotBlank) ?: return null
-        return when {
+        val normalized = when {
             value.startsWith("//") -> "https:$value"
             value.startsWith("https://") || value.startsWith("http://") -> value
             else -> null
+        }
+        return normalized?.let {
+            if ((it.contains("googleusercontent.com") || it.contains("ggpht.com")) && '=' in it) {
+                it.substringBeforeLast('=') + "=w512-h512-l90-rj"
+            } else {
+                it
+            }
         }
     }
 

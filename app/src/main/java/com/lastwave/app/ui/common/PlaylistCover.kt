@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,8 +37,10 @@ fun PlaylistCover(
     val shape = RoundedCornerShape(cornerRadius)
     val directCover = playlist.customCoverUri ?: playlist.remoteArtworkUrl
     var lastValidCover by remember(playlist.id) { mutableStateOf(directCover?.takeIf(String::isNotBlank)) }
-    if (!directCover.isNullOrBlank()) {
-        lastValidCover = directCover
+    LaunchedEffect(directCover) {
+        if (!directCover.isNullOrBlank()) {
+            lastValidCover = directCover
+        }
     }
     val effectiveCover = directCover?.takeIf(String::isNotBlank) ?: lastValidCover
     var customCoverFailed by remember(effectiveCover) { mutableStateOf(false) }
@@ -57,6 +60,7 @@ fun PlaylistCover(
             val imageRequest = remember(effectiveCover, context) {
                 ImageRequest.Builder(context)
                     .data(effectiveCover)
+                    .size(512)
                     .crossfade(true)
                     .build()
             }
