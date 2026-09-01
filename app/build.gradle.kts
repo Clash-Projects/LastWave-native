@@ -247,6 +247,7 @@ dependencies {
     // Native in-app audio playback, background service, system media
     // controls, Bluetooth/headset controls and a MediaController-backed UI.
     implementation("androidx.media3:media3-exoplayer:1.2.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.2.1")
     // MediaBrowserServiceCompat/MediaSessionCompat bridge used by Android
     // Auto to browse the LastWave library and control the same player.
     implementation("androidx.media:media:1.7.0")
@@ -264,9 +265,15 @@ dependencies {
     // requested Oboe 1.8+ baseline and exposes its CMake target through Prefab.
     implementation("com.google.oboe:oboe:1.10.0")
 
-    // Resolves YouTube's current protected/ciphered playback URLs locally.
-    // InnerTube remains responsible for YouTube Music search and metadata.
+    // Metadata/search remains local InnerTube/NewPipe functionality; playback
+    // resolves through InnerTubeX first and retains NewPipe as a fallback.
     implementation(libs.newpipe.extractor)
+
+    // InnerTubeX is invoked through the compatibility adapter because its
+    // current release is built with a newer Kotlin metadata version than the
+    // app. Runtime-only keeps the app compiler on its existing Kotlin line.
+    runtimeOnly(libs.innertubex)
+    runtimeOnly("io.ktor:ktor-client-cio:3.5.2")
 
     // Unit Testing dependencies
     testImplementation("junit:junit:4.13.2")
