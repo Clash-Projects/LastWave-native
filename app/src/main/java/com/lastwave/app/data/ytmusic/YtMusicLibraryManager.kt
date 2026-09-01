@@ -45,12 +45,11 @@ private data class YtCachedDetail(
     val id: Long,
     val title: String,
     val subtitle: String,
-    val author: String?,
     val remotePlaylistId: String,
-    val remoteArtworkUrl: String?,
-    val tracks: List<StoredTrack>,
-    val remoteTrackCount: Int?,
-    val lastSyncTime: Long = 0L,
+    val remoteArtworkUrl: String? = null,
+    val remoteTrackCount: Int? = null,
+    val tracks: List<StoredTrack> = emptyList(),
+    val cachedAtMillis: Long = 0L,
 )
 
 /** Connected YouTube playlists as live library items; importing is optional. */
