@@ -33,6 +33,7 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.lastwave.app.data.discover.DiscoverRepository
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.generate.youtubeVideoIdOrNull
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.SettingsPreferences
 import com.lastwave.app.data.music.InnerTubeMusicApi
@@ -218,6 +219,7 @@ class MusicPlayer @Inject constructor(
     private var bufferingRecoveryCount = 0
     private var bufferingRecoveryJob: Job? = null
     private val qobuzBypassMediaIds = ConcurrentHashMap.newKeySet<String>()
+    private val resolvingMediaIds = ConcurrentHashMap<String, Long>()
     private val preparedStreams = ConcurrentHashMap<String, ResolvedStream>()
 
     private val mediaCache: Cache by lazy {
@@ -250,7 +252,10 @@ class MusicPlayer @Inject constructor(
     }
 
     private val listener: Player.Listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) = refresh(player)
+        override fun onEvents(player: Player, events: Player.Events) = refresh(
+            player = player,
+            queueChanged = events.contains(Player.EVENT_TIMELINE_CHANGED),
+        )
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
                 unavailableSkipJob?.cancel()
@@ -278,12 +283,10 @@ class MusicPlayer @Inject constructor(
                 }
                 val currentIndex = player.currentMediaItemIndex
                 val currentTrack = mediaItem.toPlayableTrack()
-                val currentQueue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toPlayableTrack() }
                 _state.update {
                     it.copy(
                         current = currentTrack,
                         currentIndex = currentIndex,
-                        queue = if (currentQueue.isNotEmpty()) currentQueue else it.queue,
                         isBuffering = true,
                         error = null,
                     )
@@ -400,7 +403,6 @@ class MusicPlayer @Inject constructor(
                 val generation = playRequestGeneration.incrementAndGet()
                 playRequest?.cancel()
                 playRequest = applicationScope.launch(Dispatchers.IO) {
-                    var retryFailure: Throwable? = null
                     try {
                         rejectedStream?.cacheKey?.let { cacheKey ->
                             runCatching { mediaCache.removeResource(cacheKey) }
@@ -440,7 +442,6 @@ class MusicPlayer @Inject constructor(
                     } catch (cancellation: CancellationException) {
                         throw cancellation
                     } catch (e: Throwable) {
-                        retryFailure = e
                         logResolutionFailure(currentTrack, "player-retry-resolve", retry, e)
                     }
                     withContext(Dispatchers.Main.immediate) {
@@ -451,12 +452,11 @@ class MusicPlayer @Inject constructor(
                             return@withContext
                         }
                         _state.update { it.copy(error = error.message ?: "Playback error (${error.errorCodeName})", isBuffering = false) }
-                        if (retryFailure?.let(::isConfirmedUnplayableFailure) == true) {
-                            scheduleUnavailableMediaSkip(
-                                failedIndex = failedIndex,
-                                failedMediaId = failedMediaId,
-                            )
-                        }
+                        scheduleUnavailableMediaSkip(
+                            failedIndex = failedIndex,
+                            failedMediaId = failedMediaId,
+                            expectedGeneration = generation,
+                        )
                     }
                 }
                 _state.update { it.copy(isBuffering = true, error = null) }
@@ -464,6 +464,7 @@ class MusicPlayer @Inject constructor(
             }
 
             _state.update { it.copy(error = error.message ?: "Playback error (${error.errorCodeName})", isBuffering = false) }
+            scheduleUnavailableMediaSkip(failedIndex, failedMediaId)
         }
     }
 
@@ -749,7 +750,10 @@ class MusicPlayer @Inject constructor(
         onMain {
             ensureForegroundService()
             resetBufferingWatch()
-            if (playerDelegate.isInitialized()) player.stop()
+            if (playerDelegate.isInitialized()) {
+                player.stop()
+                player.clearMediaItems()
+            }
             _state.value = MusicPlayerState(
                 current = selectedTrack,
                 queue = tracks,
@@ -806,12 +810,33 @@ class MusicPlayer @Inject constructor(
                 logResolutionFailure(selectedTrack, "resolve-before-prepare", 0, error)
                 withContext(Dispatchers.Main.immediate) {
                     if (generation == playRequestGeneration.get()) {
-                        _state.update {
-                            it.copy(
-                                isPlaying = false,
-                                isBuffering = false,
-                                error = error.message ?: "Unable to resolve audio",
+                        unavailableMediaIds += selectedTrack.mediaIdKey()
+                        val nextIndex = if (startShuffled) {
+                            tracks.indices
+                                .filter { tracks[it].mediaIdKey() !in unavailableMediaIds }
+                                .randomOrNull()
+                        } else {
+                            (selectedIndex + 1 until tracks.size)
+                                .firstOrNull { tracks[it].mediaIdKey() !in unavailableMediaIds }
+                        }
+                        if (nextIndex != null) {
+                            playRequest = null
+                            startResolvedQueuePlayback(
+                                tracks = tracks,
+                                selectedIndex = nextIndex,
+                                startPositionMs = 0L,
+                                sourceLabel = sourceLabel,
+                                endlessDiscover = endlessDiscover,
+                                startShuffled = startShuffled,
                             )
+                        } else {
+                            _state.update {
+                                it.copy(
+                                    isPlaying = false,
+                                    isBuffering = false,
+                                    error = error.message ?: "Unable to resolve audio",
+                                )
+                            }
                         }
                     }
                 }
@@ -997,6 +1022,11 @@ class MusicPlayer @Inject constructor(
         }
     }
     fun previous() = onMain {
+        val pendingState = _state.value
+        if (playRequest?.isActive == true && pendingState.isBuffering) {
+            playPendingQueueItem(pendingState.currentIndex - 1, pendingState)
+            return@onMain
+        }
         if (player.currentPosition > 5_000) {
             player.seekTo(0)
         } else {
@@ -1006,15 +1036,42 @@ class MusicPlayer @Inject constructor(
         }
     }
     fun next() = onMain {
+        val pendingState = _state.value
+        if (playRequest?.isActive == true && pendingState.isBuffering) {
+            playPendingQueueItem(pendingState.currentIndex + 1, pendingState)
+            return@onMain
+        }
         player.nextMediaItemIndex
             .takeIf { it != C.INDEX_UNSET }
             ?.let(::resolveAndPlayQueueItem)
     }
 
     @MainThread
+    private fun playPendingQueueItem(index: Int, pendingState: MusicPlayerState) {
+        if (index !in pendingState.queue.indices) return
+        if (index in 0 until player.mediaItemCount) {
+            resolveAndPlayQueueItem(index)
+        } else {
+            startResolvedQueuePlayback(
+                tracks = pendingState.queue,
+                selectedIndex = index,
+                startPositionMs = 0L,
+                sourceLabel = pendingState.sourceLabel,
+                endlessDiscover = pendingState.isEndlessQueue,
+                startShuffled = pendingState.shuffleEnabled,
+            )
+        }
+    }
+
+    @MainThread
     private fun resolveAndPlayQueueItem(index: Int) {
         if (index !in 0 until player.mediaItemCount) return
         ensureForegroundService()
+        val generation = playRequestGeneration.incrementAndGet()
+        playRequest?.cancel()
+        preloadJob?.cancel()
+        unavailableSkipJob?.cancel()
+        unavailableSkipJob = null
         val mediaItem = player.getMediaItemAt(index)
         val prepared = mediaItem.localConfiguration?.customCacheKey?.let(preparedStreams::get)
         if (mediaItem.localConfiguration?.uri?.scheme != "lastwave" && prepared?.isExpired() != true) {
@@ -1027,9 +1084,7 @@ class MusicPlayer @Inject constructor(
 
         val track = mediaItem.toPlayableTrack()
         val expectedMediaId = mediaItem.mediaId
-        val generation = playRequestGeneration.incrementAndGet()
-        playRequest?.cancel()
-        preloadJob?.cancel()
+        resolvingMediaIds[expectedMediaId] = generation
         player.pause()
         resetBufferingWatch(expectedMediaId)
         _state.update {
@@ -1080,8 +1135,11 @@ class MusicPlayer @Inject constructor(
                                 error = error.message ?: "Unable to resolve audio",
                             )
                         }
+                        scheduleUnavailableMediaSkip(index, expectedMediaId, generation)
                     }
                 }
+            } finally {
+                resolvingMediaIds.remove(expectedMediaId, generation)
             }
         }
     }
@@ -1092,6 +1150,8 @@ class MusicPlayer @Inject constructor(
         playRequest = null
         preloadJob?.cancel()
         preloadJob = null
+        unavailableSkipJob?.cancel()
+        unavailableSkipJob = null
     }
 
     fun toggleShuffle() = setShuffleEnabled(!state.value.shuffleEnabled)
@@ -1178,6 +1238,14 @@ class MusicPlayer @Inject constructor(
      */
     private suspend fun matchMetadata(track: PlayableTrack): PlayableTrack {
         if (!track.videoId.isNullOrBlank() && !track.artworkUrl.isNullOrBlank()) return track
+        track.videoId?.takeIf(String::isNotBlank)?.let { videoId ->
+            val details = innerTube.fetchSongDetails(videoId)
+            return track.copy(
+                album = track.album?.takeIf(String::isNotBlank) ?: details?.album,
+                artworkUrl = details?.artworkUrl?.takeIf(String::isNotBlank)
+                    ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
+            )
+        }
         val match = innerTube.findBestMatch(track.title, track.artist)
         return track.copy(
             title = track.title.ifBlank { match.title },
@@ -1362,6 +1430,10 @@ class MusicPlayer @Inject constructor(
         }
 
         val mediaId = player.currentMediaItem?.mediaId ?: return
+        if (resolvingMediaIds.containsKey(mediaId)) {
+            bufferingWatchStartedMs = 0L
+            return
+        }
         val now = SystemClock.elapsedRealtime()
         val progressed = bufferingWatchMediaId != mediaId ||
             positionMs > bufferingWatchPositionMs ||
@@ -1441,6 +1513,7 @@ class MusicPlayer @Inject constructor(
             } catch (error: Throwable) {
                 logResolutionFailure(failedTrack, "stall-recovery", bufferingRecoveryCount, error)
                 _state.update { it.copy(isPlaying = false, isBuffering = false, error = "Playback stalled") }
+                scheduleUnavailableMediaSkip(failedIndex, expectedMediaId)
             }
         }
     }
@@ -1458,14 +1531,19 @@ class MusicPlayer @Inject constructor(
     }
 
     @MainThread
-    private fun scheduleUnavailableMediaSkip(failedIndex: Int, failedMediaId: String?) {
+    private fun scheduleUnavailableMediaSkip(
+        failedIndex: Int,
+        failedMediaId: String?,
+        expectedGeneration: Long = playRequestGeneration.get(),
+    ) {
         if (failedIndex == C.INDEX_UNSET || failedMediaId == null) return
         unavailableSkipJob?.cancel()
         unavailableSkipJob = applicationScope.launch(Dispatchers.Main.immediate) {
             delay(UNAVAILABLE_SKIP_DELAY_MS)
-            if (player.currentMediaItemIndex != failedIndex ||
-                player.currentMediaItem?.mediaId != failedMediaId ||
-                !player.playWhenReady || player.isPlaying
+            val failedItemStillQueued = failedIndex in 0 until player.mediaItemCount &&
+                player.getMediaItemAt(failedIndex).mediaId == failedMediaId
+            if (expectedGeneration != playRequestGeneration.get() ||
+                !failedItemStillQueued || player.isPlaying
             ) {
                 unavailableSkipJob = null
                 return@launch
@@ -1861,12 +1939,6 @@ class MusicPlayer @Inject constructor(
         return true
     }
 
-    private fun isConfirmedUnplayableFailure(error: Throwable): Boolean {
-        return isExplicitlyUnplayableFailure(error) ||
-            isPermanentHttpFailure(error) ||
-            isUnsupportedMediaFailure(error)
-    }
-
     private fun isExplicitlyUnplayableFailure(error: Throwable): Boolean =
         error.causeChain().any { it is ConfirmedUnplayableMediaException }
 
@@ -1896,14 +1968,11 @@ class MusicPlayer @Inject constructor(
         val sourceIndex = snapshot.currentIndex.coerceIn(sourceQueue.indices)
         val startIndex = (sourceIndex - RESTORED_PREVIOUS_TRACKS).coerceAtLeast(0)
         val endIndex = minOf(sourceQueue.size, startIndex + MAX_PERSISTED_QUEUE_SIZE)
-        val persistedQueue = sourceQueue.subList(startIndex, endIndex).map {
-            it.copy(playbackUrl = null, playbackMimeType = null)
-        }
         val persistedIndex = sourceIndex - startIndex
         val signature = buildString {
-            append(persistedQueue.size).append('|')
+            append(endIndex - startIndex).append('|')
             append(persistedIndex).append('|')
-            append(persistedQueue[persistedIndex].queueKey()).append('|')
+            append(sourceQueue[sourceIndex].queueKey()).append('|')
             append(snapshot.positionMs / POSITION_PERSIST_INTERVAL_MS).append('|')
             append(snapshot.sourceLabel).append('|')
             append(snapshot.isEndlessQueue).append('|')
@@ -1912,20 +1981,23 @@ class MusicPlayer @Inject constructor(
             append(snapshot.speed)
         }
         if (signature == lastPersistedSignature) return
-        val session = PersistedPlaybackSession(
-            queue = persistedQueue,
-            currentIndex = persistedIndex,
-            positionMs = snapshot.positionMs.coerceAtLeast(0),
-            sourceLabel = snapshot.sourceLabel,
-            isEndlessQueue = snapshot.isEndlessQueue,
-            shuffleEnabled = snapshot.shuffleEnabled,
-            repeatMode = snapshot.repeatMode,
-            speed = snapshot.speed,
-        )
         lastPersistedSignature = signature
         val generation = ++persistenceGeneration
         playbackPersistenceJob?.cancel()
         playbackPersistenceJob = applicationScope.launch(Dispatchers.IO) {
+            val persistedQueue = sourceQueue.subList(startIndex, endIndex).map {
+                it.copy(playbackUrl = null, playbackMimeType = null)
+            }
+            val session = PersistedPlaybackSession(
+                queue = persistedQueue,
+                currentIndex = persistedIndex,
+                positionMs = snapshot.positionMs.coerceAtLeast(0),
+                sourceLabel = snapshot.sourceLabel,
+                isEndlessQueue = snapshot.isEndlessQueue,
+                shuffleEnabled = snapshot.shuffleEnabled,
+                repeatMode = snapshot.repeatMode,
+                speed = snapshot.speed,
+            )
             val encoded = runCatching { persistenceJson.encodeToString(session) }.getOrNull()
                 ?: return@launch
             synchronized(playbackPersistenceLock) {
@@ -1949,9 +2021,13 @@ class MusicPlayer @Inject constructor(
 
 
     @MainThread
-    private fun refresh(player: Player) {
+    private fun refresh(player: Player, queueChanged: Boolean = true) {
         val previous = _state.value
-        val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toPlayableTrack() }
+        val queue = if (queueChanged || previous.queue.size != player.mediaItemCount) {
+            (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toPlayableTrack() }
+        } else {
+            previous.queue
+        }
         val current = player.currentMediaItem?.toPlayableTrack()
         val sameTrack = current?.let { it.title == previous.current?.title && it.artist == previous.current?.artist } == true ||
             (current?.videoId != null && current.videoId == previous.current?.videoId)
@@ -1960,7 +2036,7 @@ class MusicPlayer @Inject constructor(
         val dur = player.duration.takeIf { it > 0 } ?: 0L
         val rawPos = player.currentPosition.coerceAtLeast(0)
         val pos = if (dur > 0) rawPos.coerceIn(0L, dur) else rawPos
-        _state.value = MusicPlayerState(
+        val updated = MusicPlayerState(
             current = current,
             queue = queue,
             currentIndex = player.currentMediaItemIndex.takeIf { player.mediaItemCount > 0 } ?: -1,
@@ -1982,13 +2058,15 @@ class MusicPlayer @Inject constructor(
             sleepTimerRemainingMs = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())?.coerceAtLeast(0),
             error = if (player.isPlaying) null else previous.error,
         )
+        if (updated == previous) return
+        _state.value = updated
         persistPlaybackSession()
     }
 
     private companion object {
         const val DISCOVER_QUEUE_BATCH_SIZE = 16
         const val DISCOVER_QUEUE_REFILL_THRESHOLD = 8
-        const val UNAVAILABLE_SKIP_DELAY_MS = 6_000L
+        const val UNAVAILABLE_SKIP_DELAY_MS = 1_000L
         const val BUFFERING_STALL_TIMEOUT_MS = 25_000L
         const val MAX_BUFFERING_RECOVERY_ATTEMPTS = 1
         const val POSITION_PERSIST_INTERVAL_MS = 5_000L
@@ -2081,12 +2159,16 @@ private fun MediaItem.toPlayableTrack(): PlayableTrack {
     )
 }
 
-fun GeneratedTrack.toPlayableTrack() = PlayableTrack(
-    title = name,
-    artist = artist,
-    album = album,
-    artworkUrl = artworkUrl,
-)
+fun GeneratedTrack.toPlayableTrack(): PlayableTrack {
+    val videoId = youtubeVideoIdOrNull()
+    return PlayableTrack(
+        title = name,
+        artist = artist,
+        album = album,
+        artworkUrl = artworkUrl ?: videoId?.let { "https://i.ytimg.com/vi/$it/hqdefault.jpg" },
+        videoId = videoId,
+    )
+}
 
 private fun PlayableTrack.queueKey(): String = "$title|$artist".lowercase()
 

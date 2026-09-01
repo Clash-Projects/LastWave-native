@@ -48,12 +48,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LongState
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
@@ -76,6 +79,7 @@ import com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator
 import com.lastwave.app.ui.common.ExpressiveMotion
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 
 sealed interface LyricsUiState {
@@ -106,33 +110,15 @@ fun LyricsPanel(
 ) {
     val track = state.current ?: return
     val liquidGlass = LocalLiquidGlass.current
-
-    // High-frequency live progress stream
-    val progress by (progressState ?: player.progressState).collectAsStateWithLifecycle(
-        initialValue = PlaybackProgressState(positionMs = state.positionMs, durationMs = state.durationMs),
+    val liveProgressState = progressState ?: player.progressState
+    val trackKey = track.videoId ?: "${track.artist}|${track.title}"
+    val positionState = rememberLyricsPositionState(
+        trackKey = trackKey,
+        isPlaying = state.isPlaying,
+        fallbackPositionMs = state.positionMs,
+        fallbackDurationMs = state.durationMs,
+        progressState = liveProgressState,
     )
-
-    // High-precision frame-level monotonic position clock for 60/120fps bit-perfect vocal sync
-    var smoothedPositionMs by remember(track.videoId) { mutableLongStateOf(progress.positionMs) }
-    var basePositionMs by remember(track.videoId) { mutableLongStateOf(progress.positionMs) }
-    var lastSyncTime by remember(track.videoId) { mutableLongStateOf(SystemClock.elapsedRealtime()) }
-
-    LaunchedEffect(progress.positionMs, state.isPlaying) {
-        basePositionMs = progress.positionMs
-        lastSyncTime = SystemClock.elapsedRealtime()
-        smoothedPositionMs = progress.positionMs
-    }
-
-    LaunchedEffect(state.isPlaying) {
-        if (!state.isPlaying) return@LaunchedEffect
-        while (isActive) {
-            withFrameMillis {
-                val elapsed = SystemClock.elapsedRealtime() - lastSyncTime
-                val dur = progress.durationMs.takeIf { it > 0 } ?: state.durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE
-                smoothedPositionMs = (basePositionMs + elapsed).coerceIn(0L, dur)
-            }
-        }
-    }
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -191,7 +177,7 @@ fun LyricsPanel(
                         } else if (targetState.isSynced && targetState.lines.isNotEmpty()) {
                             SyncedLyricsList(
                                 lines = targetState.lines,
-                                currentPositionMs = smoothedPositionMs,
+                                positionState = positionState,
                                 isPlaying = state.isPlaying,
                                 onSeek = player::seekTo,
                                 animationStyle = lyricsAnimation,
@@ -220,8 +206,8 @@ fun LyricsPanel(
         // Transparent playback controls; no separate player-bar container.
         LyricsPlaybackControls(
             state = state,
-            currentPositionMs = smoothedPositionMs,
-            totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
+            positionState = positionState,
+            progressState = liveProgressState,
             player = player,
             wavySeekbarEnabled = wavySeekbarEnabled,
             modifier = Modifier
@@ -233,9 +219,46 @@ fun LyricsPanel(
 }
 
 @Composable
+private fun rememberLyricsPositionState(
+    trackKey: String,
+    isPlaying: Boolean,
+    fallbackPositionMs: Long,
+    fallbackDurationMs: Long,
+    progressState: StateFlow<PlaybackProgressState>,
+): LongState {
+    val progress by progressState.collectAsStateWithLifecycle(
+        initialValue = PlaybackProgressState(fallbackPositionMs, fallbackDurationMs),
+    )
+    val smoothedPosition = remember(trackKey) { mutableLongStateOf(progress.positionMs) }
+    var basePositionMs by remember(trackKey) { mutableLongStateOf(progress.positionMs) }
+    var lastSyncTime by remember(trackKey) { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+
+    LaunchedEffect(progress.positionMs, isPlaying) {
+        basePositionMs = progress.positionMs
+        lastSyncTime = SystemClock.elapsedRealtime()
+        smoothedPosition.longValue = progress.positionMs
+    }
+
+    LaunchedEffect(trackKey, isPlaying, progress.durationMs, fallbackDurationMs) {
+        if (!isPlaying) return@LaunchedEffect
+        while (isActive) {
+            withFrameMillis {
+                val elapsed = SystemClock.elapsedRealtime() - lastSyncTime
+                val duration = progress.durationMs.takeIf { it > 0 }
+                    ?: fallbackDurationMs.takeIf { it > 0 }
+                    ?: Long.MAX_VALUE
+                smoothedPosition.longValue = (basePositionMs + elapsed).coerceIn(0L, duration)
+            }
+        }
+    }
+
+    return smoothedPosition
+}
+
+@Composable
 private fun SyncedLyricsList(
     lines: List<LyricLine>,
-    currentPositionMs: Long,
+    positionState: LongState,
     isPlaying: Boolean,
     onSeek: (Long) -> Unit,
     animationStyle: LyricsAnimation,
@@ -245,20 +268,29 @@ private fun SyncedLyricsList(
     val listState = rememberLazyListState()
     var userScrolledTime by remember { mutableLongStateOf(0L) }
 
-    // Active line detection: Exact millisecond vocal onset matching
-    val activeIndex by remember(lines, currentPositionMs) {
-        androidx.compose.runtime.derivedStateOf {
-            lines.indexOfLast { it.timeMs <= currentPositionMs }
+    val activeIndex by remember(lines, positionState) {
+        derivedStateOf {
+            lines.activeLineIndex(positionState.longValue)
         }
     }
 
-    if (listState.isScrollInProgress) {
-        userScrolledTime = System.currentTimeMillis()
+    LaunchedEffect(listState) {
+        var userWasScrolling = false
+        snapshotFlow { listState.isScrollInProgress }
+            .distinctUntilChanged()
+            .collect { isScrolling ->
+                if (isScrolling) {
+                    userWasScrolling = true
+                } else if (userWasScrolling) {
+                    userScrolledTime = SystemClock.elapsedRealtime()
+                    userWasScrolling = false
+                }
+            }
     }
 
     LaunchedEffect(activeIndex, isPlaying) {
-        val timeSinceUserScroll = System.currentTimeMillis() - userScrolledTime
-        if (timeSinceUserScroll > 2200L && activeIndex in lines.indices) {
+        val timeSinceUserScroll = SystemClock.elapsedRealtime() - userScrolledTime
+        if (!listState.isScrollInProgress && timeSinceUserScroll > 2200L && activeIndex in lines.indices) {
             val scrollOffset = when (animationStyle) {
                 LyricsAnimation.APPLE_ZOOM -> -210
                 LyricsAnimation.CINEMATIC_BLUR -> -190
@@ -292,6 +324,7 @@ private fun SyncedLyricsList(
             val isActive = index == activeIndex
             val isPast = activeIndex >= 0 && index < activeIndex
             val distance = kotlin.math.abs(index - activeIndex)
+            val currentPositionMs = if (isActive) positionState.longValue else line.timeMs
 
             // Each profile gets a distinct motion signature. These targets only
             // change when focus changes (except the short onset pulse below), so
@@ -790,12 +823,17 @@ private fun EmptyLyricsView(
 @Composable
 private fun LyricsPlaybackControls(
     state: MusicPlayerState,
-    currentPositionMs: Long,
-    totalDurationMs: Long,
+    positionState: LongState,
+    progressState: StateFlow<PlaybackProgressState>,
     player: MusicPlayer,
     wavySeekbarEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+    val progress by progressState.collectAsStateWithLifecycle(
+        initialValue = PlaybackProgressState(state.positionMs, state.durationMs),
+    )
+    val currentPositionMs = positionState.longValue
+    val totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs
     // This Column performs layout only. It intentionally draws no container.
     Column(
         modifier = modifier
@@ -907,4 +945,20 @@ private fun LyricsPlaybackControls(
             )
         }
     }
+}
+
+private fun List<LyricLine>.activeLineIndex(positionMs: Long): Int {
+    var low = 0
+    var high = lastIndex
+    var result = -1
+    while (low <= high) {
+        val middle = (low + high).ushr(1)
+        if (this[middle].timeMs <= positionMs) {
+            result = middle
+            low = middle + 1
+        } else {
+            high = middle - 1
+        }
+    }
+    return result
 }

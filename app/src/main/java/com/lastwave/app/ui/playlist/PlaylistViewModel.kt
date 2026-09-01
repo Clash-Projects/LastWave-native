@@ -18,6 +18,7 @@ import com.lastwave.app.util.FileExportHelper
 import com.lastwave.app.util.PlaylistExportFormat
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -81,6 +82,7 @@ class PlaylistViewModel @Inject constructor(
 
     val syncedPlaylistIds: StateFlow<Set<Long>?> = ytMusicPreferences.syncedPlaylistIds
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    private var loadJob: Job? = null
 
     fun toggleYtSync(playlistId: Long) {
         viewModelScope.launch {
@@ -146,7 +148,8 @@ class PlaylistViewModel @Inject constructor(
      *  the Playlist tab regains visibility (e.g. right after Generate
      *  saves a new playlist) — see PlaylistScreen's LaunchedEffect. */
     fun load(justGeneratedId: Long? = null) {
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             val local = playlistRepository.getAll()
             val all = sortPlaylists(local + ytMusicLibraryManager.playlists.value, _uiState.value.sortMode)

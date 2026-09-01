@@ -127,43 +127,47 @@ fun WavySeekBar(
     val layer3Dark = remember(primaryColor, isTranslucent) { primaryColor.shiftTonal(lightnessDelta = -0.14f, saturationScale = 1.35f) }
     val thumbColor = remember(primaryColor) { primaryColor.shiftTonal(lightnessDelta = -0.10f, saturationScale = 1.25f) }
 
-    // Fluid wave animations
-    val infiniteTransition = rememberInfiniteTransition(label = "MaterialGlassWaveAnimation")
-
-    val phase1 by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2 * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "Phase1",
-    )
-
-    val phase2 by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2 * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "Phase2",
-    )
-
-    val phase3 by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2 * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1300, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "Phase3",
-    )
-
     val wavesActive = isPlaying && !dragging
-    val currPhase1 = if (wavesActive) phase1 + 2.2f else 2.2f
-    val currPhase2 = if (wavesActive) phase2 + 1.2f else 1.2f
-    val currPhase3 = if (wavesActive) phase3 else 0f
+    val currPhase1: Float
+    val currPhase2: Float
+    val currPhase3: Float
+    if (wavesActive) {
+        val infiniteTransition = rememberInfiniteTransition(label = "MaterialGlassWaveAnimation")
+        val phase1 by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2 * PI).toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 2400, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "Phase1",
+        )
+        val phase2 by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2 * PI).toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1800, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "Phase2",
+        )
+        val phase3 by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = (2 * PI).toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1300, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "Phase3",
+        )
+        currPhase1 = phase1 + 2.2f
+        currPhase2 = phase2 + 1.2f
+        currPhase3 = phase3
+    } else {
+        currPhase1 = 2.2f
+        currPhase2 = 1.2f
+        currPhase3 = 0f
+    }
 
     // 3-Tier Amplitudes with smooth dampening on seek
     val density = LocalDensity.current

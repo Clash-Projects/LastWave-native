@@ -243,24 +243,8 @@ class InnerTubeMusicApi @Inject constructor(
         if (rawId.isBlank()) return@withContext null
         val browseId = if (rawId.startsWith("VL")) rawId else "VL$rawId"
 
-        val useAuth = ytAuth.connection.value.isConnected
-        var root = if (useAuth) {
-            runCatching { browseRoot(browseId, authenticated = true) }.getOrNull()
-        } else null
-        val authenticatedAs = root != null
-        if (root == null) {
-            root = runCatching { browseRoot(browseId, authenticated = false) }.getOrNull() ?: return@withContext null
-        }
-
-        val header = root.obj("header")?.obj("musicDetailHeaderRenderer")
-            ?: root.obj("header")?.obj("musicResponsiveHeaderRenderer")
-            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicResponsiveHeaderRenderer")
-            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicDetailHeaderRenderer")
-            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")
-            ?: root.obj("header")?.obj("musicVisualHeaderRenderer")
-            ?: root.obj("header")?.obj("musicHeaderRenderer")
-            ?: root.obj("header")?.obj("playlistHeaderRenderer")
-            ?: findFirstHeaderRenderer(root)
+        val (root, authenticatedAs) = fetchPlaylistRoot(browseId) ?: return@withContext null
+        val header = playlistHeader(root)
 
         val title = extractTitleFromHeader(header, root)
 
@@ -307,6 +291,36 @@ class InnerTubeMusicApi @Inject constructor(
             tracks = songs,
         )
     }
+
+    /** Resolves a connected playlist cover from one browse page only. */
+    suspend fun fetchPlaylistArtwork(playlistIdOrUrl: String): String? = withContext(Dispatchers.IO) {
+        val rawId = extractPlaylistId(playlistIdOrUrl)
+        if (rawId.isBlank()) return@withContext null
+        val browseId = if (rawId.startsWith("VL")) rawId else "VL$rawId"
+        val root = fetchPlaylistRoot(browseId)?.first ?: return@withContext null
+        extractArtworkFromHeader(playlistHeader(root), root)
+            ?: parseSongRenderers(root).firstNotNullOfOrNull { it.artworkUrl?.takeIf(String::isNotBlank) }
+    }
+
+    private suspend fun fetchPlaylistRoot(browseId: String): Pair<JsonElement, Boolean>? {
+        if (ytAuth.connection.value.isConnected) {
+            runCatching { browseRoot(browseId, authenticated = true) }.getOrNull()?.let {
+                return it to true
+            }
+        }
+        return runCatching { browseRoot(browseId, authenticated = false) }.getOrNull()?.let { it to false }
+    }
+
+    private fun playlistHeader(root: JsonElement): JsonObject? =
+        root.obj("header")?.obj("musicDetailHeaderRenderer")
+            ?: root.obj("header")?.obj("musicResponsiveHeaderRenderer")
+            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicResponsiveHeaderRenderer")
+            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicDetailHeaderRenderer")
+            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")
+            ?: root.obj("header")?.obj("musicVisualHeaderRenderer")
+            ?: root.obj("header")?.obj("musicHeaderRenderer")
+            ?: root.obj("header")?.obj("playlistHeaderRenderer")
+            ?: findFirstHeaderRenderer(root)
 
     private fun findFirstHeaderRenderer(root: JsonElement): JsonObject? {
         val renderers = mutableListOf<JsonObject>()
@@ -1757,7 +1771,7 @@ class InnerTubeMusicApi @Inject constructor(
             "geographicrestriction", "not available in your country",
             "contentnotavailable", "video is unavailable", "video unavailable",
             "privatecontent", "this video is private", "paidcontent",
-            "members-only", "login required", "sign in to watch",
+            "members-only",
         )
         return if (confirmedMarkers.any(diagnostic::contains)) {
             causes.firstNotNullOfOrNull { it.message?.takeIf(String::isNotBlank) }
@@ -2136,8 +2150,15 @@ class InnerTubeMusicApi @Inject constructor(
             val trackCountText = subtitleRuns?.mapNotNull { it.asObject()?.string("text") }?.lastOrNull { "song" in it.lowercase() || "track" in it.lowercase() }
 
             val thumbs = renderer.obj("thumbnail")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+                ?: renderer.obj("thumbnail")?.obj("croppedSquareThumbnailRenderer")?.array("thumbnails")
+                ?: renderer.obj("thumbnail")?.obj("musicCustomThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
                 ?: renderer.obj("thumbnailRenderer")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
-            val artwork = thumbs?.lastOrNull()?.asObject()?.string("url")?.highResolutionArtwork()
+                ?: renderer.obj("thumbnailRenderer")?.obj("croppedSquareThumbnailRenderer")?.array("thumbnails")
+                ?: renderer.obj("thumbnailRenderer")?.obj("musicCustomThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
+                ?: renderer.obj("thumbnail")?.array("thumbnails")
+            val artwork = thumbs?.lastOrNull()?.asObject()?.string("url")?.let {
+                (if (it.startsWith("//")) "https:$it" else it).highResolutionArtwork()
+            }
 
             YouTubePlaylistSummary(
                 id = playlistId,

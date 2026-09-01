@@ -163,6 +163,9 @@ private class OkHttpNewPipeDownloader(
         if (headers.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
             requestBuilder.header("User-Agent", YOUTUBE_WEB_USER_AGENT)
         }
+        if (headers.keys.none { it.equals("Accept-Language", ignoreCase = true) }) {
+            requestBuilder.header("Accept-Language", "en-US,en;q=0.9")
+        }
         val origin = if (request.url().contains("music.youtube.com", ignoreCase = true)) {
             "https://music.youtube.com"
         } else {

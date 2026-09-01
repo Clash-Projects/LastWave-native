@@ -8,6 +8,8 @@ import com.lastwave.app.data.repository.AlbumRepository
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.PlayableTrack
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +43,7 @@ class AlbumViewModel @Inject constructor(
     private var currentAlbumTitle: String = ""
     private var currentArtistName: String = ""
     private var currentBrowseId: String? = null
+    private var loadJob: Job? = null
 
     fun loadAlbum(albumTitle: String, artistName: String = "", browseId: String? = null) {
         if (albumTitle == currentAlbumTitle && artistName == currentArtistName && browseId == currentBrowseId && _uiState.value is AlbumUiState.Success) {
@@ -50,11 +53,14 @@ class AlbumViewModel @Inject constructor(
         currentArtistName = artistName
         currentBrowseId = browseId
 
-        viewModelScope.launch {
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
             _uiState.value = AlbumUiState.Loading
             try {
                 val data = repository.getAlbumDetails(albumTitle, artistName, browseId)
                 _uiState.value = AlbumUiState.Success(data)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (e: Exception) {
                 _uiState.value = AlbumUiState.Error(e.message ?: "Failed to load album details")
             }

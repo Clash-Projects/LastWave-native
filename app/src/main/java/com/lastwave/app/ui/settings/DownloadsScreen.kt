@@ -106,7 +106,9 @@ fun DownloadsScreen(
     val totalBytes by viewModel.totalBytes.collectAsStateWithLifecycle()
     val activeDownloadsMap by viewModel.activeDownloads.collectAsStateWithLifecycle()
     val downloadLyrics by viewModel.downloadLyrics.collectAsStateWithLifecycle()
-    val activeDownloads = activeDownloadsMap.values.filter { !it.isFinished && it.error == null }
+    val activeDownloads = remember(activeDownloadsMap) {
+        activeDownloadsMap.values.filter { !it.isFinished && it.error == null }
+    }
 
     val haptic = LocalHapticFeedback.current
     val musicPlayer = LocalMusicPlayer.current
@@ -117,8 +119,10 @@ fun DownloadsScreen(
     var trackToDelete by remember { mutableStateOf<DownloadedTrackEntity?>(null) }
     var showOptionsMenu by remember { mutableStateOf(false) }
 
-    val totalSizeText = formatBytes(totalBytes ?: 0L)
-    val subtitleText = "${tracks.size} song(s) \u2022 $totalSizeText \u2022 Music/LastWave"
+    val totalSizeText = remember(totalBytes) { formatBytes(totalBytes ?: 0L) }
+    val subtitleText = remember(tracks.size, totalSizeText) {
+        "${tracks.size} song(s) \u2022 $totalSizeText \u2022 Music/LastWave"
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -509,6 +513,9 @@ private fun DownloadedTrackCard(
     onPlay: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val metadataText = remember(track.artist, track.fileSizeBytes, track.downloadedAtMillis) {
+        "${track.artist} \u2022 ${formatBytes(track.fileSizeBytes)} \u2022 ${formatDate(track.downloadedAtMillis)}"
+    }
     Card(
         shape = groupShape(position),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
@@ -582,9 +589,8 @@ private fun DownloadedTrackCard(
 
                 Spacer(Modifier.height(2.dp))
 
-                val sizeText = formatBytes(track.fileSizeBytes)
                 Text(
-                    text = "${track.artist} \u2022 $sizeText \u2022 ${formatDate(track.downloadedAtMillis)}",
+                    text = metadataText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

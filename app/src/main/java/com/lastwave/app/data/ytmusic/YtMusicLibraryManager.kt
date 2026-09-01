@@ -5,6 +5,7 @@ import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.StoredTrack
 import com.lastwave.app.data.generate.toGenerated
 import com.lastwave.app.data.generate.toStored
+import com.lastwave.app.data.generate.youtubeVideoIdOrNull
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.music.YouTubePlaylistSummary
@@ -24,10 +25,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromString
@@ -77,6 +81,9 @@ class YtMusicLibraryManager @Inject constructor(
     private val details = ConcurrentHashMap<Long, SavedPlaylist>()
     private val ownedPlaylistCache = ConcurrentHashMap<Long, Pair<Long, com.lastwave.app.data.music.YtOwnedPlaylist>>()
     private val ownedPlaylistLocks = ConcurrentHashMap<Long, Mutex>()
+    private val artworkRequests = ConcurrentHashMap.newKeySet<String>()
+    private val artworkRetryAfter = ConcurrentHashMap<String, Long>()
+    private val artworkRequestLimiter = Semaphore(4)
     private val refreshMutex = Mutex()
 
     init {
@@ -91,6 +98,7 @@ class YtMusicLibraryManager @Inject constructor(
                 } else {
                     remoteIdsByLocalId.clear()
                     details.clear()
+                    artworkRetryAfter.clear()
                     _accountPlaylists.value = emptyList()
                     clearDiskCache()
                 }
@@ -133,7 +141,8 @@ class YtMusicLibraryManager @Inject constructor(
         val stableAccount = account.map { summary ->
             val previousSummary = previous[summary.id]
             summary.copy(
-                artworkUrl = previousSummary?.artworkUrl ?: summary.artworkUrl,
+                artworkUrl = summary.artworkUrl.normalizedRemoteArtwork()
+                    ?: (previousSummary?.artworkUrl).normalizedRemoteArtwork(),
                 trackCountText = summary.trackCountText?.takeIf { parseTrackCount(it) != null }
                     ?: previousSummary?.trackCountText,
             )
@@ -144,11 +153,34 @@ class YtMusicLibraryManager @Inject constructor(
         allRemote.forEach { playlist ->
             playlist.remotePlaylistId?.let { remoteIdsByLocalId[playlist.id] = it }
         }
-        // Proactively pre-warm disk cache for connected playlists in background
+        // Fill missing covers without downloading every continuation page of
+        // large connected playlists.
         applicationScope.launch {
-            allRemote.take(8).forEach { playlist ->
-                if (readFromDiskCache(playlist.id) == null) {
-                    runCatching { refreshDetailFromNetwork(playlist.id) }
+            allRemote.filter { it.remoteArtworkUrl.isNullOrBlank() }.forEach { playlist ->
+                val remoteId = playlist.remotePlaylistId ?: return@forEach
+                if (System.currentTimeMillis() < (artworkRetryAfter[remoteId] ?: 0L)) return@forEach
+                if (!artworkRequests.add(remoteId)) return@forEach
+                launch(Dispatchers.IO) {
+                    try {
+                        artworkRequestLimiter.withPermit {
+                            val cached = readFromDiskCache(playlist.id)
+                            if (cached != null) details.putIfAbsent(playlist.id, cached)
+                            val cachedArtwork = (cached?.remoteArtworkUrl).normalizedRemoteArtwork()
+                                ?: cached?.tracks?.firstNotNullOfOrNull {
+                                    it.artworkUrl?.takeIf(String::isNotBlank)
+                                }
+                            val artwork = (cachedArtwork ?: innerTube.fetchPlaylistArtwork(remoteId))
+                                .normalizedRemoteArtwork()
+                            if (artwork == null) {
+                                artworkRetryAfter[remoteId] = System.currentTimeMillis() + ARTWORK_RETRY_DELAY_MS
+                            } else {
+                                artworkRetryAfter.remove(remoteId)
+                                publishArtwork(remoteId, artwork)
+                            }
+                        }
+                    } finally {
+                        artworkRequests.remove(remoteId)
+                    }
                 }
             }
         }
@@ -253,6 +285,9 @@ class YtMusicLibraryManager @Inject constructor(
         val totalEstimatedCount = summary?.trackCountText?.substringBefore(' ')?.replace(",", "")?.toIntOrNull()
 
         val result = innerTube.fetchPlaylist(remoteId) { partialSongs ->
+            val partialArtwork = summary?.artworkUrl?.takeIf(String::isNotBlank)
+                ?: partialSongs.firstNotNullOfOrNull { it.artworkUrl?.takeIf(String::isNotBlank) }
+            publishArtwork(remoteId, partialArtwork)
             val partialPlaylist = SavedPlaylist(
                 id = localId,
                 title = summary?.title?.takeIf { it.isNotBlank() } ?: "YouTube Playlist",
@@ -261,7 +296,7 @@ class YtMusicLibraryManager @Inject constructor(
                 tracks = partialSongs.map(YouTubeMusicTrack::toGeneratedTrack),
                 createdAtMillis = 0L,
                 remotePlaylistId = remoteId,
-                remoteArtworkUrl = summary?.artworkUrl,
+                remoteArtworkUrl = partialArtwork,
                 remoteTrackCount = totalEstimatedCount ?: partialSongs.size,
             )
             details[localId] = partialPlaylist
@@ -273,7 +308,10 @@ class YtMusicLibraryManager @Inject constructor(
         } else {
             summary?.title?.takeIf { it.isNotBlank() } ?: "YouTube Playlist"
         }
-        val artworkUrl = result.artworkUrl?.takeIf { it.isNotBlank() } ?: summary?.artworkUrl
+        val artworkUrl = result.artworkUrl?.takeIf(String::isNotBlank)
+            ?: summary?.artworkUrl?.takeIf(String::isNotBlank)
+            ?: result.tracks.firstNotNullOfOrNull { it.artworkUrl?.takeIf(String::isNotBlank) }
+        publishArtwork(remoteId, artworkUrl)
         val trackCount = if (result.trackCount > 0) {
             result.trackCount
         } else {
@@ -297,20 +335,44 @@ class YtMusicLibraryManager @Inject constructor(
         playlist
     }
 
+    private fun publishArtwork(remoteId: String, artworkUrl: String?) {
+        val resolvedArtwork = artworkUrl.normalizedRemoteArtwork() ?: return
+        _accountPlaylists.update { playlists ->
+            playlists.map { summary ->
+                if (summary.id == remoteId && summary.artworkUrl.isNullOrBlank()) {
+                    summary.copy(artworkUrl = resolvedArtwork)
+                } else {
+                    summary
+                }
+            }
+        }
+    }
+
+    private fun String?.normalizedRemoteArtwork(): String? {
+        val value = this?.trim()?.takeIf(String::isNotBlank) ?: return null
+        return when {
+            value.startsWith("//") -> "https:$value"
+            value.startsWith("https://") || value.startsWith("http://") -> value
+            else -> null
+        }
+    }
+
     suspend fun addTrack(
         localId: Long,
         track: GeneratedTrack,
         allowDuplicate: Boolean = false,
     ): Boolean = withContext(Dispatchers.IO) {
         val playlist = loadDetail(localId) ?: return@withContext false
-        val match = innerTube.findBestMatchOrNull(track.name, track.artist) ?: return@withContext false
+        val exactVideoId = track.youtubeVideoIdOrNull()
+        val match = if (exactVideoId == null) innerTube.findBestMatchOrNull(track.name, track.artist) else null
+        val videoId = exactVideoId ?: match?.videoId ?: return@withContext false
         if (!allowDuplicate) {
             val expectedTrackCount = playlist.remoteTrackCount ?: return@withContext false
             if (playlist.tracks.size < expectedTrackCount) return@withContext false
             if (playlist.tracks.any { it.matches(track, match) }) return@withContext false
         }
         val remoteId = playlist.remotePlaylistId ?: return@withContext false
-        val added = innerTube.addVideosToRemotePlaylist(remoteId, listOf(match.videoId))
+        val added = innerTube.addVideosToRemotePlaylist(remoteId, listOf(videoId))
         if (added) {
             ownedPlaylistCache.remove(localId)
             details.remove(localId)
@@ -325,7 +387,9 @@ class YtMusicLibraryManager @Inject constructor(
         track: GeneratedTrack,
     ): Set<Long> = withContext(Dispatchers.IO) {
         if (localIds.isEmpty()) return@withContext emptySet()
-        val match = innerTube.findBestMatchOrNull(track.name, track.artist) ?: return@withContext emptySet()
+        val directVideoId = track.youtubeVideoIdOrNull()
+        val match = if (directVideoId == null) innerTube.findBestMatchOrNull(track.name, track.artist) else null
+        if (directVideoId == null && match == null) return@withContext emptySet()
         localIds.filterTo(mutableSetOf()) { localId ->
             val playlist = refreshDetailFromNetwork(localId) ?: loadDetail(localId)
             playlist?.tracks?.any { it.matches(track, match) } == true
@@ -337,7 +401,7 @@ class YtMusicLibraryManager @Inject constructor(
         track: GeneratedTrack,
     ): Set<Long> = withContext(Dispatchers.IO) {
         if (localIds.isEmpty()) return@withContext emptySet()
-        val directVideoId = track.url.substringAfter("v=", "").substringBefore('&').takeIf { it.isNotBlank() }
+        val directVideoId = track.youtubeVideoIdOrNull()
         val match = if (directVideoId == null) innerTube.findBestMatchOrNull(track.name, track.artist) else null
         if (directVideoId == null && match == null) return@withContext emptySet()
         localIds.filterTo(mutableSetOf()) { localId ->
@@ -347,8 +411,8 @@ class YtMusicLibraryManager @Inject constructor(
     }
 
     private fun GeneratedTrack.matches(original: GeneratedTrack, match: YouTubeMusicTrack?): Boolean {
-        val videoId = url.substringAfter("v=", "").substringBefore('&').takeIf { it.isNotBlank() }
-        val originalVideoId = original.url.substringAfter("v=", "").substringBefore('&').takeIf { it.isNotBlank() }
+        val videoId = youtubeVideoIdOrNull()
+        val originalVideoId = original.youtubeVideoIdOrNull()
         return (videoId != null && videoId == originalVideoId) ||
             videoId == match?.videoId ||
             key == original.key ||
@@ -359,7 +423,7 @@ class YtMusicLibraryManager @Inject constructor(
         val playlist = loadDetail(localId) ?: return@withContext null
         val remoteId = playlist.remotePlaylistId ?: return@withContext null
         val target = playlist.tracks.getOrNull(index) ?: return@withContext playlist
-        val targetVideoId = target.url.substringAfter("v=", "").substringBefore('&').takeIf { it.isNotBlank() }
+        val targetVideoId = target.youtubeVideoIdOrNull()
         val owned = getOwnedPlaylist(localId, remoteId, targetVideoId) ?: return@withContext playlist
         val item = (if (targetVideoId != null) owned.items.firstOrNull { it.videoId == targetVideoId && it.setVideoId != null } else null)
             ?: owned.items.getOrNull(index)?.takeIf { it.setVideoId != null }
@@ -492,6 +556,7 @@ class YtMusicLibraryManager @Inject constructor(
 
     private companion object {
         const val REALTIME_REFRESH_MS = 8_000L
+        const val ARTWORK_RETRY_DELAY_MS = 5 * 60 * 1000L
         const val OWNED_PLAYLIST_CACHE_TTL_MS = 10 * 60 * 1000L
     }
 }

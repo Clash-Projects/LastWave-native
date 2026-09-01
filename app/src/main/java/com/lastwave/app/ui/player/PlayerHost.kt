@@ -245,6 +245,7 @@ class PlayerViewModel @Inject constructor(
     val lyricsState = _lyricsState.asStateFlow()
 
     private var currentTrackLyricsKey: String? = null
+    private var lyricsJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -270,6 +271,7 @@ class PlayerViewModel @Inject constructor(
                     if (track != null) {
                         loadLyrics(track, forceRefresh = false)
                     } else {
+                        lyricsJob?.cancel()
                         _lyricsState.value = LyricsUiState.Idle
                     }
                 }
@@ -290,7 +292,8 @@ class PlayerViewModel @Inject constructor(
     }
 
     fun loadLyrics(track: PlayableTrack, forceRefresh: Boolean = false) {
-        viewModelScope.launch {
+        lyricsJob?.cancel()
+        lyricsJob = viewModelScope.launch {
             _lyricsState.value = LyricsUiState.Loading
             val durationSeconds = if (player.state.value.durationMs > 0) {
                 (player.state.value.durationMs / 1000).toInt()

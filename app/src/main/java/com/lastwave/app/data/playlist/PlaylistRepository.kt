@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -103,12 +104,16 @@ class PlaylistRepository @Inject constructor(
      *  original reverses its append-ordered array before rendering). */
     suspend fun getAll(): List<SavedPlaylist> {
         awaitStartupSync()
-        return dao.getAll().map { it.toDomain() }.sortedByDescending { it.createdAtMillis }
+        val entities = dao.getAll()
+        return withContext(Dispatchers.Default) {
+            entities.map { it.toDomain() }.sortedByDescending { it.createdAtMillis }
+        }
     }
 
     suspend fun getById(id: Long): SavedPlaylist? {
         awaitStartupSync()
-        return dao.getById(id)?.toDomain()
+        val entity = dao.getById(id) ?: return null
+        return entity.toDomainOffMain()
     }
 
     /**
@@ -133,13 +138,13 @@ class PlaylistRepository @Inject constructor(
             title = title,
             subtitle = subtitle,
             mode = mode,
-            tracksJson = json.encodeToString(playableTracks.map { it.toStored() }),
+            tracksJson = encodeTracks(playableTracks),
             createdAtMillis = System.currentTimeMillis(),
             discoverSignature = discoverSignature,
         )
         dao.upsert(entity)
         dao.trimGeneratedToNewest(MAX_SAVED_PLAYLISTS)
-        val saved = entity.toDomain()
+        val saved = entity.toDomainOffMain()
         syncPublicMirror()
         _changes.tryEmit(Unit)
 
@@ -178,14 +183,14 @@ class PlaylistRepository @Inject constructor(
         val entity = dao.getById(id) ?: return null
         val cleanTitle = title.trim()
         if (entity.mode == LIKED_SONGS_MODE || cleanTitle.equals(LIKED_SONGS_TITLE, ignoreCase = true)) {
-            return entity.toDomain()
+            return entity.toDomainOffMain()
         }
-        if (cleanTitle.isBlank()) return entity.toDomain()
+        if (cleanTitle.isBlank()) return entity.toDomainOffMain()
         val updated = entity.copy(title = cleanTitle)
         dao.upsert(updated)
         syncPublicMirror()
         _changes.tryEmit(Unit)
-        return updated.toDomain()
+        return updated.toDomainOffMain()
     }
 
     suspend fun setCustomCover(id: Long, uri: String?): SavedPlaylist? {
@@ -196,18 +201,18 @@ class PlaylistRepository @Inject constructor(
         dao.upsert(updated)
         syncPublicMirror()
         _changes.tryEmit(Unit)
-        return updated.toDomain()
+        return updated.toDomainOffMain()
     }
 
     suspend fun setPinned(id: Long, pinned: Boolean): SavedPlaylist? {
         awaitStartupSync()
         val entity = dao.getById(id) ?: return null
-        if (entity.isPinned == pinned) return entity.toDomain()
+        if (entity.isPinned == pinned) return entity.toDomainOffMain()
         val updated = entity.copy(isPinned = pinned)
         dao.upsert(updated)
         syncPublicMirror()
         _changes.tryEmit(Unit)
-        return updated.toDomain()
+        return updated.toDomainOffMain()
     }
 
     suspend fun addTrack(
@@ -217,29 +222,29 @@ class PlaylistRepository @Inject constructor(
     ): SavedPlaylist? {
         awaitStartupSync()
         val entity = dao.getById(id) ?: return null
-        val playlist = entity.toDomain()
+        val playlist = entity.toDomainOffMain()
         if (playlist.mode != "custom" && playlist.mode != LIKED_SONGS_MODE) return playlist
         if ((playlist.mode == LIKED_SONGS_MODE || !allowDuplicate) && playlist.tracks.any { it.key == track.key }) return playlist
         if (!innerTube.isPlayable(track.name, track.artist)) return playlist
-        val updatedTracksJson = json.encodeToString((playlist.tracks + track).map { it.toStored() })
+        val updatedTracksJson = encodeTracks(playlist.tracks + track)
         val updated = entity.copy(tracksJson = updatedTracksJson)
         dao.upsert(updated)
         syncPublicMirror()
         _changes.tryEmit(Unit)
-        return updated.toDomain()
+        return updated.toDomainOffMain()
     }
 
     suspend fun removeTrack(id: Long, index: Int): SavedPlaylist? {
         awaitStartupSync()
         val entity = dao.getById(id) ?: return null
-        val playlist = entity.toDomain()
+        val playlist = entity.toDomainOffMain()
         if (index !in playlist.tracks.indices) return playlist
         val updatedTracks = playlist.tracks.toMutableList().apply { removeAt(index) }
-        val updated = entity.copy(tracksJson = json.encodeToString(updatedTracks.map { it.toStored() }))
+        val updated = entity.copy(tracksJson = encodeTracks(updatedTracks))
         dao.upsert(updated)
         syncPublicMirror()
         _changes.tryEmit(Unit)
-        return updated.toDomain()
+        return updated.toDomainOffMain()
     }
 
     suspend fun getLikedSongs(): SavedPlaylist? =
@@ -260,7 +265,7 @@ class PlaylistRepository @Inject constructor(
                 dao.upsert(adopted)
                 syncPublicMirror()
                 _changes.tryEmit(Unit)
-                return@withLock adopted.toDomain()
+                return@withLock adopted.toDomainOffMain()
             }
         }
         val created = save(
@@ -276,11 +281,11 @@ class PlaylistRepository @Inject constructor(
     suspend fun replaceTracksForSync(id: Long, tracks: List<GeneratedTrack>): SavedPlaylist? {
         awaitStartupSync()
         val entity = dao.getById(id) ?: return null
-        val updated = entity.copy(tracksJson = json.encodeToString(tracks.map { it.toStored() }))
+        val updated = entity.copy(tracksJson = encodeTracks(tracks))
         dao.upsert(updated)
         syncPublicMirror()
         _changes.tryEmit(Unit)
-        return updated.toDomain()
+        return updated.toDomainOffMain()
     }
 
     suspend fun delete(id: Long) {
@@ -339,4 +344,12 @@ class PlaylistRepository @Inject constructor(
             isPinned = isPinned,
         )
     }
+
+    private suspend fun SavedPlaylistEntity.toDomainOffMain(): SavedPlaylist =
+        withContext(Dispatchers.Default) { toDomain() }
+
+    private suspend fun encodeTracks(tracks: List<GeneratedTrack>): String =
+        withContext(Dispatchers.Default) {
+            json.encodeToString(tracks.map { it.toStored() })
+        }
 }

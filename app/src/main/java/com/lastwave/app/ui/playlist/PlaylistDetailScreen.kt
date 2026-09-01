@@ -108,6 +108,7 @@ import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.playlist.LIKED_SONGS_MODE
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.data.playlist.isYouTubeOnly
+import com.lastwave.app.playback.toPlayableTrack
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveLoadingIndicator
 import com.lastwave.app.ui.common.PlaylistCover
@@ -340,14 +341,7 @@ fun PlaylistDetailScreen(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 if (playlist.tracks.isNotEmpty()) {
-                                    val playableTracks = playlist.tracks.map { track ->
-                                        com.lastwave.app.playback.PlayableTrack(
-                                            title = track.name,
-                                            artist = track.artist,
-                                            album = track.album,
-                                            artworkUrl = track.artworkUrl,
-                                        )
-                                    }
+                                    val playableTracks = playlist.tracks.map(GeneratedTrack::toPlayableTrack)
                                     val randomIndex = (playableTracks.indices).random()
                                     musicPlayer.playQueue(
                                         playableTracks,
@@ -376,14 +370,7 @@ fun PlaylistDetailScreen(
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 if (playlist.tracks.isNotEmpty()) {
                                     musicPlayer.playQueue(
-                                        displayTracks.map { track ->
-                                            com.lastwave.app.playback.PlayableTrack(
-                                                title = track.name,
-                                                artist = track.artist,
-                                                album = track.album,
-                                                artworkUrl = track.artworkUrl,
-                                            )
-                                        },
+                                        displayTracks.map(GeneratedTrack::toPlayableTrack),
                                         startIndex = 0,
                                         sourceLabel = playlist.title,
                                     )
@@ -582,14 +569,7 @@ fun PlaylistDetailScreen(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 musicPlayer.playQueue(
-                                    displayTracks.map { t ->
-                                        com.lastwave.app.playback.PlayableTrack(
-                                            title = t.name,
-                                            artist = t.artist,
-                                            album = t.album,
-                                            artworkUrl = t.artworkUrl,
-                                        )
-                                    },
+                                    displayTracks.map(GeneratedTrack::toPlayableTrack),
                                     startIndex = index,
                                     sourceLabel = playlist.title,
                                 )
@@ -690,14 +670,7 @@ fun PlaylistDetailScreen(
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             musicPlayer.playQueue(
-                                displayTracks.map { track ->
-                                    com.lastwave.app.playback.PlayableTrack(
-                                        title = track.name,
-                                        artist = track.artist,
-                                        album = track.album,
-                                        artworkUrl = track.artworkUrl,
-                                    )
-                                },
+                                displayTracks.map(GeneratedTrack::toPlayableTrack),
                                 startIndex = 0,
                                 sourceLabel = playlist.title,
                             )

@@ -1,5 +1,6 @@
 package com.lastwave.app.data.generate
 
+import android.net.Uri
 import androidx.compose.runtime.Immutable
 import com.lastwave.app.data.artwork.ArtworkNormalizer
 import kotlinx.serialization.Serializable
@@ -44,6 +45,25 @@ data class StoredTrack(
 
 fun GeneratedTrack.toStored() = StoredTrack(name = name, artist = artist, url = url, image = artworkUrl, album = album)
 fun StoredTrack.toGenerated() = GeneratedTrack(name = name, artist = artist, artworkUrl = image, url = url, album = album)
+
+fun GeneratedTrack.youtubeVideoIdOrNull(): String? {
+    val value = url.trim()
+    if (YOUTUBE_VIDEO_ID_REGEX.matches(value)) return value
+    val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return null
+    val host = uri.host?.lowercase() ?: return null
+    val videoId = when {
+        host == "youtu.be" -> uri.pathSegments.firstOrNull()
+        host == "youtube.com" || host.endsWith(".youtube.com") ->
+            uri.getQueryParameter("v")
+                ?: uri.pathSegments
+                    .takeIf { it.firstOrNull() in setOf("embed", "shorts", "live") }
+                    ?.getOrNull(1)
+        else -> null
+    }
+    return videoId?.takeIf(YOUTUBE_VIDEO_ID_REGEX::matches)
+}
+
+private val YOUTUBE_VIDEO_ID_REGEX = Regex("[A-Za-z0-9_-]{11}")
 
 /**
  * Last.fm's quirky "bare object instead of a 1-item array" behavior (seen
