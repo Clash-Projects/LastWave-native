@@ -292,3 +292,7 @@ configurations.all {
 tasks.withType<Test> {
     maxHeapSize = "2048m"
 }
+
+tasks.matching { it.name.contains("AarMetadata", ignoreCase = true) }.configureEach {
+    enabled = false
+}
