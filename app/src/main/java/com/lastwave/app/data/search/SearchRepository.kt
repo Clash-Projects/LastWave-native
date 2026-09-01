@@ -67,16 +67,14 @@ class SearchRepository @Inject constructor(
                 val suggestions = array[1] as? JsonArray ?: return@withContext emptyList()
                 suggestions.mapNotNull { (it as? JsonPrimitive)?.content }
             }
-        } catch (cancellation: CancellationException) {
-            throw cancellation
         } catch (e: Exception) {
             emptyList()
         }
     }
 
-    suspend fun search(tab: SearchTab, query: String): List<SearchResultItem> = withContext(Dispatchers.Default) {
-        if (query.isBlank()) return@withContext emptyList()
-        when (tab) {
+    suspend fun search(tab: SearchTab, query: String): List<SearchResultItem> {
+        if (query.isBlank()) return emptyList()
+        return when (tab) {
             SearchTab.TRACKS -> innerTube.searchSongs(query).map { track ->
                 SearchResultItem(
                     name = track.title,

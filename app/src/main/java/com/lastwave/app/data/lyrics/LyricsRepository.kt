@@ -1,7 +1,6 @@
 package com.lastwave.app.data.lyrics
 
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -106,8 +105,6 @@ class LyricsRepository @Inject constructor(
                     return@withContext result
                 }
             }
-        } catch (cancellation: CancellationException) {
-            throw cancellation
         } catch (_: Exception) {
             // Silently fall back to secondary word-by-word provider
         }
@@ -128,8 +125,6 @@ class LyricsRepository @Inject constructor(
                 cache[cacheKey] = result
                 return@withContext result
             }
-        } catch (cancellation: CancellationException) {
-            throw cancellation
         } catch (_: Exception) {
             // Silently fall back to LRCLIB
         }
@@ -137,8 +132,6 @@ class LyricsRepository @Inject constructor(
         // 3. TERTIARY: Fall back to LRCLIB line-by-line sync
         val lrclibRecord = try {
             lrclibApi.fetchLyrics(title, artist, album, durationSeconds)
-        } catch (cancellation: CancellationException) {
-            throw cancellation
         } catch (e: Exception) {
             null
         }

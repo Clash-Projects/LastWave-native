@@ -10,7 +10,6 @@ import com.lastwave.app.data.search.SearchTab
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.PlayableTrack
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,6 +49,7 @@ class SearchViewModel @Inject constructor(
     private var debounceJob: Job? = null
     private var suggestionsJob: Job? = null
     private var searchQueueJob: Job? = null
+    private var lastIssuedQuery: String = ""
 
     init {
         viewModelScope.launch {
@@ -86,21 +86,19 @@ class SearchViewModel @Inject constructor(
         }
 
         // Full search results debounce (400ms)
-        val tab = _uiState.value.tab
         debounceJob = viewModelScope.launch {
             delay(400)
-            runSearch(query, tab, saveToHistory = false)
+            runSearch(query, saveToHistory = false)
         }
     }
 
     fun setTab(tab: SearchTab) {
-        if (tab == _uiState.value.tab) return
         _uiState.update { it.copy(tab = tab, isShowingSuggestions = false) }
         val q = _uiState.value.query
         if (q.isNotBlank()) {
             debounceJob?.cancel()
             suggestionsJob?.cancel()
-            debounceJob = viewModelScope.launch { runSearch(q, tab, saveToHistory = false) }
+            viewModelScope.launch { runSearch(q, saveToHistory = false) }
         }
     }
 
@@ -115,16 +113,14 @@ class SearchViewModel @Inject constructor(
         if (trimmed.isBlank()) return
         debounceJob?.cancel()
         suggestionsJob?.cancel()
+        historyRepository.add(trimmed)
         _uiState.update {
             it.copy(
                 query = trimmed,
                 isShowingSuggestions = false,
             )
         }
-        val tab = _uiState.value.tab
-        debounceJob = viewModelScope.launch {
-            runSearch(trimmed, tab, saveToHistory = true)
-        }
+        viewModelScope.launch { runSearch(trimmed, saveToHistory = true) }
     }
 
     fun removeRecentSearch(query: String) {
@@ -187,24 +183,25 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    private suspend fun runSearch(query: String, tab: SearchTab, saveToHistory: Boolean) {
+    private suspend fun runSearch(query: String, saveToHistory: Boolean) {
+        lastIssuedQuery = query
         _uiState.update { it.copy(status = SearchStatus.LOADING) }
         if (saveToHistory) {
             historyRepository.add(query)
         }
         try {
-            val results = repository.search(tab, query)
-            if (_uiState.value.query != query || _uiState.value.tab != tab) return
+            val results = repository.search(_uiState.value.tab, query)
+            // Stale-response guard: discard if the user has typed something
+            // new since this call was issued.
+            if (lastIssuedQuery != query) return
             _uiState.update {
                 it.copy(
                     status = if (results.isEmpty()) SearchStatus.EMPTY else SearchStatus.RESULTS,
                     results = results,
                 )
             }
-        } catch (cancellation: CancellationException) {
-            throw cancellation
         } catch (e: Exception) {
-            if (_uiState.value.query != query || _uiState.value.tab != tab) return
+            if (lastIssuedQuery != query) return
             _uiState.update { it.copy(status = SearchStatus.EMPTY, results = emptyList()) }
         }
     }

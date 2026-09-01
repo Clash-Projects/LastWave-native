@@ -252,10 +252,7 @@ class MusicPlayer @Inject constructor(
     }
 
     private val listener: Player.Listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) = refresh(
-            player = player,
-            queueChanged = events.contains(Player.EVENT_TIMELINE_CHANGED),
-        )
+        override fun onEvents(player: Player, events: Player.Events) = refresh(player)
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
                 unavailableSkipJob?.cancel()
@@ -283,10 +280,12 @@ class MusicPlayer @Inject constructor(
                 }
                 val currentIndex = player.currentMediaItemIndex
                 val currentTrack = mediaItem.toPlayableTrack()
+                val currentQueue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toPlayableTrack() }
                 _state.update {
                     it.copy(
                         current = currentTrack,
                         currentIndex = currentIndex,
+                        queue = if (currentQueue.isNotEmpty()) currentQueue else it.queue,
                         isBuffering = true,
                         error = null,
                     )
@@ -1968,11 +1967,14 @@ class MusicPlayer @Inject constructor(
         val sourceIndex = snapshot.currentIndex.coerceIn(sourceQueue.indices)
         val startIndex = (sourceIndex - RESTORED_PREVIOUS_TRACKS).coerceAtLeast(0)
         val endIndex = minOf(sourceQueue.size, startIndex + MAX_PERSISTED_QUEUE_SIZE)
+        val persistedQueue = sourceQueue.subList(startIndex, endIndex).map {
+            it.copy(playbackUrl = null, playbackMimeType = null)
+        }
         val persistedIndex = sourceIndex - startIndex
         val signature = buildString {
-            append(endIndex - startIndex).append('|')
+            append(persistedQueue.size).append('|')
             append(persistedIndex).append('|')
-            append(sourceQueue[sourceIndex].queueKey()).append('|')
+            append(persistedQueue[persistedIndex].queueKey()).append('|')
             append(snapshot.positionMs / POSITION_PERSIST_INTERVAL_MS).append('|')
             append(snapshot.sourceLabel).append('|')
             append(snapshot.isEndlessQueue).append('|')
@@ -1981,23 +1983,20 @@ class MusicPlayer @Inject constructor(
             append(snapshot.speed)
         }
         if (signature == lastPersistedSignature) return
+        val session = PersistedPlaybackSession(
+            queue = persistedQueue,
+            currentIndex = persistedIndex,
+            positionMs = snapshot.positionMs.coerceAtLeast(0),
+            sourceLabel = snapshot.sourceLabel,
+            isEndlessQueue = snapshot.isEndlessQueue,
+            shuffleEnabled = snapshot.shuffleEnabled,
+            repeatMode = snapshot.repeatMode,
+            speed = snapshot.speed,
+        )
         lastPersistedSignature = signature
         val generation = ++persistenceGeneration
         playbackPersistenceJob?.cancel()
         playbackPersistenceJob = applicationScope.launch(Dispatchers.IO) {
-            val persistedQueue = sourceQueue.subList(startIndex, endIndex).map {
-                it.copy(playbackUrl = null, playbackMimeType = null)
-            }
-            val session = PersistedPlaybackSession(
-                queue = persistedQueue,
-                currentIndex = persistedIndex,
-                positionMs = snapshot.positionMs.coerceAtLeast(0),
-                sourceLabel = snapshot.sourceLabel,
-                isEndlessQueue = snapshot.isEndlessQueue,
-                shuffleEnabled = snapshot.shuffleEnabled,
-                repeatMode = snapshot.repeatMode,
-                speed = snapshot.speed,
-            )
             val encoded = runCatching { persistenceJson.encodeToString(session) }.getOrNull()
                 ?: return@launch
             synchronized(playbackPersistenceLock) {
@@ -2021,13 +2020,9 @@ class MusicPlayer @Inject constructor(
 
 
     @MainThread
-    private fun refresh(player: Player, queueChanged: Boolean = true) {
+    private fun refresh(player: Player) {
         val previous = _state.value
-        val queue = if (queueChanged || previous.queue.size != player.mediaItemCount) {
-            (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toPlayableTrack() }
-        } else {
-            previous.queue
-        }
+        val queue = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).toPlayableTrack() }
         val current = player.currentMediaItem?.toPlayableTrack()
         val sameTrack = current?.let { it.title == previous.current?.title && it.artist == previous.current?.artist } == true ||
             (current?.videoId != null && current.videoId == previous.current?.videoId)
@@ -2036,7 +2031,7 @@ class MusicPlayer @Inject constructor(
         val dur = player.duration.takeIf { it > 0 } ?: 0L
         val rawPos = player.currentPosition.coerceAtLeast(0)
         val pos = if (dur > 0) rawPos.coerceIn(0L, dur) else rawPos
-        val updated = MusicPlayerState(
+        _state.value = MusicPlayerState(
             current = current,
             queue = queue,
             currentIndex = player.currentMediaItemIndex.takeIf { player.mediaItemCount > 0 } ?: -1,
@@ -2058,8 +2053,6 @@ class MusicPlayer @Inject constructor(
             sleepTimerRemainingMs = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())?.coerceAtLeast(0),
             error = if (player.isPlaying) null else previous.error,
         )
-        if (updated == previous) return
-        _state.value = updated
         persistPlaybackSession()
     }
 

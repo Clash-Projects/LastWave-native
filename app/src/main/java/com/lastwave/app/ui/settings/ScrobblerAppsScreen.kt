@@ -56,9 +56,7 @@ fun ScrobblerAppsScreen(
     val query by viewModel.query.collectAsStateWithLifecycle()
 
     val detectedCount = apps.count { it.isKnownMusicPlayer }
-    val undetectedSelected = detectedCount > 0 && apps.any {
-        it.isKnownMusicPlayer && it.packageName !in selected
-    }
+    val undetectedSelected = detectedCount > 0 && apps.filter { it.isKnownMusicPlayer }.any { it.packageName !in selected }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {

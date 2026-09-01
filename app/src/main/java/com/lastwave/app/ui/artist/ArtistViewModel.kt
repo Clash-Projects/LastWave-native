@@ -9,8 +9,6 @@ import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.ui.generate.MixLauncher
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,7 +43,6 @@ class ArtistViewModel @Inject constructor(
 
     private var currentArtistName: String = ""
     private var currentBrowseId: String? = null
-    private var loadJob: Job? = null
 
     fun loadArtist(artistName: String, browseId: String? = null) {
         if (artistName == currentArtistName && browseId == currentBrowseId && _uiState.value is ArtistUiState.Success) {
@@ -54,14 +51,11 @@ class ArtistViewModel @Inject constructor(
         currentArtistName = artistName
         currentBrowseId = browseId
 
-        loadJob?.cancel()
-        loadJob = viewModelScope.launch {
+        viewModelScope.launch {
             _uiState.value = ArtistUiState.Loading
             try {
                 val data = repository.getArtistDetails(artistName, browseId)
                 _uiState.value = ArtistUiState.Success(data)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
             } catch (e: Exception) {
                 _uiState.value = ArtistUiState.Error(e.message ?: "Failed to load artist details")
             }
