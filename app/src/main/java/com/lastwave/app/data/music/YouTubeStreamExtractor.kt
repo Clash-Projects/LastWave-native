@@ -143,9 +143,10 @@ class YouTubeStreamExtractor @Inject constructor(
         private const val UNKNOWN_EXPIRY_TTL_MS = 5 * 60 * 1000L
         private const val NEWPIPE_CLIENT_PROFILE = "NEWPIPE"
         private const val ANONYMOUS_AUTH_SCOPE = "anonymous"
-        private const val YOUTUBE_ORIGIN = "https://www.youtube.com"
     }
 }
+
+internal const val YOUTUBE_ORIGIN = "https://www.youtube.com"
 
 private class OkHttpNewPipeDownloader(
     private val http: OkHttpClient,

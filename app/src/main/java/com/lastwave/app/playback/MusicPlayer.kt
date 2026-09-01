@@ -249,7 +249,7 @@ class MusicPlayer @Inject constructor(
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 
-    private val listener = object : Player.Listener {
+    private val listener: Player.Listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = refresh(player)
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (isPlaying) {
@@ -470,7 +470,7 @@ class MusicPlayer @Inject constructor(
     // Do not initialize ExoPlayer/audio/cache merely to draw the launcher.
     // Several Android 11 OEM audio stacks are fragile during cold start; the
     // engine is needed only when the user actually operates playback.
-    private val playerDelegate = lazy {
+    private val playerDelegate: Lazy<ExoPlayer> = lazy {
         val resolving = ResolvingDataSource.Factory(cacheDataSourceFactory) { dataSpec ->
             val stream = dataSpec.key?.let(preparedStreams::get)
                 ?: preparedStreams.values.firstOrNull { it.url == dataSpec.uri.toString() }

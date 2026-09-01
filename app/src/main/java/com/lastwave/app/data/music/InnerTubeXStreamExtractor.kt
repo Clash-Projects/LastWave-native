@@ -193,7 +193,7 @@ class InnerTubeXStreamExtractor @Inject constructor(
             return if (method.parameterCount == 0) {
                 method.invoke(null)
             } else {
-                method.invoke(null, Function1<Any?, Any?> { Unit })
+                method.invoke(null, { _: Any? -> Unit })
             }
         }
         error("Ktor JVM HttpClient factory was not found")
