@@ -374,36 +374,17 @@ class InnerTubeMusicApi @Inject constructor(
     }
 
     private fun extractArtworkFromHeader(header: JsonObject?, root: JsonElement): String? {
-        fun extractFromThumbnailsArray(arr: JsonArray?): String? {
-            val url = arr?.lastOrNull()?.asObject()?.string("url") ?: return null
-            val formatted = if (url.startsWith("//")) "https:$url" else url
-            return formatted.highResolutionArtwork()
-        }
-
         if (header != null) {
-            val direct = header.obj("thumbnail")?.obj("croppedSquareThumbnailRenderer")?.array("thumbnails")
-                ?: header.obj("thumbnail")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
-                ?: header.obj("thumbnail")?.obj("musicThumbnailRenderer")?.array("thumbnails")
-                ?: header.obj("thumbnail")?.obj("musicCustomThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
-                ?: header.obj("thumbnail")?.array("thumbnails")
-                ?: header.obj("thumbnailRenderer")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
-            extractFromThumbnailsArray(direct)?.let { return it }
-
-            val nestedHeader = header.obj("header")
-            if (nestedHeader != null) {
-                val nestedThumbs = nestedHeader.obj("thumbnail")?.obj("croppedSquareThumbnailRenderer")?.array("thumbnails")
-                    ?: nestedHeader.obj("thumbnail")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
-                    ?: nestedHeader.obj("thumbnail")?.array("thumbnails")
-                extractFromThumbnailsArray(nestedThumbs)?.let { return it }
-            }
+            extractThumbnailsUrl(header)?.let { return it }
         }
-
         val thumbObjects = mutableListOf<JsonObject>()
-        if (header != null) collectObjects(header, "musicThumbnailRenderer", thumbObjects)
         collectObjects(root, "musicResponsiveHeaderRenderer", thumbObjects)
+        collectObjects(root, "musicDetailHeaderRenderer", thumbObjects)
+        collectObjects(root, "musicEditablePlaylistDetailHeaderRenderer", thumbObjects)
+        collectObjects(root, "musicVisualHeaderRenderer", thumbObjects)
+        collectObjects(root, "musicThumbnailRenderer", thumbObjects)
         for (to in thumbObjects) {
-            val arr = to.array("thumbnails") ?: to.obj("thumbnail")?.array("thumbnails")
-            extractFromThumbnailsArray(arr)?.let { return it }
+            extractThumbnailsUrl(to)?.let { return it }
         }
         return null
     }
@@ -2132,17 +2113,22 @@ class InnerTubeMusicApi @Inject constructor(
         val renderers = mutableListOf<JsonObject>()
         collectObjects(root, "musicResponsiveListItemRenderer", renderers)
         collectObjects(root, "musicTwoRowItemRenderer", renderers)
+        collectObjects(root, "gridPlaylistRenderer", renderers)
+        collectObjects(root, "musicGridItemRenderer", renderers)
+        collectObjects(root, "playlistRenderer", renderers)
         return renderers.mapNotNull { renderer ->
             val nav = renderer.obj("navigationEndpoint")?.obj("browseEndpoint")
                 ?: renderer.obj("title")?.array("runs")?.firstOrNull()?.asObject()?.obj("navigationEndpoint")?.obj("browseEndpoint")
-            val browseId = nav?.string("browseId") ?: return@mapNotNull null
+                ?: renderer.obj("thumbnailOverlay")?.obj("musicItemThumbnailOverlayRenderer")?.obj("content")?.obj("musicPlayButtonRenderer")?.obj("playNavigationEndpoint")?.obj("watchEndpoint")
+                ?: renderer.obj("onTap")?.obj("browseEndpoint")
+            val browseId = nav?.string("browseId") ?: nav?.string("playlistId") ?: return@mapNotNull null
             val playlistId = if (browseId.startsWith("VL")) browseId.removePrefix("VL") else browseId
-            if (!browseId.startsWith("VL") && !browseId.startsWith("PL") && !browseId.startsWith("RDCLAK")) return@mapNotNull null
 
             val title = renderer.array("flexColumns")?.getOrNull(0)?.asObject()
                 ?.obj("musicResponsiveListItemFlexColumnRenderer")?.obj("text")?.array("runs")
                 ?.joinToString("") { it.asObject()?.string("text").orEmpty() }
                 ?: renderer.obj("title")?.array("runs")?.joinToString("") { it.asObject()?.string("text").orEmpty() }
+                ?: renderer.obj("title")?.string("simpleText")
                 ?: return@mapNotNull null
 
             val subtitleRuns = renderer.array("flexColumns")?.getOrNull(1)?.asObject()
@@ -2152,16 +2138,7 @@ class InnerTubeMusicApi @Inject constructor(
 
             val trackCountText = subtitleRuns?.mapNotNull { it.asObject()?.string("text") }?.lastOrNull { "song" in it.lowercase() || "track" in it.lowercase() }
 
-            val thumbs = renderer.obj("thumbnail")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
-                ?: renderer.obj("thumbnail")?.obj("croppedSquareThumbnailRenderer")?.array("thumbnails")
-                ?: renderer.obj("thumbnail")?.obj("musicCustomThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
-                ?: renderer.obj("thumbnailRenderer")?.obj("musicThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
-                ?: renderer.obj("thumbnailRenderer")?.obj("croppedSquareThumbnailRenderer")?.array("thumbnails")
-                ?: renderer.obj("thumbnailRenderer")?.obj("musicCustomThumbnailRenderer")?.obj("thumbnail")?.array("thumbnails")
-                ?: renderer.obj("thumbnail")?.array("thumbnails")
-            val artwork = thumbs?.lastOrNull()?.asObject()?.string("url")?.let {
-                (if (it.startsWith("//")) "https:$it" else it).highResolutionArtwork()
-            }
+            val artwork = extractThumbnailsUrl(renderer)
 
             YouTubePlaylistSummary(
                 id = playlistId,
@@ -2171,6 +2148,30 @@ class InnerTubeMusicApi @Inject constructor(
                 artworkUrl = artwork,
             )
         }.distinctBy { it.id }
+    }
+
+    private fun extractThumbnailsUrl(renderer: JsonElement): String? {
+        val foundArrays = mutableListOf<JsonArray>()
+        fun findThumbnails(el: JsonElement) {
+            when (el) {
+                is JsonObject -> {
+                    el.array("thumbnails")?.takeIf { it.isNotEmpty() }?.let { foundArrays += it }
+                    el.values.forEach { findThumbnails(it) }
+                }
+                is JsonArray -> el.forEach { findThumbnails(it) }
+                else -> Unit
+            }
+        }
+        val thumbnailNode = renderer.asObject()?.let {
+            it.obj("thumbnail") ?: it.obj("thumbnailRenderer") ?: it
+        } ?: renderer
+        findThumbnails(thumbnailNode)
+        val bestArray = foundArrays.firstOrNull { it.isNotEmpty() } ?: return null
+        val bestUrl = bestArray.lastOrNull()?.asObject()?.string("url")
+            ?: bestArray.firstOrNull()?.asObject()?.string("url")
+            ?: return null
+        val formatted = if (bestUrl.startsWith("//")) "https:$bestUrl" else bestUrl
+        return formatted.highResolutionArtwork()
     }
 
     private fun collectObjects(element: JsonElement, key: String, output: MutableList<JsonObject>) {
