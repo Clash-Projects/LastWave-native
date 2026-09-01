@@ -382,7 +382,9 @@ class YtMusicLibraryManager @Inject constructor(
                 writeToDiskCache(localId, updated)
             }
         }
-        preferences.setCachedLibraryPlaylists(_accountPlaylists.value.map { it.toCache() })
+        applicationScope.launch(Dispatchers.IO) {
+            preferences.setCachedLibraryPlaylists(_accountPlaylists.value.map { it.toCache() })
+        }
     }
 
     private fun String?.normalizedRemoteArtwork(): String? {
