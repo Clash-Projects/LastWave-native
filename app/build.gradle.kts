@@ -291,8 +291,10 @@ configurations.all {
         if (requested.group == "org.jetbrains.kotlinx" && requested.name.startsWith("kotlinx-coroutines")) {
             useVersion("1.8.1")
         }
-        if (requested.group == "org.jetbrains.kotlinx" && requested.name.startsWith("kotlinx-serialization")) {
-            useVersion("1.6.3")
+        if (requested.group == "org.jetbrains.kotlinx" && (requested.name.startsWith("kotlinx-serialization-core") || requested.name.startsWith("kotlinx-serialization-json"))) {
+            if (!requested.name.contains("json-io") && !requested.name.contains("json-okio")) {
+                useVersion("1.6.3")
+            }
         }
         if (requested.group == "io.github.dokar3" && requested.name.startsWith("quickjs-kt")) {
             useVersion("1.0.12")
