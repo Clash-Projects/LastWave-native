@@ -283,8 +283,12 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }
 
+configurations.all {
+    resolutionStrategy {
+        force("io.github.dokar3:quickjs-kt-android:1.0.12")
+    }
+}
+
 tasks.withType<Test> {
     maxHeapSize = "2048m"
 }
-
-
