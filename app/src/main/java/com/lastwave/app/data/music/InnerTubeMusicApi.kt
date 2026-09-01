@@ -311,16 +311,19 @@ class InnerTubeMusicApi @Inject constructor(
         return runCatching { browseRoot(browseId, authenticated = false) }.getOrNull()?.let { it to false }
     }
 
-    private fun playlistHeader(root: JsonElement): JsonObject? =
-        root.obj("header")?.obj("musicDetailHeaderRenderer")
-            ?: root.obj("header")?.obj("musicResponsiveHeaderRenderer")
-            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicResponsiveHeaderRenderer")
-            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicDetailHeaderRenderer")
-            ?: root.obj("header")?.obj("musicEditablePlaylistDetailHeaderRenderer")
-            ?: root.obj("header")?.obj("musicVisualHeaderRenderer")
-            ?: root.obj("header")?.obj("musicHeaderRenderer")
-            ?: root.obj("header")?.obj("playlistHeaderRenderer")
+    private fun playlistHeader(root: JsonElement): JsonObject? {
+        val rootObj = root as? JsonObject ?: return findFirstHeaderRenderer(root)
+        val header = rootObj.obj("header")
+        return header?.obj("musicDetailHeaderRenderer")
+            ?: header?.obj("musicResponsiveHeaderRenderer")
+            ?: header?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicResponsiveHeaderRenderer")
+            ?: header?.obj("musicEditablePlaylistDetailHeaderRenderer")?.obj("header")?.obj("musicDetailHeaderRenderer")
+            ?: header?.obj("musicEditablePlaylistDetailHeaderRenderer")
+            ?: header?.obj("musicVisualHeaderRenderer")
+            ?: header?.obj("musicHeaderRenderer")
+            ?: header?.obj("playlistHeaderRenderer")
             ?: findFirstHeaderRenderer(root)
+    }
 
     private fun findFirstHeaderRenderer(root: JsonElement): JsonObject? {
         val renderers = mutableListOf<JsonObject>()
@@ -2545,3 +2548,7 @@ private fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
 private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
 private fun JsonObject.int(key: String): Int? = string(key)?.toIntOrNull()
 private fun JsonElement.asObject(): JsonObject? = this as? JsonObject
+private fun JsonElement.obj(key: String): JsonObject? = (this as? JsonObject)?.obj(key)
+private fun JsonElement.array(key: String): JsonArray? = (this as? JsonObject)?.array(key)
+private fun JsonElement.string(key: String): String? = (this as? JsonObject)?.string(key)
+private fun JsonElement.int(key: String): Int? = (this as? JsonObject)?.int(key)
