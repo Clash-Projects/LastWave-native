@@ -8,6 +8,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
+import com.lastwave.app.ui.common.PredictiveBackScreen
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -476,32 +477,34 @@ fun PlayerHost(
                 visible = expanded && state.current != null,
                 enter = slideInVertically(
                     animationSpec = ExpressiveMotion.spatialSpring(),
-                    initialOffsetY = { it / 4 },
-                ) + fadeIn(tween(ExpressiveMotion.Standard)),
+                    initialOffsetY = { it },
+                ) + fadeIn(tween(180)),
                 exit = slideOutVertically(
-                    animationSpec = tween(ExpressiveMotion.Standard),
-                    targetOffsetY = { it / 5 },
-                ) + fadeOut(tween(ExpressiveMotion.Quick)),
+                    animationSpec = ExpressiveMotion.spatialSpring(),
+                    targetOffsetY = { it },
+                ) + fadeOut(tween(150)),
             ) {
-                ExpandedPlayer(
-                    viewModel = viewModel,
-                    currentTab = currentTab,
-                    onTabChange = { currentTab = it },
-                    onRetryLyrics = viewModel::retryLyrics,
-                    onCollapse = { expanded = false },
-                    onOpenArtist = { artist ->
-                        expanded = false
-                        viewModel.openArtist(artist)
+                PredictiveBackScreen(
+                    enabled = expanded && state.current != null,
+                    onBack = {
+                        if (currentTab != FullPlayerTab.NOW_PLAYING) {
+                            currentTab = FullPlayerTab.NOW_PLAYING
+                        } else {
+                            expanded = false
+                        }
                     },
-                )
-            }
-            // Compose this after the underlying screen so the expanded player
-            // owns Back before any route-level handler can navigate away.
-            BackHandler(enabled = expanded && state.current != null) {
-                if (currentTab != FullPlayerTab.NOW_PLAYING) {
-                    currentTab = FullPlayerTab.NOW_PLAYING
-                } else {
-                    expanded = false
+                ) {
+                    ExpandedPlayer(
+                        viewModel = viewModel,
+                        currentTab = currentTab,
+                        onTabChange = { currentTab = it },
+                        onRetryLyrics = viewModel::retryLyrics,
+                        onCollapse = { expanded = false },
+                        onOpenArtist = { artist ->
+                            expanded = false
+                            viewModel.openArtist(artist)
+                        },
+                    )
                 }
             }
         }
@@ -1506,10 +1509,17 @@ private fun FullPlayer(
                     targetState = currentTab,
                     modifier = Modifier.weight(1f),
                     transitionSpec = {
-                        (fadeIn(tween(ExpressiveMotion.Standard)) +
-                            scaleIn(ExpressiveMotion.spatialSpring(), initialScale = 0.98f)) togetherWith
-                            (fadeOut(tween(ExpressiveMotion.Quick)) +
-                                scaleOut(tween(ExpressiveMotion.Standard), targetScale = 0.98f))
+                        if (targetState != FullPlayerTab.NOW_PLAYING) {
+                            (slideInVertically(animationSpec = ExpressiveMotion.spatialSpring()) { it / 6 } +
+                                fadeIn(tween(ExpressiveMotion.Standard))) togetherWith
+                                (slideOutVertically(animationSpec = tween(ExpressiveMotion.Quick)) { -it / 6 } +
+                                    fadeOut(tween(ExpressiveMotion.Quick)))
+                        } else {
+                            (slideInVertically(animationSpec = ExpressiveMotion.spatialSpring()) { -it / 6 } +
+                                fadeIn(tween(ExpressiveMotion.Standard))) togetherWith
+                                (slideOutVertically(animationSpec = tween(ExpressiveMotion.Quick)) { it / 6 } +
+                                    fadeOut(tween(ExpressiveMotion.Quick)))
+                        }
                     },
                     label = "playerTabContent",
                 ) { tab ->

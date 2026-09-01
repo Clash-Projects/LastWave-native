@@ -172,17 +172,23 @@ fun PlaylistDetailScreen(
         }
     }
 
-    val playlist = state.detailPlaylist?.takeIf { it.id == playlistId }
+    var cachedPlaylist by remember(playlistId) {
+        mutableStateOf(
+            state.detailPlaylist?.takeIf { it.id == playlistId }
+                ?: state.playlists.firstOrNull { it.id == playlistId }
+        )
+    }
+    val currentFound = state.detailPlaylist?.takeIf { it.id == playlistId }
         ?: state.playlists.firstOrNull { it.id == playlistId }
+    if (currentFound != null) {
+        cachedPlaylist = currentFound
+    }
+    val playlist = currentFound ?: cachedPlaylist
 
     if (playlist == null) {
-        if (state.isLoading || state.isDetailLoading) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                ExpressiveLoadingIndicator(message = "Loading playlist...")
-            }
-            return
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            ExpressiveLoadingIndicator(message = "Loading playlist...")
         }
-        LaunchedEffect(Unit) { onBack() }
         return
     }
 

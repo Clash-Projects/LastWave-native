@@ -241,7 +241,10 @@ class InnerTubeMusicApi @Inject constructor(
     ): YouTubePlaylistResult? = withContext(Dispatchers.IO) {
         val rawId = extractPlaylistId(playlistIdOrUrl)
         if (rawId.isBlank()) return@withContext null
-        val browseId = if (rawId.startsWith("VL")) rawId else "VL$rawId"
+        val browseId = when {
+            rawId.startsWith("VL") || rawId.startsWith("RDCLAK") || rawId.startsWith("FE") || rawId.startsWith("MPRE") || rawId.startsWith("UC") -> rawId
+            else -> "VL$rawId"
+        }
 
         val (root, authenticatedAs) = fetchPlaylistRoot(browseId) ?: return@withContext null
         val header = playlistHeader(root)
@@ -292,11 +295,13 @@ class InnerTubeMusicApi @Inject constructor(
         )
     }
 
-    /** Resolves a connected playlist cover from one browse page only. */
     suspend fun fetchPlaylistArtwork(playlistIdOrUrl: String): String? = withContext(Dispatchers.IO) {
         val rawId = extractPlaylistId(playlistIdOrUrl)
         if (rawId.isBlank()) return@withContext null
-        val browseId = if (rawId.startsWith("VL")) rawId else "VL$rawId"
+        val browseId = when {
+            rawId.startsWith("VL") || rawId.startsWith("RDCLAK") || rawId.startsWith("FE") || rawId.startsWith("MPRE") || rawId.startsWith("UC") -> rawId
+            else -> "VL$rawId"
+        }
         val root = fetchPlaylistRoot(browseId)?.first ?: return@withContext null
         extractArtworkFromHeader(playlistHeader(root), root)
             ?: parseSongRenderers(root).firstNotNullOfOrNull { it.artworkUrl?.takeIf(String::isNotBlank) }
