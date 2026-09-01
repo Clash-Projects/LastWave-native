@@ -59,3 +59,14 @@
 -keep class io.ktor.client.HttpClientJvmKt { *; }
 -keep class io.ktor.client.HttpClientKt { *; }
 -keep class io.ktor.client.engine.cio.** { *; }
+
+# Silence R8 missing-class warnings for Kotlin 2.x standard library and IO additions
+# referenced by InnerTubeX and QuickJS runtime jars.
+-dontwarn kotlin.**
+-dontwarn kotlinx.io.**
+-dontwarn kotlinx.coroutines.**
+-dontwarn kotlinx.serialization.**
+-dontwarn com.dokar.quickjs.**
+-dontwarn com.metrolist.innertubex.**
+-dontwarn io.ktor.**
+
