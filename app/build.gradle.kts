@@ -284,18 +284,19 @@ dependencies {
 }
 
 configurations.all {
-    resolutionStrategy {
-        force(
-            "org.jetbrains.kotlin:kotlin-stdlib:1.9.24",
-            "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24",
-            "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.24",
-            "org.jetbrains.kotlin:kotlin-stdlib-common:1.9.24",
-            "org.jetbrains.kotlin:kotlin-reflect:1.9.24",
-            "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1",
-            "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1",
-            "org.jetbrains.kotlinx:kotlinx-serialization-core:1.6.3",
-            "org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3",
-        )
+    resolutionStrategy.eachDependency {
+        if (requested.group == "org.jetbrains.kotlin") {
+            useVersion("1.9.24")
+        }
+        if (requested.group == "org.jetbrains.kotlinx" && requested.name.startsWith("kotlinx-coroutines")) {
+            useVersion("1.8.1")
+        }
+        if (requested.group == "org.jetbrains.kotlinx" && requested.name.startsWith("kotlinx-serialization")) {
+            useVersion("1.6.3")
+        }
+        if (requested.group == "io.github.dokar3" && requested.name.startsWith("quickjs-kt")) {
+            useVersion("1.0.12")
+        }
     }
 }
 
