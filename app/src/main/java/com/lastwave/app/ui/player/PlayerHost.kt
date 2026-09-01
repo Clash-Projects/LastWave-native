@@ -479,11 +479,11 @@ fun PlayerHost(
             AnimatedVisibility(
                 visible = expanded && state.current != null,
                 enter = slideInVertically(
-                    animationSpec = ExpressiveMotion.spatialSpring(),
+                    animationSpec = ExpressiveMotion.smoothSpring(),
                     initialOffsetY = { it },
                 ) + fadeIn(tween(180)),
                 exit = slideOutVertically(
-                    animationSpec = ExpressiveMotion.spatialSpring(),
+                    animationSpec = ExpressiveMotion.smoothSpring(),
                     targetOffsetY = { it },
                 ) + fadeOut(tween(150)),
             ) {
@@ -1513,12 +1513,12 @@ private fun FullPlayer(
                     modifier = Modifier.weight(1f),
                     transitionSpec = {
                         if (targetState != FullPlayerTab.NOW_PLAYING) {
-                            (slideInVertically(animationSpec = ExpressiveMotion.spatialSpring()) { it / 6 } +
+                            (slideInVertically(animationSpec = ExpressiveMotion.smoothSpring()) { it / 6 } +
                                 fadeIn(tween(ExpressiveMotion.Standard))) togetherWith
                                 (slideOutVertically(animationSpec = tween(ExpressiveMotion.Quick)) { -it / 6 } +
                                     fadeOut(tween(ExpressiveMotion.Quick)))
                         } else {
-                            (slideInVertically(animationSpec = ExpressiveMotion.spatialSpring()) { -it / 6 } +
+                            (slideInVertically(animationSpec = ExpressiveMotion.smoothSpring()) { -it / 6 } +
                                 fadeIn(tween(ExpressiveMotion.Standard))) togetherWith
                                 (slideOutVertically(animationSpec = tween(ExpressiveMotion.Quick)) { it / 6 } +
                                     fadeOut(tween(ExpressiveMotion.Quick)))
