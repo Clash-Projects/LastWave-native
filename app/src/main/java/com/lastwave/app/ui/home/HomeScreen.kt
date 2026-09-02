@@ -218,9 +218,10 @@ fun HomeScreen(
                     snapshotFlowNearEnd(listState) { viewModel.loadNextPage() }
                 }
 
-                val rows = remember(uiState.allTracks, uiState.sortMode, uiState.nowPlaying, uiState.topTracksOverall, uiState.topTracks7Days, uiState.topTracks30Days) {
-                    uiState.visibleRows()
-                }
+                // Computed off the main thread in HomeViewModel — see its
+                // doc comment on `rows` for why this used to jank on every
+                // Last.fm poll tick when it ran inline here instead.
+                val rows by viewModel.rows.collectAsStateWithLifecycle()
                 val playbackQueue = remember(rows) {
                     rows.mapNotNull { row ->
                         (row as? HomeRow.Track)?.track?.let { track ->
