@@ -75,3 +75,20 @@
   `app/src/main/java/com/lastwave/app/data/local/db/DownloadedTrackEntity.kt`,
   `app/src/main/java/com/lastwave/app/di/DatabaseModule.kt`,
   `app/src/main/java/com/lastwave/app/data/download/TrackDownloadManager.kt`
+
+### Fixed
+- **Skipping to the next track did nothing when playing from Downloads.**
+  `DownloadsViewModel.playTrack()` started playback via `MusicPlayer.play()`,
+  which always builds a single-track queue (`listOf(track)`) regardless of
+  how many tracks are downloaded. So the moment you played anything from the
+  Downloads screen, the player's queue had exactly one item — there was
+  never a "next" track to advance to, so `next()` correctly found no
+  following item and silently did nothing.
+
+  `playTrack()` now builds the full queue from every currently downloaded
+  track (in the same order shown on screen), starting at the tapped
+  track's position, via `MusicPlayer.playQueue()` instead of `play()`.
+  Next/previous now move through the rest of your downloads normally.
+
+  Files changed:
+  `app/src/main/java/com/lastwave/app/ui/settings/DownloadsViewModel.kt`

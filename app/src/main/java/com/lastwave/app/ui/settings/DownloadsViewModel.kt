@@ -125,21 +125,25 @@ class DownloadsViewModel @Inject constructor(
     }
 
     fun playTrack(track: DownloadedTrackEntity) {
-        val playable = PlayableTrack(
-            title = track.title,
-            artist = track.artist,
-            album = track.album,
-            artworkUrl = track.artworkUrl,
-            playbackUrl = track.mediaStoreUri ?: track.filePath,
-        )
+        val allTracks = downloadedTracks.value
+        val startIndex = allTracks.indexOfFirst { it.id == track.id }.let { if (it >= 0) it else 0 }
+        val queue = (allTracks.ifEmpty { listOf(track) }).map { it.toPlayableTrack() }
         try {
-            musicPlayer.play(playable, sourceLabel = "Downloads")
+            musicPlayer.playQueue(queue, startIndex = startIndex, sourceLabel = "Downloads")
         } catch (error: Exception) {
             android.util.Log.e("DownloadsViewModel", "Could not play download", error)
         } catch (error: LinkageError) {
             android.util.Log.e("DownloadsViewModel", "Playback unsupported on this device", error)
         }
     }
+
+    private fun DownloadedTrackEntity.toPlayableTrack(): PlayableTrack = PlayableTrack(
+        title = title,
+        artist = artist,
+        album = album,
+        artworkUrl = artworkUrl,
+        playbackUrl = mediaStoreUri ?: filePath,
+    )
 
     fun openInFileManager() {
         try {
