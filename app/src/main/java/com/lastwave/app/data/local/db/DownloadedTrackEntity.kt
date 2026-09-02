@@ -1,5 +1,6 @@
 package com.lastwave.app.data.local.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -25,11 +26,10 @@ data class DownloadedTrackEntity(
     val formatBadge: String = "AUDIO",
     val durationMs: Long = 0L,
     val bitrateKbps: Int? = null,
-    val isQobuz: Boolean = false,
+    val isLossless: Boolean = false,
     val hasLyrics: Boolean = false,
     val syncedLyrics: String? = null,
     val plainLyrics: String? = null,
     val lrcFilePath: String? = null,
     val downloadedAtMillis: Long = System.currentTimeMillis(),
 )
-

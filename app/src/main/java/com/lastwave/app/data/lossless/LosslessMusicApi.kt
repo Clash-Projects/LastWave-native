@@ -1,4 +1,4 @@
-package com.lastwave.app.data.qobuz
+package com.lastwave.app.data.lossless
 
 import android.util.Log
 import kotlinx.coroutines.CancellationException
@@ -19,7 +19,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Serializable
-data class QobuzAudioStream(
+data class LosslessAudioStream(
     val url: String,
     val mimeType: String = "audio/flac",
     val bitDepth: Int = 16,
@@ -30,30 +30,30 @@ data class QobuzAudioStream(
 )
 
 @Serializable
-private data class QobuzSearchResponse(
+private data class LosslessSearchResponse(
     val success: Boolean = false,
-    val results: QobuzSearchResults? = null,
+    val results: LosslessSearchResults? = null,
 )
 
 @Serializable
-private data class QobuzSearchResults(
-    val tracks: QobuzTrackList? = null,
+private data class LosslessSearchResults(
+    val tracks: LosslessTrackList? = null,
 )
 
 @Serializable
-private data class QobuzTrackList(
-    val items: List<QobuzTrackItem> = emptyList(),
+private data class LosslessTrackList(
+    val items: List<LosslessTrackItem> = emptyList(),
 )
 
 @Serializable
-private data class QobuzTrackItem(
+private data class LosslessTrackItem(
     val id: Long,
     val title: String,
     val duration: Int = 0,
     val version: String? = null,
-    val performer: QobuzPerformer? = null,
+    val performer: LosslessPerformer? = null,
     val performers: String? = null,
-    val album: QobuzAlbumInfo? = null,
+    val album: LosslessAlbumInfo? = null,
     val hires: Boolean = false,
     @SerialName("maximum_bit_depth")
     val maxBitDepth: Int? = null,
@@ -62,26 +62,26 @@ private data class QobuzTrackItem(
 )
 
 @Serializable
-private data class QobuzPerformer(
+private data class LosslessPerformer(
     val name: String,
     val id: Long = 0,
 )
 
 @Serializable
-private data class QobuzAlbumInfo(
+private data class LosslessAlbumInfo(
     val title: String? = null,
-    val artist: QobuzPerformer? = null,
+    val artist: LosslessPerformer? = null,
 )
 
 @Serializable
-private data class QobuzTrackUrlResponse(
+private data class LosslessTrackUrlResponse(
     val success: Boolean = false,
-    val data: QobuzTrackUrlData? = null,
+    val data: LosslessTrackUrlData? = null,
     val error: String? = null,
 )
 
 @Serializable
-private data class QobuzTrackUrlData(
+private data class LosslessTrackUrlData(
     val url: String? = null,
     @SerialName("format_id")
     val formatId: Int = 6,
@@ -95,7 +95,7 @@ private data class QobuzTrackUrlData(
 )
 
 @Singleton
-class QobuzMusicApi @Inject constructor(
+class LosslessMusicApi @Inject constructor(
     okHttpClient: OkHttpClient,
 ) {
     private val client = okHttpClient.newBuilder()
@@ -113,13 +113,13 @@ class QobuzMusicApi @Inject constructor(
     companion object {
         val BACKEND_BASE_URL: String
             get() = decodeSecretBytes(
-                com.lastwave.app.BuildConfig.QOBUZ_BACKEND_URL_BYTES,
+                com.lastwave.app.BuildConfig.LOSSLESS_BACKEND_URL_BYTES,
                 com.lastwave.app.BuildConfig.SECRET_MASK_BYTES
             )
 
         val BACKEND_API_KEY: String
             get() = decodeSecretBytes(
-                com.lastwave.app.BuildConfig.QOBUZ_API_KEY_BYTES,
+                com.lastwave.app.BuildConfig.LOSSLESS_API_KEY_BYTES,
                 com.lastwave.app.BuildConfig.SECRET_MASK_BYTES
             )
 
@@ -137,7 +137,7 @@ class QobuzMusicApi @Inject constructor(
         const val QUALITY_CD_LOSSLESS = 6 // 16-bit / 44.1 kHz FLAC
         const val QUALITY_MP3_320 = 5     // 320 kbps MP3
 
-        private const val TAG = "QobuzMusicApi"
+        private const val TAG = "LosslessMusicApi"
         private const val MAX_DURATION_DIFFERENCE_SECONDS = 8
         private val DIACRITICS = Regex("\\p{M}+")
         private val NON_ALPHANUMERIC = Regex("[^a-z0-9]+")
@@ -171,7 +171,7 @@ class QobuzMusicApi @Inject constructor(
     }
 
     /**
-     * Resolves a high-confidence, verified Qobuz direct CDN audio stream URL for a given track.
+     * Resolves a high-confidence, verified direct CDN lossless audio stream URL for a given track.
      * If no high-confidence exact match is found, returns null so playback safely falls back to YouTube Music.
      */
     suspend fun resolveStream(
@@ -180,11 +180,11 @@ class QobuzMusicApi @Inject constructor(
         expectedDurationSeconds: Int? = null,
         expectedAlbum: String? = null,
         preferredQuality: Int = QUALITY_MAX_HI_RES,
-    ): QobuzAudioStream? = withContext(Dispatchers.IO) {
+    ): LosslessAudioStream? = withContext(Dispatchers.IO) {
         if (title.isBlank() || artist.isBlank()) return@withContext null
 
         try {
-            // 1. Search Qobuz catalog via backend
+            // 1. Search catalog via backend
             val candidate = findBestVerifiedMatch(
                 title = title,
                 artist = artist,
@@ -204,13 +204,13 @@ class QobuzMusicApi @Inject constructor(
 
             resolutionClient.newCall(requestBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful) {
-                    Log.w(TAG, "Qobuz stream request failed with HTTP ${response.code}")
+                    Log.w(TAG, "Lossless stream request failed with HTTP ${response.code}")
                     return@withContext null
                 }
                 val body = response.body?.string() ?: return@withContext null
-                val parsed = json.decodeFromString<QobuzTrackUrlResponse>(body)
+                val parsed = json.decodeFromString<LosslessTrackUrlResponse>(body)
                 if (!parsed.success) {
-                    Log.w(TAG, "Qobuz stream response rejected: ${parsed.error.orEmpty()}")
+                    Log.w(TAG, "Lossless stream response rejected: ${parsed.error.orEmpty()}")
                     return@withContext null
                 }
                 val data = parsed.data ?: return@withContext null
@@ -224,7 +224,7 @@ class QobuzMusicApi @Inject constructor(
                     else -> null
                 }
 
-                QobuzAudioStream(
+                LosslessAudioStream(
                     url = streamUrl,
                     mimeType = data.mimeType.ifBlank { "audio/flac" },
                     bitDepth = data.bitDepth.takeIf { it > 0 } ?: 16,
@@ -237,7 +237,7 @@ class QobuzMusicApi @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.d(TAG, "Qobuz resolution failed gracefully: ${e.message}")
+            Log.d(TAG, "Lossless resolution failed gracefully: ${e.message}")
             null
         }
     }
@@ -247,13 +247,10 @@ class QobuzMusicApi @Inject constructor(
         artist: String,
         expectedDurationSeconds: Int?,
         expectedAlbum: String?,
-    ): QobuzTrackItem? {
+    ): LosslessTrackItem? {
         val cleanTitle = cleanForSearch(title)
         val cleanArtist = cleanForSearch(artist)
 
-        // Qobuz search ranking varies by catalog/locale. Try precise metadata
-        // first, then progressively broader queries, but never relax identity
-        // verification for the returned track.
         val queries = listOfNotNull(
             "$cleanTitle $cleanArtist".trim().takeIf { it.isNotBlank() },
             "$cleanArtist $cleanTitle".trim().takeIf { it.isNotBlank() },
@@ -276,15 +273,15 @@ class QobuzMusicApi @Inject constructor(
             val items = try {
                 resolutionClient.newCall(reqBuilder.build()).execute().use { response ->
                     if (!response.isSuccessful) {
-                        Log.w(TAG, "Qobuz search failed with HTTP ${response.code}")
-                        return@use emptyList<QobuzTrackItem>()
+                        Log.w(TAG, "Lossless search failed with HTTP ${response.code}")
+                        return@use emptyList<LosslessTrackItem>()
                     }
-                    val body = response.body?.string() ?: return@use emptyList<QobuzTrackItem>()
-                    val searchRes = json.decodeFromString<QobuzSearchResponse>(body)
+                    val body = response.body?.string() ?: return@use emptyList<LosslessTrackItem>()
+                    val searchRes = json.decodeFromString<LosslessSearchResponse>(body)
                     if (searchRes.success) searchRes.results?.tracks?.items.orEmpty() else emptyList()
                 }
             } catch (e: Exception) {
-                Log.d(TAG, "Qobuz search failed gracefully: ${e.message}")
+                Log.d(TAG, "Lossless search failed gracefully: ${e.message}")
                 emptyList()
             }
 
@@ -309,7 +306,7 @@ class QobuzMusicApi @Inject constructor(
     }
 
     private fun verifiedMatchScore(
-        item: QobuzTrackItem,
+        item: LosslessTrackItem,
         title: String,
         artist: String,
         expectedDurationSeconds: Int?,
@@ -394,9 +391,6 @@ class QobuzMusicApi @Inject constructor(
         if (targetTokens.isEmpty()) return false
         if (primaryIdentities.any { identity -> targetTokens.all(identity.split(' ').toSet()::contains) }) return true
 
-        // Qobuz's performers string also lists writers/producers. Only use
-        // credits explicitly labelled as a performing role; a songwriter's
-        // name must never make a cover look like the requested artist.
         val performingCredits = performersText.orEmpty()
             .split(Regex("""\s+-\s+"""))
             .map(::normalizeText)

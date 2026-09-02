@@ -2541,14 +2541,14 @@ internal fun formatTime(ms: Long): String {
 }
 
 private fun qualityLabel(state: MusicPlayerState): String = when {
-    // Qobuz with known bit depth / sampling rate → show precise format
-    state.isQobuz && state.bitDepth != null && state.samplingRateKHz != null -> {
+    // Lossless with known bit depth / sampling rate → show precise format
+    state.isLossless && state.bitDepth != null && state.samplingRateKHz != null -> {
         val rate = if (state.samplingRateKHz % 1.0 == 0.0) state.samplingRateKHz.toInt().toString()
         else state.samplingRateKHz.toString()
         "FLAC ${state.bitDepth}/$rate"
     }
-    state.isQobuz && state.audioCodec == "MP3 320k" -> "MP3 320k"
-    state.isQobuz -> state.audioCodec ?: "LOSSLESS"
+    state.isLossless && state.audioCodec == "MP3 320k" -> "MP3 320k"
+    state.isLossless -> state.audioCodec ?: "LOSSLESS"
     // YouTube with known codec + bitrate → e.g. "OPUS 160k" or "AAC 256k"
     state.audioCodec != null && state.bitrateKbps != null -> "${state.audioCodec} ${state.bitrateKbps}k"
     state.audioCodec != null -> state.audioCodec

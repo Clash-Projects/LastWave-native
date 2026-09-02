@@ -106,7 +106,7 @@ object DatabaseModule {
                     formatBadge TEXT NOT NULL,
                     durationMs INTEGER NOT NULL,
                     bitrateKbps INTEGER,
-                    isQobuz INTEGER NOT NULL,
+                    isLossless INTEGER NOT NULL,
                     hasLyrics INTEGER NOT NULL,
                     syncedLyrics TEXT,
                     plainLyrics TEXT,
