@@ -28,12 +28,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
@@ -79,6 +82,13 @@ class TrackDownloadManager @Inject constructor(
         private const val PUBLIC_DIR_NAME = "LastWave"
         private const val DOWNLOAD_BUFFER_SIZE = 512 * 1024 // 512 KB
         private const val MAX_DOWNLOAD_RETRIES = 1
+
+        // Caps how many tracks download at once. Uncapped concurrency was
+        // firing every queued track's network calls (metadata lookup,
+        // stream resolution, the transfer itself) simultaneously, which on
+        // a big playlist competes for the same CDN/API and risks getting
+        // throttled — working against overall speed rather than for it.
+        private const val MAX_CONCURRENT_DOWNLOADS = 3
     }
 
     // Dedicated HTTP client with extended timeouts and high-throughput connection pooling
@@ -106,6 +116,7 @@ class TrackDownloadManager @Inject constructor(
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val activeUris = ConcurrentHashMap<String, Uri>()
     private val activeFiles = ConcurrentHashMap<String, File>()
+    private val downloadSemaphore = Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
     private val _downloads = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
     val downloads: StateFlow<Map<String, DownloadProgress>> = _downloads.asStateFlow()
@@ -190,6 +201,12 @@ class TrackDownloadManager @Inject constructor(
             }
             val notifId = key.hashCode()
             updateProgress(DownloadProgress(key = key, title = title, artist = artist, progressPercent = 0))
+            showDownloadNotification(notifId, key, title, artist, 0, false, "Waiting for a download slot...")
+
+            // Caps how many tracks run their network work concurrently —
+            // see MAX_CONCURRENT_DOWNLOADS. Acquired here (not per-byte),
+            // released in the finally block below.
+            downloadSemaphore.acquire()
             showDownloadNotification(notifId, key, title, artist, 0, false, "Preparing high-res stream...")
 
             var destinationUri: Uri? = null
@@ -198,32 +215,13 @@ class TrackDownloadManager @Inject constructor(
 
             try {
 
-                // Resolve missing metadata & cover art proactively
+                // Read settings up front so Qobuz resolution (network) can
+                // start immediately, in parallel with artwork/metadata
+                // resolution below, instead of waiting for them first.
+                val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
+
                 var resolvedArtworkUrl = artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                 var resolvedAlbum = album?.takeIf { it.isNotBlank() }
-
-                if (resolvedArtworkUrl == null || resolvedAlbum == null) {
-                    val best = runCatching { innerTube.findBestMatch(title, artist) }.getOrNull()
-                    if (resolvedArtworkUrl == null) {
-                        resolvedArtworkUrl = best?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
-                    }
-                    if (resolvedAlbum == null) {
-                        resolvedAlbum = best?.album?.takeIf { it.isNotBlank() }
-                    }
-                }
-
-                if (resolvedArtworkUrl == null) {
-                    artworkRepository.resolve(title, artist)
-                    val cacheKey = ArtworkNormalizer.cacheKey(title, artist)
-                    resolvedArtworkUrl = artworkRepository.resolved.value[cacheKey]
-                        ?.takeIf { ArtworkNormalizer.isRealImage(it) }
-                        ?: kotlinx.coroutines.withTimeoutOrNull(3_500L) {
-                            artworkRepository.resolved.first { it.containsKey(cacheKey) }[cacheKey]
-                        }?.takeIf { ArtworkNormalizer.isRealImage(it) }
-                }
-
-                // 1. Resolve source — respect user's Qobuz preference for downloads too
-                val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
                 var resolvedUrl: String? = null
                 var mimeType = "audio/flac"
                 var extension = "flac"
@@ -231,17 +229,55 @@ class TrackDownloadManager @Inject constructor(
                 var isQobuz = false
                 var durationMs = 0L
 
-                if (misc.preferQobuzStreaming) {
-                    val qobuzStream = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
-                        runCatching {
-                            qobuzMusicApi.resolveStream(
-                                title = title,
-                                artist = artist,
-                                preferredQuality = QobuzMusicApi.QUALITY_MAX_HI_RES,
-                            )
-                        }.getOrNull()
+                // Cached across both possible uses below (artwork/album
+                // backfill, and the YouTube fallback stream lookup) so this
+                // fairly expensive search only ever runs once per track
+                // instead of twice.
+                var cachedBestMatch: com.lastwave.app.data.music.YouTubeMusicTrack? = null
+
+                coroutineScope {
+                    // Independent of everything else here — start it now so
+                    // its network round-trip overlaps with artwork/metadata
+                    // resolution below instead of running after it.
+                    val qobuzDeferred = if (misc.preferQobuzStreaming) {
+                        async {
+                            kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                                runCatching {
+                                    qobuzMusicApi.resolveStream(
+                                        title = title,
+                                        artist = artist,
+                                        preferredQuality = QobuzMusicApi.QUALITY_MAX_HI_RES,
+                                    )
+                                }.getOrNull()
+                            }
+                        }
+                    } else {
+                        null
                     }
 
+                    // Resolve missing metadata & cover art proactively
+                    if (resolvedArtworkUrl == null || resolvedAlbum == null) {
+                        val best = runCatching { innerTube.findBestMatch(title, artist) }.getOrNull()
+                        cachedBestMatch = best
+                        if (resolvedArtworkUrl == null) {
+                            resolvedArtworkUrl = best?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                        }
+                        if (resolvedAlbum == null) {
+                            resolvedAlbum = best?.album?.takeIf { it.isNotBlank() }
+                        }
+                    }
+
+                    if (resolvedArtworkUrl == null) {
+                        artworkRepository.resolve(title, artist)
+                        val cacheKey = ArtworkNormalizer.cacheKey(title, artist)
+                        resolvedArtworkUrl = artworkRepository.resolved.value[cacheKey]
+                            ?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                            ?: kotlinx.coroutines.withTimeoutOrNull(3_500L) {
+                                artworkRepository.resolved.first { it.containsKey(cacheKey) }[cacheKey]
+                            }?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                    }
+
+                    val qobuzStream = qobuzDeferred?.await()
                     if (qobuzStream != null) {
                         resolvedUrl = qobuzStream.url
                         mimeType = qobuzStream.mimeType
@@ -259,7 +295,7 @@ class TrackDownloadManager @Inject constructor(
 
                 if (resolvedUrl == null) {
                     // Fallback to YouTube Music (prefer M4A/AAC for universal media player compatibility)
-                    val bestMatch = innerTube.findBestMatch(title, artist)
+                    val bestMatch = cachedBestMatch ?: innerTube.findBestMatch(title, artist).also { cachedBestMatch = it }
                     val videoId = bestMatch.videoId ?: error("No audio source found for $title")
                     if (resolvedArtworkUrl == null) {
                         resolvedArtworkUrl = bestMatch.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
@@ -547,6 +583,7 @@ class TrackDownloadManager @Inject constructor(
                 )
                 showErrorNotification(notifId, title, artist, error.localizedMessage ?: "Failed")
             } finally {
+                downloadSemaphore.release()
                 activeKeys.remove(key)
                 activeJobs.remove(key)
                 activeUris.remove(key)
