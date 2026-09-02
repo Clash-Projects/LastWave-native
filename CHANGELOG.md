@@ -114,3 +114,31 @@
     risking throttling — working against overall speed rather than for it.
 
   Files changed: `app/src/main/java/com/lastwave/app/data/download/TrackDownloadManager.kt`
+
+## 2026-09-02 — musaibbhat120605
+
+### Fixed
+- **Downloaded songs missing from the Downloads screen after reinstalling the app.**
+  The files were never actually lost — `syncDownloadsFromStorage()` (which
+  re-discovers tracks in the public `LastWave` folder after the app's
+  database is wiped, e.g. by a reinstall) was silently finding nothing on
+  Android 13+. The app targets SDK 35, `READ_EXTERNAL_STORAGE` is correctly
+  capped at `maxSdkVersion="32"` for that target, but the replacement
+  permission for API 33+, `READ_MEDIA_AUDIO`, was never declared — and the
+  app had **no runtime permission-request code at all** for either
+  permission, on any Android version. Without it, the OS returns an empty
+  directory listing rather than an error, so the scan always came back
+  empty and the screen looked like the downloads were gone.
+
+  - Declared `READ_MEDIA_AUDIO` in the manifest.
+  - `MainActivity` now requests the correct runtime permission on launch
+    (`READ_MEDIA_AUDIO` on API 33+, `READ_EXTERNAL_STORAGE` below that),
+    mirroring the existing `POST_NOTIFICATIONS` request pattern.
+
+  Once granted, reopening the Downloads screen re-runs
+  `syncDownloadsFromStorage()` and repopulates the list from the files
+  already on disk — no re-downloading needed.
+
+  Files changed:
+  `app/src/main/AndroidManifest.xml`,
+  `app/src/main/java/com/lastwave/app/MainActivity.kt`

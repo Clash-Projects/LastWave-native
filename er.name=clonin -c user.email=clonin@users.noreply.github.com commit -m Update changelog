@@ -1,0 +1,36 @@
+[1mdiff --git a/CHANGELOG.md b/CHANGELOG.md[m
+[1mindex db35057..c00c294 100644[m
+[1m--- a/CHANGELOG.md[m
+[1m+++ b/CHANGELOG.md[m
+[36m@@ -114,3 +114,31 @@[m
+     risking throttling — working against overall speed rather than for it.[m
+ [m
+   Files changed: `app/src/main/java/com/lastwave/app/data/download/TrackDownloadManager.kt`[m
+[32m+[m
+[32m+[m[32m## 2026-09-02 — musaibbhat120605[m
+[32m+[m
+[32m+[m[32m### Fixed[m
+[32m+[m[32m- **Downloaded songs missing from the Downloads screen after reinstalling the app.**[m
+[32m+[m[32m  The files were never actually lost — `syncDownloadsFromStorage()` (which[m
+[32m+[m[32m  re-discovers tracks in the public `LastWave` folder after the app's[m
+[32m+[m[32m  database is wiped, e.g. by a reinstall) was silently finding nothing on[m
+[32m+[m[32m  Android 13+. The app targets SDK 35, `READ_EXTERNAL_STORAGE` is correctly[m
+[32m+[m[32m  capped at `maxSdkVersion="32"` for that target, but the replacement[m
+[32m+[m[32m  permission for API 33+, `READ_MEDIA_AUDIO`, was never declared — and the[m
+[32m+[m[32m  app had **no runtime permission-request code at all** for either[m
+[32m+[m[32m  permission, on any Android version. Without it, the OS returns an empty[m
+[32m+[m[32m  directory listing rather than an error, so the scan always came back[m
+[32m+[m[32m  empty and the screen looked like the downloads were gone.[m
+[32m+[m
+[32m+[m[32m  - Declared `READ_MEDIA_AUDIO` in the manifest.[m
+[32m+[m[32m  - `MainActivity` now requests the correct runtime permission on launch[m
+[32m+[m[32m    (`READ_MEDIA_AUDIO` on API 33+, `READ_EXTERNAL_STORAGE` below that),[m
+[32m+[m[32m    mirroring the existing `POST_NOTIFICATIONS` request pattern.[m
+[32m+[m
+[32m+[m[32m  Once granted, reopening the Downloads screen re-runs[m
+[32m+[m[32m  `syncDownloadsFromStorage()` and repopulates the list from the files[m
+[32m+[m[32m  already on disk — no re-downloading needed.[m
+[32m+[m
+[32m+[m[32m  Files changed:[m
+[32m+[m[32m  `app/src/main/AndroidManifest.xml`,[m
+[32m+[m[32m  `app/src/main/java/com/lastwave/app/MainActivity.kt`[m
