@@ -45,3 +45,33 @@
   Files changed:
   `app/src/main/java/com/lastwave/app/ui/home/HomeViewModel.kt`,
   `app/src/main/java/com/lastwave/app/ui/home/HomeScreen.kt`
+
+### Fixed
+- **Downloaded tracks appearing twice in the Downloads list.**
+  `TrackDownloadManager.downloadTrack()` had no check against tracks that
+  were already downloaded — it only guarded against the *same* download
+  running twice concurrently (`activeKeys`), which is cleared as soon as a
+  download finishes. Re-downloading a track you already had correctly
+  overwrote the file on disk, but `downloadedTrackDao.insert()` always
+  created a brand-new row: `DownloadedTrackEntity.id` is an
+  autoincrement primary key with no other unique constraint, so
+  `OnConflictStrategy.REPLACE` never had anything to actually collide
+  with.
+
+  - Added a normalized `trackKey` column (`"${artist}_${title}"`,
+    lowercased/trimmed) with a **unique index**, so the database itself
+    can no longer hold two rows for the same track.
+  - Migration `10 → 11` backfills `trackKey` for existing rows, deletes
+    any duplicate rows already present (keeping the most recently
+    downloaded copy of each), then creates the unique index.
+  - `downloadTrack()` now checks the database first; if the track is
+    already downloaded and its file still exists, it skips re-downloading
+    entirely instead of re-fetching and duplicating. If the file was
+    removed outside the app, it falls through and re-downloads, and the
+    unique index makes that insert safely `REPLACE` the stale row instead
+    of duplicating it.
+
+  Files changed:
+  `app/src/main/java/com/lastwave/app/data/local/db/DownloadedTrackEntity.kt`,
+  `app/src/main/java/com/lastwave/app/di/DatabaseModule.kt`,
+  `app/src/main/java/com/lastwave/app/data/download/TrackDownloadManager.kt`
