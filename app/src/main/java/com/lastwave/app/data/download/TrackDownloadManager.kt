@@ -169,6 +169,25 @@ class TrackDownloadManager @Inject constructor(
         if (!activeKeys.add(key)) return
 
         val job = applicationScope.launch(Dispatchers.IO) {
+            // Already downloaded? Skip re-downloading entirely rather than
+            // re-fetching the file and inserting a duplicate DB row.
+            val existing = runCatching { downloadedTrackDao.findByTitleAndArtist(title, artist) }.getOrNull()
+            if (existing != null) {
+                val fileStillPresent = when {
+                    existing.mediaStoreUri != null -> runCatching {
+                        context.contentResolver.openInputStream(Uri.parse(existing.mediaStoreUri))?.use { }
+                        true
+                    }.getOrDefault(false)
+                    else -> runCatching { File(existing.filePath).exists() }.getOrDefault(false)
+                }
+                if (fileStillPresent) {
+                    activeKeys.remove(key)
+                    return@launch
+                }
+                // Row is stale (file was deleted outside the app) — fall through
+                // and re-download; the unique trackKey index means the insert
+                // below will REPLACE this row instead of duplicating it.
+            }
             val notifId = key.hashCode()
             updateProgress(DownloadProgress(key = key, title = title, artist = artist, progressPercent = 0))
             showDownloadNotification(notifId, key, title, artist, 0, false, "Preparing high-res stream...")
@@ -476,6 +495,7 @@ class TrackDownloadManager @Inject constructor(
 
                 // 6. Persist to Room database
                 val entity = DownloadedTrackEntity(
+                    trackKey = key,
                     title = title,
                     artist = artist,
                     album = resolvedAlbum.orEmpty(),
@@ -900,6 +920,7 @@ class TrackDownloadManager @Inject constructor(
                     val lrcText = if (hasLyrics) runCatching { lrcFile.readText() }.getOrNull() else null
 
                     val entity = DownloadedTrackEntity(
+                        trackKey = trackKey,
                         title = title,
                         artist = artist,
                         album = album,
@@ -989,6 +1010,7 @@ class TrackDownloadManager @Inject constructor(
                         }
 
                         val entity = DownloadedTrackEntity(
+                            trackKey = trackKey,
                             title = title,
                             artist = artist,
                             album = album,
