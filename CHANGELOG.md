@@ -92,3 +92,21 @@
 
   Files changed:
   `app/src/main/java/com/lastwave/app/ui/settings/DownloadsViewModel.kt`
+### Improved
+***Download speed.
+Removed a duplicate network call: downloadTrack() looked up
+innerTube.findBestMatch() once for artwork/album backfill, then called
+it again later for the YouTube fallback stream lookup. The result is
+now cached and reused, so this search only ever runs once per track.
+Qobuz stream resolution now runs concurrently with artwork/metadata
+resolution (coroutineScope + async) instead of waiting for them to
+finish first — the two are independent, so their network round-trips
+now overlap instead of stacking up serially (previously up to ~7.5s of
+pure latency per track before the transfer even started).
+Added a concurrency cap (MAX_CONCURRENT_DOWNLOADS = 3) via a
+Semaphore around each track's full download pipeline, matching the
+pattern already used by the Nocturne project. Uncapped concurrent
+downloads (e.g. downloading a whole playlist) were firing every track's
+network calls simultaneously, competing for the same CDN/API and
+risking throttling — working against overall speed rather than for it.
+Files changed: app/src/main/java/com/lastwave/app/data/download/TrackDownloadManager.kt
