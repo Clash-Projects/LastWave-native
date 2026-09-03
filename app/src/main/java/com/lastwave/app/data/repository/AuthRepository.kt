@@ -48,6 +48,13 @@ class AuthRepository @Inject constructor(
         }
     }.stateIn(externalScope, SharingStarted.Eagerly, AuthState.Unknown)
 
+    /** Guest mode — no Last.fm account, no network call. See
+     *  SessionPreferences.continueAsGuest() for what this actually sets. */
+    suspend fun continueAsGuest() {
+        sessionPreferences.continueAsGuest()
+        transientState.value = null // defer to persisted (now-authenticated) session
+    }
+
     suspend fun saveApiCredentials(apiKey: String, apiSecret: String) {
         sessionPreferences.setApiCredentials(
             LastFmSigner.normalizeKey(apiKey),

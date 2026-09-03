@@ -149,6 +149,7 @@ fun LastWaveNavHost(
                 onSignOut = authViewModel::signOut,
                 onRestoreBackupAndSignIn = authViewModel::beginRestoreAndSignIn,
                 onDismissError = authViewModel::dismissError,
+                onContinueAsGuest = authViewModel::continueAsGuest,
             )
         }
 
