@@ -237,10 +237,8 @@ class SettingsViewModel @Inject constructor(
 
     fun setDynamicNowPlaying(enabled: Boolean) = launchSettingsAction("update dynamic theme") { themeRepository.setDynamicNowPlaying(enabled) }
     fun setUseCustomFont(enabled: Boolean) = launchSettingsAction("update the app font") { settingsPreferences.setUseCustomFont(enabled) }
-    fun setPreferQobuzStreaming(enabled: Boolean) = launchSettingsAction("update streaming preference") { settingsPreferences.setPreferQobuzStreaming(enabled) }
-    fun setPreferLosslessStreaming(enabled: Boolean) = setPreferQobuzStreaming(enabled)
-    fun setQobuzQuality(quality: Int) = launchSettingsAction("update streaming quality") { settingsPreferences.setQobuzQuality(quality) }
-    fun setLosslessQuality(quality: Int) = setQobuzQuality(quality)
+    fun setPreferLosslessStreaming(enabled: Boolean) = launchSettingsAction("update streaming preference") { settingsPreferences.setPreferLosslessStreaming(enabled) }
+    fun setLosslessQuality(quality: Int) = launchSettingsAction("update streaming quality") { settingsPreferences.setLosslessQuality(quality) }
     fun setDownloadQuality(quality: Int) = launchSettingsAction("update download quality") { settingsPreferences.setDownloadQuality(quality) }
     fun setStudioMasterClarity(enabled: Boolean) {
         // Apply immediately; DataStore persists the same state for future engine instances.

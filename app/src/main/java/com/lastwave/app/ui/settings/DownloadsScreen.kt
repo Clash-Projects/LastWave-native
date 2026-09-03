@@ -224,7 +224,7 @@ fun DownloadsScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            "Tap the 3-dot menu on any song and select \"Download (Max Quality)\". Qobuz FLAC tracks and YouTube audio are saved directly to your device's Music/LastWave folder with embedded metadata & synchronized LRCLIB lyrics.",
+                            "Tap the 3-dot menu on any song and select \"Download (Max Quality)\". Lossless FLAC tracks and YouTube audio are saved directly to your device's Music/LastWave folder with embedded metadata & synchronized LRCLIB lyrics.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center,
@@ -553,13 +553,13 @@ private fun DownloadedTrackCard(
                     Spacer(Modifier.width(6.dp))
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = if (track.isQobuz) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
+                        color = if (track.isLossless) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
                     ) {
                         Text(
                             text = track.formatBadge,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = if (track.isQobuz) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
+                            color = if (track.isLossless) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }

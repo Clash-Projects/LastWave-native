@@ -13,13 +13,13 @@ package com.lastwave.app.data.network
  */
 object LastFmAppCredentials {
     val API_KEY: String
-        get() = com.lastwave.app.data.qobuz.QobuzMusicApi.decodeSecretBytes(
+        get() = com.lastwave.app.data.lossless.LosslessMusicApi.decodeSecretBytes(
             com.lastwave.app.BuildConfig.LASTFM_API_KEY_BYTES,
             com.lastwave.app.BuildConfig.SECRET_MASK_BYTES
         )
 
     val API_SECRET: String
-        get() = com.lastwave.app.data.qobuz.QobuzMusicApi.decodeSecretBytes(
+        get() = com.lastwave.app.data.lossless.LosslessMusicApi.decodeSecretBytes(
             com.lastwave.app.BuildConfig.LASTFM_API_SECRET_BYTES,
             com.lastwave.app.BuildConfig.SECRET_MASK_BYTES
         )

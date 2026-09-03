@@ -18,7 +18,7 @@ import com.lastwave.app.data.local.db.DownloadedTrackDao
 import com.lastwave.app.data.local.db.DownloadedTrackEntity
 import com.lastwave.app.data.lyrics.LrclibLyricsApi
 import com.lastwave.app.data.music.InnerTubeMusicApi
-import com.lastwave.app.data.qobuz.QobuzMusicApi
+import com.lastwave.app.data.lossless.LosslessMusicApi
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.SettingsPreferences
 import com.lastwave.app.data.artwork.ArtworkNormalizer
@@ -62,7 +62,7 @@ data class DownloadProgress(
 @Singleton
 class TrackDownloadManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val qobuzMusicApi: QobuzMusicApi,
+    private val losslessMusicApi: LosslessMusicApi,
     private val innerTube: InnerTubeMusicApi,
     private val artworkRepository: ArtworkRepository,
     private val lrclibLyricsApi: LrclibLyricsApi,
@@ -203,22 +203,22 @@ class TrackDownloadManager @Inject constructor(
                         }?.takeIf { ArtworkNormalizer.isRealImage(it) }
                 }
 
-                // 1. Resolve source — respect user's download quality preference (Qobuz tiers or YouTube Music)
+                // 1. Resolve source — respect user's download quality preference (Lossless tiers or YouTube Music)
                 val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
                 var resolvedUrl: String? = null
                 var mimeType = "audio/flac"
                 var extension = "flac"
                 var formatBadge = "24-BIT FLAC"
-                var isQobuz = false
+                var isLossless = false
                 var durationMs = 0L
 
                 val downloadQuality = misc.downloadQuality
-                val isYouTubeRequested = downloadQuality == QobuzMusicApi.QUALITY_YOUTUBE
+                val isYouTubeRequested = downloadQuality == LosslessMusicApi.QUALITY_YOUTUBE
 
                 if (!isYouTubeRequested) {
-                    val qobuzStream = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                    val losslessStream = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
                         runCatching {
-                            qobuzMusicApi.resolveStream(
+                            losslessMusicApi.resolveStream(
                                 title = title,
                                 artist = artist,
                                 preferredQuality = downloadQuality,
@@ -226,17 +226,17 @@ class TrackDownloadManager @Inject constructor(
                         }.getOrNull()
                     }
 
-                    if (qobuzStream != null) {
-                        resolvedUrl = qobuzStream.url
-                        mimeType = qobuzStream.mimeType
-                        extension = if (qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320) "mp3" else "flac"
+                    if (losslessStream != null) {
+                        resolvedUrl = losslessStream.url
+                        mimeType = losslessStream.mimeType
+                        extension = if (losslessStream.formatId == LosslessMusicApi.QUALITY_MP3_320) "mp3" else "flac"
                         formatBadge = when {
-                            qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
-                            qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS FLAC"
-                            qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "320k MP3"
+                            losslessStream.bitDepth > 16 || losslessStream.samplingRate > 48.0 -> "HI-RES FLAC"
+                            losslessStream.formatId == LosslessMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS FLAC"
+                            losslessStream.formatId == LosslessMusicApi.QUALITY_MP3_320 -> "320k MP3"
                             else -> "FLAC"
                         }
-                        isQobuz = true
+                        isLossless = true
                         durationMs = 0L
                     }
                 }
@@ -269,7 +269,7 @@ class TrackDownloadManager @Inject constructor(
                         mimeType = "audio/mp4"
                         formatBadge = "AUDIO"
                     }
-                    isQobuz = false
+                    isLossless = false
                 }
 
                 // 2. Download raw stream to local temp cache file
@@ -488,7 +488,7 @@ class TrackDownloadManager @Inject constructor(
                     fileSizeBytes = tempDownloadFile.length(),
                     formatBadge = formatBadge,
                     durationMs = durationMs,
-                    isQobuz = isQobuz,
+                    isLossless = isLossless,
                     hasLyrics = hasLyrics,
                     syncedLyrics = syncedLyrics,
                     plainLyrics = plainLyrics,
@@ -911,7 +911,7 @@ class TrackDownloadManager @Inject constructor(
                         formatBadge = badge,
                         durationMs = durMs,
                         bitrateKbps = bitrateKbps,
-                        isQobuz = ext == "flac",
+                        isLossless = ext == "flac",
                         hasLyrics = hasLyrics,
                         syncedLyrics = if (lrcText?.contains("[") == true) lrcText else null,
                         plainLyrics = if (lrcText?.contains("[") != true) lrcText else null,
@@ -1000,7 +1000,7 @@ class TrackDownloadManager @Inject constructor(
                             fileSizeBytes = size,
                             formatBadge = badge,
                             durationMs = durMs,
-                            isQobuz = isFlac,
+                            isLossless = isFlac,
                             downloadedAtMillis = if (date > 0) date else System.currentTimeMillis(),
                         )
                         downloadedTrackDao.insert(entity)

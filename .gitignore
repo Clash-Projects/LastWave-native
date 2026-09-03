@@ -51,5 +51,4 @@ keystore_credentials.txt
 .env
 *.env
 .wrangler/
-qobuz-worker-backend/wrangler.toml
-qobuz-worker-backend/.env
+

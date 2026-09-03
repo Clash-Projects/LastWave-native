@@ -62,7 +62,7 @@ Designed from the ground up around **Material 3 Expressive**, LastWave pairs an 
 
 LastWave features a lossless streaming and download engine powered directly by the **[clashflac](https://github.com/ajisth69/clashflac)** backend:
 
-- <img src="https://api.iconify.design/lucide:disc.svg?color=%2300E5FF" width="16" height="16" align="center" /> **Studio Master Quality:** Stream and download bit-perfect FLAC audio up to **24-bit / 192kHz** directly from Qobuz via **[clashflac](https://github.com/ajisth69/clashflac)**.
+- <img src="https://api.iconify.design/lucide:disc.svg?color=%2300E5FF" width="16" height="16" align="center" /> **Studio Master Quality:** Stream and download bit-perfect FLAC audio up to **24-bit / 192kHz** directly via **[clashflac](https://github.com/ajisth69/clashflac)**.
 - <img src="https://api.iconify.design/lucide:zap.svg?color=%23C6F100" width="16" height="16" align="center" /> **Opus & High-Efficiency Audio:** Seamless dual-engine fallback streaming via YouTube Music Opus for exhaustive global catalog coverage.
 - <img src="https://api.iconify.design/lucide:download.svg?color=%23C6F100" width="16" height="16" align="center" /> **Full-Fidelity Offline Downloads:** One-tap downloads saved directly to your local storage (`Music/LastWave`), fully tagged with high-res cover art, release tags, and synchronized LRCLIB `.lrc` lyrics.
 - <img src="https://api.iconify.design/lucide:sliders.svg?color=%23C6F100" width="16" height="16" align="center" /> **Zero-Gap Playback:** Powered by AndroidX Media3 ExoPlayer with foreground audio playback and lockscreen media session controls.

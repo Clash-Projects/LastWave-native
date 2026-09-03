@@ -17,7 +17,7 @@ data class DownloadedTrackEntity(
     val formatBadge: String = "AUDIO",
     val durationMs: Long = 0L,
     val bitrateKbps: Int? = null,
-    val isQobuz: Boolean = false,
+    val isLossless: Boolean = false,
     val hasLyrics: Boolean = false,
     val syncedLyrics: String? = null,
     val plainLyrics: String? = null,

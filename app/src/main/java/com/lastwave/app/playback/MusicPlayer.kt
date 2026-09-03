@@ -38,10 +38,10 @@ import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.SettingsPreferences
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.music.ConfirmedUnplayableMediaException
-import com.lastwave.app.data.music.YOUTUBE_WEB_USER_AGENT
 import com.lastwave.app.data.music.YouTubeAudioStream
-import com.lastwave.app.data.qobuz.QobuzAudioStream
-import com.lastwave.app.data.qobuz.QobuzMusicApi
+import com.lastwave.app.data.music.YOUTUBE_WEB_USER_AGENT
+import com.lastwave.app.data.lossless.LosslessAudioStream
+import com.lastwave.app.data.lossless.LosslessMusicApi
 import com.lastwave.app.widget.WidgetUpdater
 import kotlinx.coroutines.flow.first
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -119,7 +119,6 @@ data class MusicPlayerState(
     val speed: Float = 1f,
     val bitrateKbps: Int? = null,
     val audioCodec: String? = null,
-    val isQobuz: Boolean = false,
     val isLossless: Boolean = false,
     val bitDepth: Int? = null,
     val samplingRateKHz: Double? = null,
@@ -157,7 +156,7 @@ data class PlaybackProgressState(
 class MusicPlayer @Inject constructor(
     @ApplicationContext context: Context,
     private val innerTube: InnerTubeMusicApi,
-    private val qobuzMusicApi: QobuzMusicApi,
+    private val losslessMusicApi: LosslessMusicApi,
     private val settingsPreferences: SettingsPreferences,
     private val discoverRepository: DiscoverRepository,
     private val nativeAudioEngine: dagger.Lazy<NativeAudioEngine>,
@@ -186,8 +185,6 @@ class MusicPlayer @Inject constructor(
     private val unavailableMediaIds = mutableSetOf<String>()
     private var sleepTimerDeadlineMs: Long? = null
     private var sleepTimerStep = 0
-    @Volatile
-    private var bitPerfectEnabled = false
     @Volatile
     private var crossfadeEnabled = false
     @Volatile
@@ -221,7 +218,8 @@ class MusicPlayer @Inject constructor(
     private var bufferingWatchBufferedMs = -1L
     private var bufferingRecoveryCount = 0
     private var bufferingRecoveryJob: Job? = null
-    private val qobuzBypassMediaIds = ConcurrentHashMap.newKeySet<String>()
+    private val losslessBypassMediaIds = ConcurrentHashMap.newKeySet<String>()
+    private var bitPerfectEnabled = false
     private val resolvingMediaIds = ConcurrentHashMap<String, Long>()
     private val preparedStreams = ConcurrentHashMap<String, ResolvedStream>()
 
@@ -275,7 +273,7 @@ class MusicPlayer @Inject constructor(
             if (mediaItem != null) {
                 if (bufferingWatchMediaId != mediaItem.mediaId) {
                     resetBufferingWatch(mediaItem.mediaId)
-                    qobuzBypassMediaIds.retainAll(setOf(mediaItem.mediaId))
+                    losslessBypassMediaIds.retainAll(setOf(mediaItem.mediaId))
                 }
                 if (retryMediaId != mediaItem.mediaId) {
                     retryMediaId = mediaItem.mediaId
@@ -312,7 +310,9 @@ class MusicPlayer @Inject constructor(
                     }
                     return
                 }
-                if (crossfadeEnabled && crossfadeDurationMs > 0L) {
+                val isNaturalTransition = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
+                if (crossfadeEnabled && crossfadeDurationMs > 0L && isNaturalTransition) {
                     incomingCrossfadeMediaId = mediaItem.mediaId
                     incomingCrossfadeStartVolume = player.volume
                         .coerceIn(0f, 1f)
@@ -323,12 +323,12 @@ class MusicPlayer @Inject constructor(
                     incomingCrossfadeMediaId = null
                     player.volume = 1f
                 }
-                updateBitPerfectState()
                 if (currentTrack.playbackUrl != null) {
                     applicationScope.launch(Dispatchers.IO) {
                         publishLocalTrackQuality(currentTrack)
                     }
                 }
+                updateBitPerfectState()
                 enrichUpcomingQueue(currentIndex)
                 extendDiscoverQueueIfNeeded(currentIndex)
                 val nextIndex = if (player.shuffleModeEnabled) {
@@ -352,9 +352,9 @@ class MusicPlayer @Inject constructor(
                 ?.customCacheKey
                 ?.let(preparedStreams::get)
             val customCacheKey = player.currentMediaItem?.localConfiguration?.customCacheKey
-            val failedQobuzStream = rejectedStream?.isQobuz
-                ?: customCacheKey?.startsWith("qobuz:")
-                ?: _state.value.isQobuz
+            val failedLosslessStream = rejectedStream?.isLossless
+                ?: customCacheKey?.startsWith("lossless:")
+                ?: _state.value.isLossless
             val rejectedYouTubeCandidate = rejectedStream?.youtubeCandidate
             val videoId = trackVideoId ?: rejectedYouTubeCandidate?.videoId
             val httpStatus = error.httpStatusCodeOrNull()
@@ -374,8 +374,8 @@ class MusicPlayer @Inject constructor(
                 )
             } ?: currentTrack?.let { logResolutionFailure(it, "player-error", errorRetryCount, error) }
 
-            if (failedQobuzStream && failedMediaId != null) {
-                qobuzBypassMediaIds += failedMediaId
+            if (failedLosslessStream && failedMediaId != null) {
+                losslessBypassMediaIds += failedMediaId
             } else if (!videoId.isNullOrBlank()) {
                 if (rejectedYouTubeCandidate == null) innerTube.invalidateCache(videoId)
                 innerTube.reportPlaybackFailure(videoId, rejectedYouTubeCandidate)
@@ -384,10 +384,10 @@ class MusicPlayer @Inject constructor(
             val confirmedWithoutRetry = isExplicitlyUnplayableFailure(error) ||
                 isUnsupportedMediaFailure(error)
             val confirmedAfterRetry = errorRetryCount > 0 && isPermanentHttpFailure(error)
-            // Any Qobuz CDN/format failure gets one immediate YouTube Music
+            // Any Lossless CDN/format failure gets one immediate YouTube Music
             // fallback. Permanent-error skipping applies only after that
             // alternate source has also failed.
-            if ((confirmedWithoutRetry || confirmedAfterRetry) && !failedQobuzStream) {
+            if ((confirmedWithoutRetry || confirmedAfterRetry) && !failedLosslessStream) {
                 _state.update {
                     it.copy(error = "Track unavailable", isPlaying = false, isBuffering = false)
                 }
@@ -415,7 +415,7 @@ class MusicPlayer @Inject constructor(
                         val stream = resolveTrackAudioStream(
                             track = currentTrack,
                             videoId = videoId,
-                            allowQobuz = !failedQobuzStream,
+                            allowLossless = !failedLosslessStream,
                         )
                         val updated = currentTrack.copy(
                             playbackUrl = null,
@@ -657,9 +657,9 @@ class MusicPlayer @Inject constructor(
 
         applicationScope.launch {
             settingsPreferences.settings.collect { settings ->
-                bitPerfectEnabled = settings.isBitPerfectEnabled
                 crossfadeEnabled = settings.crossfadeEnabled
-                crossfadeDurationMs = settings.crossfadeSeconds.coerceIn(1, 12) * 1000L
+                crossfadeDurationMs = settings.crossfadeSeconds.coerceIn(1, 10) * 1000L
+                bitPerfectEnabled = settings.isBitPerfectEnabled
                 updateBitPerfectState()
                 if (playerDelegate.isInitialized()) {
                     onMain {
@@ -776,7 +776,7 @@ class MusicPlayer @Inject constructor(
                     resolveTrackAudioStreamWithRetry(
                         track = selectedTrack,
                         videoId = selectedTrack.videoId,
-                        allowQobuz = selectedTrack.mediaIdKey() !in qobuzBypassMediaIds,
+                        allowLossless = selectedTrack.mediaIdKey() !in losslessBypassMediaIds,
                     )
                 } else {
                     null
@@ -996,7 +996,7 @@ class MusicPlayer @Inject constructor(
         val isIncomingCrossfade = incomingCrossfadeMediaId == player.currentMediaItem?.mediaId
         if (isIncomingCrossfade) {
             val incomingFadeDuration = if (durationMs > 0L) {
-                minOf(crossfadeDurationMs, durationMs / 2).coerceAtLeast(500L)
+                minOf(crossfadeDurationMs, durationMs / 3).coerceAtLeast(500L)
             } else {
                 crossfadeDurationMs
             }
@@ -1010,12 +1010,14 @@ class MusicPlayer @Inject constructor(
         }
         if (durationMs <= 0L) return 1.0f
 
-        val effectiveCrossfade = minOf(crossfadeDurationMs, durationMs / 2).coerceAtLeast(500L)
+        val effectiveCrossfade = minOf(crossfadeDurationMs, durationMs / 3).coerceAtLeast(500L)
+        if (durationMs < effectiveCrossfade * 2) return 1.0f
+
         val remainingMs = durationMs - positionMs
         if (remainingMs >= effectiveCrossfade) return 1.0f
 
         val progress = (remainingMs.toFloat() / effectiveCrossfade.toFloat()).coerceIn(0f, 1f)
-        return kotlin.math.sin(progress * (Math.PI.toFloat() / 2f)).coerceIn(0f, 1f)
+        return kotlin.math.sin(progress * (Math.PI.toFloat() / 2f))
     }
 
     private fun updateBitPerfectState() {
@@ -1024,6 +1026,7 @@ class MusicPlayer @Inject constructor(
         runCatching { nativeAudioEngine.get().setBitPerfect(effectiveBitPerfect) }
         audioEffectsEngine.setBitPerfectActive(effectiveBitPerfect)
     }
+
     fun seekToQueueItem(index: Int) = onMain {
         if (index in 0 until player.mediaItemCount) {
             resolveAndPlayQueueItem(index)
@@ -1109,7 +1112,7 @@ class MusicPlayer @Inject constructor(
                 val resolved = resolveTrackAudioStreamWithRetry(
                     track = track,
                     videoId = track.videoId,
-                    allowQobuz = expectedMediaId !in qobuzBypassMediaIds,
+                    allowLossless = expectedMediaId !in losslessBypassMediaIds,
                 )
                 currentCoroutineContext().ensureActive()
                 withContext(Dispatchers.Main.immediate) {
@@ -1477,17 +1480,17 @@ class MusicPlayer @Inject constructor(
             ?.customCacheKey
             ?.let(preparedStreams::get)
         val customCacheKey = player.currentMediaItem?.localConfiguration?.customCacheKey
-        val failedQobuzStream = rejectedStream?.isQobuz
-            ?: customCacheKey?.startsWith("qobuz:")
-            ?: _state.value.isQobuz
+        val failedLosslessStream = rejectedStream?.isLossless
+            ?: customCacheKey?.startsWith("lossless:")
+            ?: _state.value.isLossless
         val candidateVideoId = rejectedStream?.youtubeCandidate?.videoId ?: failedTrack.videoId
-        if (failedQobuzStream) qobuzBypassMediaIds += expectedMediaId
+        if (failedLosslessStream) losslessBypassMediaIds += expectedMediaId
 
         preloadJob?.cancel()
         player.stop()
         bufferingRecoveryJob = applicationScope.launch(Dispatchers.Main.immediate) {
             withContext(Dispatchers.IO) {
-                if (!failedQobuzStream) {
+                if (!failedLosslessStream) {
                     candidateVideoId
                         ?.takeIf(String::isNotBlank)
                         ?.let { innerTube.reportPlaybackFailure(it, rejectedStream?.youtubeCandidate) }
@@ -1501,7 +1504,7 @@ class MusicPlayer @Inject constructor(
                     resolveTrackAudioStream(
                         track = failedTrack,
                         videoId = candidateVideoId,
-                        allowQobuz = !failedQobuzStream,
+                        allowLossless = !failedLosslessStream,
                     )
                 }
                 withContext(Dispatchers.Main.immediate) {
@@ -1535,7 +1538,7 @@ class MusicPlayer @Inject constructor(
         bufferingWatchPositionMs = -1L
         bufferingWatchBufferedMs = -1L
         bufferingRecoveryCount = 0
-        if (mediaId == null) qobuzBypassMediaIds.clear()
+        if (mediaId == null) losslessBypassMediaIds.clear()
     }
 
     @MainThread
@@ -1594,7 +1597,7 @@ class MusicPlayer @Inject constructor(
         val audioCodec: String?,
         val cacheKey: String,
         val requestHeaders: Map<String, String> = emptyMap(),
-        val isQobuz: Boolean = false,
+        val isLossless: Boolean = false,
         val bitDepth: Int? = null,
         val samplingRateKHz: Double? = null,
         val youtubeCandidate: YouTubeAudioStream? = null,
@@ -1603,40 +1606,40 @@ class MusicPlayer @Inject constructor(
     private suspend fun resolveTrackAudioStream(
         track: PlayableTrack,
         videoId: String?,
-        allowQobuz: Boolean = true,
+        allowLossless: Boolean = true,
     ): ResolvedStream = withContext(Dispatchers.IO) {
         val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
-        if (!allowQobuz) return@withContext resolveYoutubeTrackAudioStream(track, videoId)
+        if (!allowLossless) return@withContext resolveYoutubeTrackAudioStream(track, videoId)
 
-        // Resolve both sources together, but always await Qobuz first. If it
+        // Resolve both sources together, but always await lossless first. If it
         // fails or times out, the YouTube result is already being prepared.
         supervisorScope {
-            val qobuzDeferred = async(Dispatchers.IO) {
-                resolveQobuzTrackAudioStream(track, misc)
+            val losslessDeferred = async(Dispatchers.IO) {
+                resolveLosslessTrackAudioStream(track, misc)
             }
             val youtubeDeferred = async(Dispatchers.IO) {
                 resolveYoutubeTrackAudioStream(track, videoId)
             }
             try {
-                qobuzDeferred.await() ?: youtubeDeferred.await()
+                losslessDeferred.await() ?: youtubeDeferred.await()
             } finally {
-                qobuzDeferred.cancel()
+                losslessDeferred.cancel()
                 youtubeDeferred.cancel()
             }
         }
     }
 
-    private suspend fun resolveQobuzTrackAudioStream(
+    private suspend fun resolveLosslessTrackAudioStream(
         track: PlayableTrack,
         misc: MiscSettings,
     ): ResolvedStream? {
-        val qobuzStream = withTimeoutOrNull(QOBUZ_RESOLVE_TIMEOUT_MS) {
+        val losslessStream = withTimeoutOrNull(LOSSLESS_RESOLVE_TIMEOUT_MS) {
             try {
-                qobuzMusicApi.resolveStream(
+                losslessMusicApi.resolveStream(
                     title = track.title,
                     artist = track.artist,
                     expectedAlbum = track.album,
-                    preferredQuality = misc.qobuzQuality,
+                    preferredQuality = misc.losslessQuality,
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -1645,20 +1648,20 @@ class MusicPlayer @Inject constructor(
             }
         } ?: return null
         val codec = when {
-            qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "HI-RES FLAC"
-            qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS"
-            qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "MP3 320k"
+            losslessStream.bitDepth > 16 || losslessStream.samplingRate > 48.0 -> "HI-RES FLAC"
+            losslessStream.formatId == LosslessMusicApi.QUALITY_CD_LOSSLESS -> "LOSSLESS"
+            losslessStream.formatId == LosslessMusicApi.QUALITY_MP3_320 -> "MP3 320k"
             else -> "LOSSLESS"
         }
         return ResolvedStream(
-            url = qobuzStream.url,
-            mimeType = qobuzStream.mimeType,
-            bitrateKbps = qobuzStream.bitrateKbps,
+            url = losslessStream.url,
+            mimeType = losslessStream.mimeType,
+            bitrateKbps = losslessStream.bitrateKbps,
             audioCodec = codec,
-            cacheKey = "qobuz:${track.mediaIdKey()}:${qobuzStream.formatId}",
-            isQobuz = true,
-            bitDepth = qobuzStream.bitDepth.takeIf { it > 0 },
-            samplingRateKHz = qobuzStream.samplingRate.takeIf { it > 0 },
+            cacheKey = "lossless:${track.mediaIdKey()}:${losslessStream.formatId}",
+            isLossless = true,
+            bitDepth = losslessStream.bitDepth.takeIf { it > 0 },
+            samplingRateKHz = losslessStream.samplingRate.takeIf { it > 0 },
         )
     }
 
@@ -1694,7 +1697,7 @@ class MusicPlayer @Inject constructor(
             audioCodec = codec,
             cacheKey = ytStream.mediaCacheKey,
             requestHeaders = ytStream.requestHeaders,
-            isQobuz = false,
+            isLossless = false,
             samplingRateKHz = ytStream.sampleRateHz?.let { it / 1_000.0 },
             youtubeCandidate = ytStream,
         )
@@ -1705,7 +1708,7 @@ class MusicPlayer @Inject constructor(
             it.copy(
                 bitrateKbps = resolved.bitrateKbps,
                 audioCodec = resolved.audioCodec,
-                isQobuz = resolved.isQobuz,
+                isLossless = resolved.isLossless,
                 bitDepth = resolved.bitDepth,
                 samplingRateKHz = resolved.samplingRateKHz,
             )
@@ -1716,12 +1719,12 @@ class MusicPlayer @Inject constructor(
     private suspend fun resolveTrackAudioStreamWithRetry(
         track: PlayableTrack,
         videoId: String?,
-        allowQobuz: Boolean,
+        allowLossless: Boolean,
     ): ResolvedStream {
         var lastFailure: Throwable? = null
         repeat(2) { attempt ->
             try {
-                return resolveTrackAudioStream(track, videoId, allowQobuz)
+                return resolveTrackAudioStream(track, videoId, allowLossless)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: Throwable) {
@@ -1770,7 +1773,7 @@ class MusicPlayer @Inject constructor(
         PlaybackDiagnostics.event(
             "Stream",
             "stage=$stage videoId=${candidate?.videoId.orEmpty()} " +
-                "client=${candidate?.clientProfile ?: if (stream.isQobuz) "QOBUZ" else "unknown"} " +
+                "client=${candidate?.clientProfile ?: if (stream.isLossless) "LOSSLESS" else "unknown"} " +
                 "itag=${candidate?.itag ?: -1} mime=${stream.mimeType} expiry=$expiry " +
                 "retry=$retry http=${httpStatus ?: 0} error=${error?.javaClass?.simpleName.orEmpty()}",
         )
@@ -1837,7 +1840,7 @@ class MusicPlayer @Inject constructor(
             it.copy(
                 bitrateKbps = trueBitrate,
                 audioCodec = codec,
-                isQobuz = false,
+                isLossless = false,
             )
         }
         updateBitPerfectState()
@@ -1884,8 +1887,7 @@ class MusicPlayer @Inject constructor(
                     bitrateKbps = bitrateKbps,
                     bitDepth = bitDepth ?: if (isFlac) 16 else null,
                     samplingRateKHz = sampleRateKHz ?: if (isFlac) 44.1 else null,
-                    isQobuz = isFlac && (bitDepth ?: 0) > 16,
-                    isLossless = isFlac,
+                    isLossless = isFlac && (bitDepth ?: 0) > 16,
                 )
             }
             updateBitPerfectState()
@@ -2062,7 +2064,7 @@ class MusicPlayer @Inject constructor(
             speed = player.playbackParameters.speed,
             bitrateKbps = previous.bitrateKbps.takeIf { sameTrack },
             audioCodec = previous.audioCodec.takeIf { sameTrack },
-            isQobuz = previous.isQobuz && sameTrack,
+            isLossless = previous.isLossless && sameTrack,
             bitDepth = previous.bitDepth.takeIf { sameTrack },
             samplingRateKHz = previous.samplingRateKHz.takeIf { sameTrack },
             sleepTimerRemainingMs = sleepTimerDeadlineMs?.minus(SystemClock.elapsedRealtime())?.coerceAtLeast(0),
@@ -2084,7 +2086,7 @@ class MusicPlayer @Inject constructor(
         const val PLAYBACK_SESSION_KEY = "active_session"
         /** Ticker-driven session persistence cadence (explicit state changes persist immediately). */
         const val TICKER_PERSIST_INTERVAL_MS = 2_000L
-        const val QOBUZ_RESOLVE_TIMEOUT_MS = 4_000L
+        const val LOSSLESS_RESOLVE_TIMEOUT_MS = 4_000L
         const val MAX_PLAYBACK_RETRIES = 2
         const val PLAYBACK_RETRY_BASE_DELAY_MS = 350L
         const val PLAYBACK_RETRY_JITTER_MS = 250L

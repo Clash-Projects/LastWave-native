@@ -627,7 +627,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Audio & Streaming")
-                    val qualitySubtitle = when (misc.qobuzQuality) {
+                    val qualitySubtitle = when (misc.losslessQuality) {
                         27 -> "Max (Up to 24-bit / 192 kHz)"
                         7 -> "Hi-Res (24-bit / 96 kHz)"
                         6 -> "CD Lossless (16-bit / 44.1 kHz FLAC)"
@@ -650,7 +650,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.HighQuality,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Qobuz-first Streaming",
+                                title = "Lossless Streaming",
                                 subtitle = "$qualitySubtitle \u2022 YouTube Music fallback",
                                 onClick = { showQualityDialog = true },
                                 position = position,
@@ -660,7 +660,7 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = "Download Quality",
-                                subtitle = "$downloadQualitySubtitle \u2022 Qobuz & YouTube",
+                                subtitle = "$downloadQualitySubtitle \u2022 Lossless & YouTube",
                                 onClick = { showDownloadQualityDialog = true },
                                 position = position,
                             )
@@ -1131,11 +1131,11 @@ fun SettingsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     tiers.forEach { (qualityId, title, meta) ->
                         val (subtitle, badge) = meta
-                        val isSelected = misc.qobuzQuality == qualityId
+                        val isSelected = misc.losslessQuality == qualityId
                         Surface(
                             onClick = {
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                viewModel.setQobuzQuality(qualityId)
+                                viewModel.setLosslessQuality(qualityId)
                                 showQualityDialog = false
                             },
                             shape = RoundedCornerShape(20.dp),
@@ -1204,10 +1204,10 @@ fun SettingsScreen(
 
     if (showDownloadQualityDialog) {
         val downloadTiers = listOf(
-            Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Qobuz Studio Master FLAC" to "24-BIT / 192k"),
-            Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Qobuz Studio FLAC" to "24-BIT / 96k"),
-            Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Qobuz Bit-Exact CD FLAC" to "16-BIT / 44.1k"),
-            Triple(5, "Standard Quality", "320 kbps • Qobuz High-Bitrate MP3" to "320 kbps"),
+            Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Studio Master FLAC" to "24-BIT / 192k"),
+            Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Studio FLAC" to "24-BIT / 96k"),
+            Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Bit-Exact CD FLAC" to "16-BIT / 44.1k"),
+            Triple(5, "Standard Quality", "320 kbps • High-Bitrate MP3" to "320 kbps"),
             Triple(-1, "YouTube Music", "128-256 kbps • YouTube Music AAC / Opus stream" to "YOUTUBE"),
         )
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1269,7 +1269,7 @@ fun SettingsScreen(
                 }
 
                 Text(
-                    "Qobuz downloads provide bit-exact studio quality (FLAC/MP3). If your chosen quality is unavailable, LastWave automatically downloads the higher quality tier above it (or falls back to YouTube Music if unavailable on Qobuz).",
+                    "Lossless downloads provide bit-exact studio quality (FLAC/MP3). If your chosen quality is unavailable, LastWave automatically downloads the higher quality tier above it (or falls back to YouTube Music if unavailable in lossless).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline,
                 )

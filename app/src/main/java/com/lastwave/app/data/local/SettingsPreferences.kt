@@ -45,11 +45,11 @@ data class MiscSettings(
      *  just filtered to the front, not independently reorderable. */
     val pinnedFriends: Set<String> = emptySet(),
     /** When true, the player attempts to resolve and stream lossless / Hi-Res audio
-     *  directly from Qobuz CDN when a high-confidence match exists. Falls back to YouTube Music. */
-    val preferQobuzStreaming: Boolean = true,
-    /** Preferred quality preset for Qobuz streaming (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k).
+     *  directly from lossless CDN when a high-confidence match exists. Falls back to YouTube Music. */
+    val preferLosslessStreaming: Boolean = true,
+    /** Preferred quality preset for lossless streaming (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k).
      *  If a track does not support the requested quality, the worker automatically selects the highest available. */
-    val qobuzQuality: Int = 27,
+    val losslessQuality: Int = 27,
     /** Preferred quality preset for downloads (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k, -1: YouTube Music). */
     val downloadQuality: Int = 27,
     /** Optional studio-clarity curve. Disabled by default because fixed tone
@@ -68,10 +68,7 @@ data class MiscSettings(
     val wavySeekbarEnabled: Boolean = true,
     /** When true (default), downloads fetch and save synced lyrics (.lrc companion files and embedded tags). */
     val downloadLyrics: Boolean = true,
-) {
-    val preferLosslessStreaming: Boolean get() = preferQobuzStreaming
-    val losslessQuality: Int get() = qobuzQuality
-}
+)
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
  *  or SessionPreferences semantically — shares the app's single DataStore. */
@@ -83,8 +80,8 @@ class SettingsPreferences @Inject constructor(
         val DYNAMIC_NOW_PLAYING = booleanPreferencesKey("lw_dynamic_now_playing")
         val USE_CUSTOM_FONT = booleanPreferencesKey("lw_use_custom_font")
         val PINNED_FRIENDS = stringSetPreferencesKey("lw_pinned_friends")
-        val PREFER_QOBUZ_STREAMING = booleanPreferencesKey("lw_prefer_qobuz_streaming")
-        val QOBUZ_QUALITY = intPreferencesKey("lw_qobuz_quality")
+        val PREFER_LOSSLESS_STREAMING = booleanPreferencesKey("lw_prefer_lossless_streaming")
+        val LOSSLESS_QUALITY = intPreferencesKey("lw_lossless_quality")
         val DOWNLOAD_QUALITY = intPreferencesKey("lw_download_quality")
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
         val BIT_PERFECT_ENABLED = booleanPreferencesKey("lw_bit_perfect_enabled")
@@ -102,8 +99,8 @@ class SettingsPreferences @Inject constructor(
                 dynamicNowPlayingEnabled = p.readSafely(Keys.DYNAMIC_NOW_PLAYING) ?: false,
                 useCustomFont = p.readSafely(Keys.USE_CUSTOM_FONT) ?: true,
                 pinnedFriends = p.readSafely(Keys.PINNED_FRIENDS) ?: emptySet(),
-                preferQobuzStreaming = p.readSafely(Keys.PREFER_QOBUZ_STREAMING) ?: true,
-                qobuzQuality = p.readSafely(Keys.QOBUZ_QUALITY)?.takeIf { it in QOBUZ_QUALITIES } ?: 27,
+                preferLosslessStreaming = p.readSafely(Keys.PREFER_LOSSLESS_STREAMING) ?: true,
+                losslessQuality = p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
                 downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: false,
                 isBitPerfectEnabled = p.readSafely(Keys.BIT_PERFECT_ENABLED) ?: false,
@@ -123,17 +120,18 @@ class SettingsPreferences @Inject constructor(
         dataStore.edit { it[Keys.USE_CUSTOM_FONT] = enabled }
     }
 
-    suspend fun setPreferQobuzStreaming(enabled: Boolean) {
-        dataStore.edit { it[Keys.PREFER_QOBUZ_STREAMING] = enabled }
+    suspend fun setPreferLosslessStreaming(enabled: Boolean) {
+        dataStore.edit {
+            it[Keys.PREFER_LOSSLESS_STREAMING] = enabled
+        }
     }
 
-    suspend fun setPreferLosslessStreaming(enabled: Boolean) = setPreferQobuzStreaming(enabled)
-
-    suspend fun setQobuzQuality(quality: Int) {
-        dataStore.edit { it[Keys.QOBUZ_QUALITY] = quality.takeIf { it in QOBUZ_QUALITIES } ?: 27 }
+    suspend fun setLosslessQuality(quality: Int) {
+        dataStore.edit {
+            val q = quality.takeIf { it in LOSSLESS_QUALITIES } ?: 27
+            it[Keys.LOSSLESS_QUALITY] = q
+        }
     }
-
-    suspend fun setLosslessQuality(quality: Int) = setQobuzQuality(quality)
 
     suspend fun setDownloadQuality(quality: Int) {
         dataStore.edit {
@@ -178,7 +176,7 @@ class SettingsPreferences @Inject constructor(
     }
 
     private companion object {
-        val QOBUZ_QUALITIES = setOf(5, 6, 7, 27)
+        val LOSSLESS_QUALITIES = setOf(5, 6, 7, 27)
         val DOWNLOAD_QUALITIES = setOf(-1, 5, 6, 7, 27)
     }
 }
