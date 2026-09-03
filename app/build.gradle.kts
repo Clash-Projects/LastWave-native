@@ -65,6 +65,12 @@ android {
         val losslessApiKey = resolveSecret("LOSSLESS_API_KEY", "LOSSLESS_AUTH_KEY", "API_AUTH_KEY", "API_KEY")
         buildConfigField("byte[]", "LOSSLESS_API_KEY_BYTES", obfuscateSecret(losslessApiKey))
 
+        val qobuzBackendUrl = resolveSecret("QOBUZ_BACKEND_URL", "QOBUZ_BASE_URL", "BACKEND_BASE_URL")
+        buildConfigField("byte[]", "QOBUZ_BACKEND_URL_BYTES", obfuscateSecret(qobuzBackendUrl))
+
+        val qobuzApiKey = resolveSecret("QOBUZ_API_KEY", "QOBUZ_AUTH_KEY", "API_AUTH_KEY")
+        buildConfigField("byte[]", "QOBUZ_API_KEY_BYTES", obfuscateSecret(qobuzApiKey))
+
         val lyricsApiKey = resolveSecret("LYRICS_API_KEY", "API_KEY", "LYRICS_AUTH_TOKEN")
         buildConfigField("byte[]", "LYRICS_API_KEY_BYTES", obfuscateSecret(lyricsApiKey))
 

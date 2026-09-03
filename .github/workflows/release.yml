@@ -46,6 +46,8 @@ jobs:
         env:
           LOSSLESS_BACKEND_URL: ${{ secrets.LOSSLESS_BACKEND_URL }}
           LOSSLESS_API_KEY: ${{ secrets.LOSSLESS_API_KEY }}
+          QOBUZ_BACKEND_URL: ${{ secrets.QOBUZ_BACKEND_URL }}
+          QOBUZ_API_KEY: ${{ secrets.QOBUZ_API_KEY }}
           LYRICS_API_KEY: ${{ secrets.LYRICS_API_KEY }}
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           RELEASE_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD }}
