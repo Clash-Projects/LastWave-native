@@ -881,9 +881,24 @@ class MusicPlaybackService : MediaBrowserServiceCompat() {
             art = art,
             expanded = true,
         )
-        val style = Notification.DecoratedMediaCustomViewStyle()
-            .setShowActionsInCompactView(0, 1, 2)
-        platformSessionToken?.let(style::setMediaSession)
+        // On Android 10 and below (One UI 2.x especially), attaching a
+        // MediaSession to DecoratedMediaCustomViewStyle causes SystemUI's
+        // older media-notification renderer to draw its own full media
+        // chrome as a second layer on top of our custom RemoteViews,
+        // instead of just framing it — producing two overlapping players.
+        // Our compact/expanded RemoteViews already draw everything (art,
+        // title, artist, transport buttons), so the system's own media
+        // decoration is redundant; drop just the session tag on affected
+        // versions. Lock screen, Bluetooth, Android Auto, and the in-app
+        // widget are unaffected — they all read from `mediaSession`
+        // directly, never from this notification Style object.
+        val style = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Notification.DecoratedMediaCustomViewStyle()
+                .setShowActionsInCompactView(0, 1, 2)
+                .also { s -> platformSessionToken?.let(s::setMediaSession) }
+        } else {
+            Notification.DecoratedCustomViewStyle()
+        }
 
         return builder
             .setSmallIcon(R.drawable.ic_launcher_logo)
