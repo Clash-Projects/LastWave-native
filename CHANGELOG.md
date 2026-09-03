@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Duplicate/overlapping "now playing" notification on Android 10 (One UI 2.x).**
+  `buildNotification()` used `Notification.DecoratedMediaCustomViewStyle`
+  with a `MediaSession` attached, alongside a fully custom `RemoteViews`
+  player (own artwork, title, artist, transport buttons). On Android 10 +
+  Samsung One UI 2.x, SystemUI's older media-notification renderer drew
+  its own full media chrome as a second layer instead of just framing the
+  custom view, producing two overlapping players in the notification
+  shade/quick controls.
+
+  Now version-gated: Android 11+ keeps `DecoratedMediaCustomViewStyle`
+  with the session attached as before; Android 10 and below uses
+  `Notification.DecoratedCustomViewStyle` (no session tag on the
+  notification itself). Lock screen controls, Bluetooth, Android Auto,
+  and the in-app widget are unaffected, since they all read from
+  `mediaSession` directly rather than this notification's `Style` object.
+
+  Files changed:
+  `app/src/main/java/com/lastwave/app/playback/MusicPlaybackService.kt`
+
 ## 2026-09-02 — musaibbhat120605
 
 ### Fixed
