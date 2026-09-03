@@ -50,9 +50,13 @@ data class MiscSettings(
     /** Preferred quality preset for Qobuz streaming (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k).
      *  If a track does not support the requested quality, the worker automatically selects the highest available. */
     val qobuzQuality: Int = 27,
+    /** Preferred quality preset for downloads (27: 24/192, 7: 24/96, 6: 16/44.1, 5: 320k, -1: YouTube Music). */
+    val downloadQuality: Int = 27,
     /** Optional studio-clarity curve. Disabled by default because fixed tone
      *  shaping cannot be neutral on every speaker, headset and OEM spatializer. */
     val isStudioMasterClarityEnabled: Boolean = false,
+    /** When true, completely bypasses DSP, EQ, tone effects, and software volume ducking for bit-exact audio. */
+    val isBitPerfectEnabled: Boolean = false,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     /** Blend the end of one queued track into the beginning of the next. */
@@ -64,7 +68,10 @@ data class MiscSettings(
     val wavySeekbarEnabled: Boolean = true,
     /** When true (default), downloads fetch and save synced lyrics (.lrc companion files and embedded tags). */
     val downloadLyrics: Boolean = true,
-)
+) {
+    val preferLosslessStreaming: Boolean get() = preferQobuzStreaming
+    val losslessQuality: Int get() = qobuzQuality
+}
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
  *  or SessionPreferences semantically — shares the app's single DataStore. */
@@ -78,7 +85,9 @@ class SettingsPreferences @Inject constructor(
         val PINNED_FRIENDS = stringSetPreferencesKey("lw_pinned_friends")
         val PREFER_QOBUZ_STREAMING = booleanPreferencesKey("lw_prefer_qobuz_streaming")
         val QOBUZ_QUALITY = intPreferencesKey("lw_qobuz_quality")
+        val DOWNLOAD_QUALITY = intPreferencesKey("lw_download_quality")
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
+        val BIT_PERFECT_ENABLED = booleanPreferencesKey("lw_bit_perfect_enabled")
         val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
         val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
@@ -95,10 +104,12 @@ class SettingsPreferences @Inject constructor(
                 pinnedFriends = p.readSafely(Keys.PINNED_FRIENDS) ?: emptySet(),
                 preferQobuzStreaming = p.readSafely(Keys.PREFER_QOBUZ_STREAMING) ?: true,
                 qobuzQuality = p.readSafely(Keys.QOBUZ_QUALITY)?.takeIf { it in QOBUZ_QUALITIES } ?: 27,
+                downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: false,
+                isBitPerfectEnabled = p.readSafely(Keys.BIT_PERFECT_ENABLED) ?: false,
                 lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
-                crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 10),
+                crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 12),
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
                 downloadLyrics = p.readSafely(Keys.DOWNLOAD_LYRICS) ?: true,
             )
@@ -116,12 +127,27 @@ class SettingsPreferences @Inject constructor(
         dataStore.edit { it[Keys.PREFER_QOBUZ_STREAMING] = enabled }
     }
 
+    suspend fun setPreferLosslessStreaming(enabled: Boolean) = setPreferQobuzStreaming(enabled)
+
     suspend fun setQobuzQuality(quality: Int) {
         dataStore.edit { it[Keys.QOBUZ_QUALITY] = quality.takeIf { it in QOBUZ_QUALITIES } ?: 27 }
     }
 
+    suspend fun setLosslessQuality(quality: Int) = setQobuzQuality(quality)
+
+    suspend fun setDownloadQuality(quality: Int) {
+        dataStore.edit {
+            val q = quality.takeIf { it in DOWNLOAD_QUALITIES } ?: 27
+            it[Keys.DOWNLOAD_QUALITY] = q
+        }
+    }
+
     suspend fun setStudioMasterClarity(enabled: Boolean) {
         dataStore.edit { it[Keys.MUSIC_ENHANCER] = enabled }
+    }
+
+    suspend fun setBitPerfectEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.BIT_PERFECT_ENABLED] = enabled }
     }
 
     suspend fun setLyricsAnimation(animation: LyricsAnimation) {
@@ -133,7 +159,7 @@ class SettingsPreferences @Inject constructor(
     }
 
     suspend fun setCrossfadeSeconds(seconds: Int) {
-        dataStore.edit { it[Keys.CROSSFADE_SECONDS] = seconds.coerceIn(1, 10) }
+        dataStore.edit { it[Keys.CROSSFADE_SECONDS] = seconds.coerceIn(1, 12) }
     }
 
     suspend fun setWavySeekbarEnabled(enabled: Boolean) {
@@ -153,5 +179,6 @@ class SettingsPreferences @Inject constructor(
 
     private companion object {
         val QOBUZ_QUALITIES = setOf(5, 6, 7, 27)
+        val DOWNLOAD_QUALITIES = setOf(-1, 5, 6, 7, 27)
     }
 }

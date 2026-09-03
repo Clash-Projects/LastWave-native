@@ -248,6 +248,7 @@ fun SettingsScreen(
     val eq by viewModel.equalizer.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showQualityDialog by remember { mutableStateOf(false) }
+    var showDownloadQualityDialog by remember { mutableStateOf(false) }
     var showEqSheet by remember { mutableStateOf(false) }
     var showLyricsAnimationSheet by remember { mutableStateOf(false) }
     var showSyncPlaylistsSheet by remember { mutableStateOf(false) }
@@ -578,7 +579,9 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = "Equalizer",
-                                subtitle = if (eq.enabled) {
+                                subtitle = if (misc.isBitPerfectEnabled && eq.enabled) {
+                                    "On \u2022 ${eq.presetName} (Active on YT \u2022 Bypassed on FLAC)"
+                                } else if (eq.enabled) {
                                     "On \u2022 ${eq.presetName} \u2022 15-band"
                                 } else {
                                     "Shape your sound across 15 frequencies"
@@ -605,7 +608,9 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = "Studio Master Clarity",
-                                subtitle = if (misc.isStudioMasterClarityEnabled) {
+                                subtitle = if (misc.isBitPerfectEnabled && misc.isStudioMasterClarityEnabled) {
+                                    "Active on YT \u2022 Bypassed on Lossless/FLAC"
+                                } else if (misc.isStudioMasterClarityEnabled) {
                                     "Crystal-clear open sound \u2022 airy detail \u2022 deep clean separation"
                                 } else {
                                     "Original unshaped output"
@@ -629,10 +634,17 @@ fun SettingsScreen(
                         5 -> "Standard (320 kbps MP3)"
                         else -> "Max (Up to 24-bit / 192 kHz)"
                     }
+                    val downloadQualitySubtitle = when (misc.downloadQuality) {
+                        27 -> "Max (24-bit / 192 kHz FLAC)"
+                        7 -> "Hi-Res (24-bit / 96 kHz FLAC)"
+                        6 -> "CD Lossless (16-bit / 44.1 kHz FLAC)"
+                        5 -> "Standard (320 kbps MP3)"
+                        -1 -> "YouTube Music (AAC / Opus)"
+                        else -> "Max (24-bit / 192 kHz FLAC)"
+                    }
 
-                    val totalAudioRows = if (misc.crossfadeEnabled) 4 else 3
+                    val totalAudioRows = if (misc.crossfadeEnabled) 6 else 5
                     SettingsGroup(rowCount = totalAudioRows) { index, position ->
-                        val lyricsIndex = if (misc.crossfadeEnabled) 3 else 2
                         when (index) {
                             0 -> SettingsActionCard(
                                 icon = Icons.Filled.HighQuality,
@@ -643,13 +655,36 @@ fun SettingsScreen(
                                 onClick = { showQualityDialog = true },
                                 position = position,
                             )
-                            1 -> SettingsToggleCard(
+                            1 -> SettingsActionCard(
+                                icon = Icons.Filled.CloudDownload,
+                                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                title = "Download Quality",
+                                subtitle = "$downloadQualitySubtitle \u2022 Qobuz & YouTube",
+                                onClick = { showDownloadQualityDialog = true },
+                                position = position,
+                            )
+                            2 -> SettingsToggleCard(
+                                icon = Icons.Filled.Tune,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "Bit-Perfect Mode (FLAC Direct)",
+                                subtitle = if (misc.isBitPerfectEnabled) {
+                                    "Bit-exact DAC passthrough for Lossless/FLAC \u2022 DSP active on YT"
+                                } else {
+                                    "Bypass DSP & EQ on FLAC tracks for bit-exact reproduction"
+                                },
+                                checked = misc.isBitPerfectEnabled,
+                                onCheckedChange = viewModel::setBitPerfectEnabled,
+                                position = position,
+                            )
+                            3 -> SettingsToggleCard(
                                 icon = Icons.Filled.GraphicEq,
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 title = "Crossfade",
                                 subtitle = if (misc.crossfadeEnabled) {
-                                    "Smooth transition between tracks • ${misc.crossfadeSeconds} sec"
+                                    "Smooth transition between tracks \u2022 ${misc.crossfadeSeconds} sec"
                                 } else {
                                     "Blend the end of a track into the next one"
                                 },
@@ -657,7 +692,7 @@ fun SettingsScreen(
                                 onCheckedChange = viewModel::setCrossfadeEnabled,
                                 position = position,
                             )
-                            2 -> if (misc.crossfadeEnabled) {
+                            4 -> if (misc.crossfadeEnabled) {
                                 CrossfadeDurationRow(
                                     seconds = misc.crossfadeSeconds,
                                     onSecondsChange = viewModel::setCrossfadeSeconds,
@@ -679,7 +714,7 @@ fun SettingsScreen(
                                     position = position,
                                 )
                             }
-                            3 -> SettingsToggleCard(
+                            5 -> SettingsToggleCard(
                                 icon = Icons.Filled.Lyrics,
                                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -1167,6 +1202,152 @@ fun SettingsScreen(
         }
     }
 
+    if (showDownloadQualityDialog) {
+        val downloadTiers = listOf(
+            Triple(27, "Max Quality", "Up to 24-bit / 192 kHz • Qobuz Studio Master FLAC" to "24-BIT / 192k"),
+            Triple(7, "Hi-Res Audio", "24-bit / 96 kHz • Qobuz Studio FLAC" to "24-BIT / 96k"),
+            Triple(6, "CD Lossless", "16-bit / 44.1 kHz • Qobuz Bit-Exact CD FLAC" to "16-BIT / 44.1k"),
+            Triple(5, "Standard Quality", "320 kbps • Qobuz High-Bitrate MP3" to "320 kbps"),
+            Triple(-1, "YouTube Music", "128-256 kbps • YouTube Music AAC / Opus stream" to "YOUTUBE"),
+        )
+        val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
+        ModalBottomSheet(
+            onDismissRequest = { showDownloadQualityDialog = false },
+            sheetState = sheetState,
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            dragHandle = {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                    modifier = Modifier
+                        .padding(top = 12.dp, bottom = 8.dp)
+                        .size(width = 36.dp, height = 4.dp),
+                ) {}
+            },
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp + safeDrawingBottomPadding()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 4.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.secondaryContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Filled.CloudDownload,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(
+                            "Download Quality",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            "Select offline audio resolution & bit depth",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+
+                Text(
+                    "Qobuz downloads provide bit-exact studio quality (FLAC/MP3). If your chosen quality is unavailable, LastWave automatically downloads the higher quality tier above it (or falls back to YouTube Music if unavailable on Qobuz).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    downloadTiers.forEach { (qualityId, title, meta) ->
+                        val (subtitle, badge) = meta
+                        val isSelected = misc.downloadQuality == qualityId
+                        Surface(
+                            onClick = {
+                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                                viewModel.setDownloadQuality(qualityId)
+                                showDownloadQualityDialog = false
+                            },
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                            shadowElevation = if (isSelected) 3.dp else 0.dp,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            title,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        ) {
+                                            Text(
+                                                badge,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        subtitle,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primary),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = "Selected",
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if (showYouTubeImportSheet) {
         YouTubeImportSheet(
             onDismiss = { showYouTubeImportSheet = false },
@@ -1363,9 +1544,17 @@ private fun CrossfadeDurationRow(
     onSecondsChange: (Int) -> Unit,
     position: GroupPosition = GroupPosition.SINGLE,
 ) {
-    var sliderValue by remember(seconds) { mutableStateOf(seconds.coerceIn(1, 10).toFloat()) }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var sliderValue by remember(seconds) { mutableStateOf(seconds.coerceIn(1, 12).toFloat()) }
     val shape = groupShape(position)
     val liquidGlass = LocalLiquidGlass.current
+
+    val blendStyle = when (sliderValue.roundToInt()) {
+        in 1..2 -> "Quick DJ overlap"
+        in 3..5 -> "Standard smooth blend"
+        in 6..8 -> "Long musical transition"
+        else -> "Extended cinematic crossfade"
+    }
 
     Card(
         shape = shape,
@@ -1386,33 +1575,50 @@ private fun CrossfadeDurationRow(
                 Column(Modifier.weight(1f)) {
                     Text("Crossfade duration", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
                     Text(
-                        "${sliderValue.toInt()} sec blend",
+                        "${sliderValue.roundToInt()}s \u2022 $blendStyle",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Text(
+                        "${sliderValue.roundToInt()}s",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     )
                 }
             }
             Slider(
                 value = sliderValue,
                 onValueChange = { value ->
-                    val updatedSeconds = value.roundToInt().coerceIn(1, 10)
-                    if (updatedSeconds.toFloat() != sliderValue) {
-                        sliderValue = updatedSeconds.toFloat()
-                        onSecondsChange(updatedSeconds)
+                    val rounded = value.roundToInt().coerceIn(1, 12)
+                    if (rounded.toFloat() != sliderValue) {
+                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                        sliderValue = rounded.toFloat()
+                        onSecondsChange(rounded)
                     }
                 },
-                valueRange = 1f..10f,
-                steps = 8,
+                onValueChangeFinished = {
+                    onSecondsChange(sliderValue.roundToInt().coerceIn(1, 12))
+                },
+                valueRange = 1f..12f,
+                steps = 10,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 4.dp),
+                    .padding(top = 6.dp),
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text("1 sec", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                Text("10 sec", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text("1s (Tight)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text("6s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                Text("12s (Long)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
             }
         }
     }

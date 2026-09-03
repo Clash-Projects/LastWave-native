@@ -7,7 +7,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -17,7 +20,6 @@ import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -30,8 +32,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -53,7 +56,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import com.lastwave.app.ui.common.PredictiveBackScreen
 import com.lastwave.app.ui.common.ExpressiveMotion
-import com.lastwave.app.ui.generate.GenerateScreen
+import com.lastwave.app.ui.feed.FeedScreen
 import com.lastwave.app.ui.generate.MixLauncher
 import com.lastwave.app.ui.home.HomeScreen
 import com.lastwave.app.ui.playlist.PlaylistScreen
@@ -73,7 +76,7 @@ class MainShellViewModel @Inject constructor(mixLauncher: MixLauncher) : ViewMod
     val mixRequests = mixLauncher.requests
 }
 
-private enum class MainTab(val label: String) { HOME("Home"), GENERATE("Generate"), PLAYLISTS("Playlists") }
+private enum class MainTab(val label: String) { FEED("Feed"), STATS("Stats"), PLAYLISTS("Playlists") }
 
 /** Shared with any screen hosted inside [MainShell] so their scrolling
  *  lists know how much bottom content padding to reserve — the nav
@@ -114,20 +117,17 @@ fun MainShell(
     onOpenGenres: () -> Unit,
     onOpenFriends: () -> Unit,
     onOpenPlaylist: (Long) -> Unit = {},
+    onOpenGenerator: () -> Unit = {},
     mainShellViewModel: MainShellViewModel = hiltViewModel(),
 ) {
     val tabs = MainTab.entries
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
 
-    // "Start Mix with this Song" (§6) can be tapped from any screen's track
-    // menu, including ones pushed on top of MainShell (Discover/Search/
-    // Genres) — this keeps running even while MainShell isn't the visible
-    // screen, since its composition isn't disposed just because another
-    // route is on top of it in the back stack.
+    // "Start Mix with this Song" (§6) opens the Generator from anywhere
     LaunchedEffect(Unit) {
         mainShellViewModel.mixRequests.collect {
-            scope.launch { pagerState.animateScrollToPage(tabs.indexOf(MainTab.GENERATE)) }
+            onOpenGenerator()
         }
     }
 
@@ -135,30 +135,30 @@ fun MainShell(
     // content via Box alignment, never reserving/subtracting its own
     // height from the content area.
     Box(Modifier.fillMaxSize()) {
-        val homeIndex = tabs.indexOf(MainTab.HOME)
+        val feedIndex = tabs.indexOf(MainTab.FEED)
         HorizontalPager(
             state = pagerState,
-            // Pager prefetches the gesture destination itself. Keeping all
-            // three tabs composed made off-screen lists, image loaders and
-            // infinite animations compete with the visible page for frames.
             beyondViewportPageCount = 0,
             modifier = Modifier.fillMaxSize(),
         ) { page ->
-            // Predictive back on a non-Home tab returns to Home (with the
-            // same swipe-to-pop gesture as other screens), but once on Home
-            // stays enabled = false so back on Home falls through to the
-            // system default (exit/minimize), same as before.
             val isCurrent = page == pagerState.currentPage
             PredictiveBackScreen(
-                enabled = isCurrent && tabs[page] != MainTab.HOME,
-                onBack = { scope.launch { pagerState.animateScrollToPage(homeIndex) } },
+                enabled = isCurrent && tabs[page] != MainTab.FEED,
+                onBack = { scope.launch { pagerState.animateScrollToPage(feedIndex) } },
             ) {
                 when (tabs[page]) {
-                    MainTab.HOME -> HomeScreen(onOpenSettings = onOpenSettings, onOpenSearch = onOpenSearch, onOpenDiscover = onOpenDiscover, onOpenGenres = onOpenGenres, onOpenFriends = onOpenFriends)
-                    MainTab.GENERATE -> GenerateScreen(
-                        onNavigateToPlaylist = {
-                            scope.launch { pagerState.animateScrollToPage(tabs.indexOf(MainTab.PLAYLISTS)) }
-                        },
+                    MainTab.FEED -> FeedScreen(
+                        onOpenSettings = onOpenSettings,
+                        onOpenSearch = onOpenSearch,
+                        onOpenDiscover = onOpenDiscover,
+                        onOpenPlaylist = onOpenPlaylist,
+                    )
+                    MainTab.STATS -> HomeScreen(
+                        onOpenSettings = onOpenSettings,
+                        onOpenSearch = onOpenSearch,
+                        onOpenDiscover = onOpenDiscover,
+                        onOpenGenres = onOpenGenres,
+                        onOpenFriends = onOpenFriends,
                     )
                     MainTab.PLAYLISTS -> PlaylistScreen(onOpenPlaylist = onOpenPlaylist)
                 }
@@ -169,24 +169,22 @@ fun MainShell(
             tabs = tabs,
             selectedIndex = pagerState.currentPage,
             onSelect = { index -> scope.launch { pagerState.animateScrollToPage(index) } },
+            onOpenGenerator = onOpenGenerator,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
 }
 
 /**
- * ONE floating dock (a single Surface with generous rounded corners,
- * elevation, and margin) containing the three tabs with real breathing
- * space between them. Unselected tabs render as plain borderless icon
- * buttons (ripple only) so the dock's own surface shows through as their
- * "background"; the selected tab morphs its own shape into an accent pill
- * with icon + label.
+ * Modern floating dock containing the 3 tabs plus an animated companion
+ * Generator button that pops into view exclusively on the Playlists tab.
  */
 @Composable
 private fun FloatingNavBar(
     tabs: List<MainTab>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
+    onOpenGenerator: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val liquidGlass = LocalLiquidGlass.current
@@ -195,29 +193,69 @@ private fun FloatingNavBar(
             .windowInsetsPadding(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
             )
-            .padding(horizontal = 24.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .animateContentSize(animationSpec = navSpring()),
         contentAlignment = Alignment.Center,
     ) {
-        Surface(
-            shape = DockShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
-            shadowElevation = 12.dp,
-            modifier = Modifier.liquidGlassChrome(DockShape, liquidGlass),
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Surface(
+                shape = DockShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 6.dp,
+                shadowElevation = 12.dp,
+                modifier = Modifier.liquidGlassChrome(DockShape, liquidGlass),
             ) {
-                tabs.forEachIndexed { index, tab ->
-                    val onClick = remember(index) { { onSelect(index) } }
-                    FloatingNavItem(
-                        label = tab.label,
-                        icon = tab.icon(),
-                        selected = selectedIndex == index,
-                        onClick = onClick,
-                    )
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    tabs.forEachIndexed { index, tab ->
+                        val onClick = remember(index) { { onSelect(index) } }
+                        FloatingNavItem(
+                            label = tab.label,
+                            icon = tab.icon(),
+                            selected = selectedIndex == index,
+                            onClick = onClick,
+                        )
+                    }
+                }
+            }
+
+            // Satellite Companion Generator Button (only visible on Playlists tab)
+            AnimatedVisibility(
+                visible = selectedIndex == tabs.indexOf(MainTab.PLAYLISTS),
+                enter = fadeIn(animationSpec = tween(180)) +
+                    scaleIn(initialScale = 0.35f, animationSpec = navSpring()) +
+                    expandHorizontally(animationSpec = navSpring(), expandFrom = Alignment.End),
+                exit = fadeOut(animationSpec = tween(120)) +
+                    scaleOut(targetScale = 0.35f, animationSpec = navSpring()) +
+                    shrinkHorizontally(animationSpec = navSpring(), shrinkTowards = Alignment.End),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Spacer(Modifier.width(10.dp))
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shadowElevation = 10.dp,
+                        tonalElevation = 4.dp,
+                        modifier = Modifier
+                            .size(56.dp)
+                            .liquidGlassChrome(CircleShape, liquidGlass)
+                            .clickable(onClick = onOpenGenerator),
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Icon(
+                                imageVector = Icons.Filled.AutoAwesome,
+                                contentDescription = "Create / Generate Playlist",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -293,7 +331,7 @@ private fun FloatingNavItem(
 }
 
 private fun MainTab.icon(): ImageVector = when (this) {
-    MainTab.HOME -> Icons.Filled.Home
-    MainTab.GENERATE -> Icons.Filled.Add
+    MainTab.FEED -> Icons.Filled.Home
+    MainTab.STATS -> Icons.Filled.Leaderboard
     MainTab.PLAYLISTS -> Icons.AutoMirrored.Filled.QueueMusic
 }

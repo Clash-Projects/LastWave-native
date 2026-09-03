@@ -132,17 +132,6 @@ enum class PlaylistTrackSort(val label: String) {
     PLAY_TIME("Play time"),
 }
 
-@HiltViewModel
-class PlaylistDownloadHelperViewModel @Inject constructor(
-    private val downloadManager: com.lastwave.app.data.download.TrackDownloadManager,
-) : ViewModel() {
-    fun downloadAll(tracks: List<GeneratedTrack>) {
-        tracks.forEach { t ->
-            downloadManager.downloadTrack(t.name, t.artist, t.album, t.artworkUrl)
-        }
-    }
-}
-
 private fun formatDate(millis: Long): String =
     SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(millis))
 
@@ -153,7 +142,6 @@ fun PlaylistDetailScreen(
     onBack: () -> Unit,
     onOpenPlaylist: ((Long) -> Unit)? = null,
     viewModel: PlaylistViewModel = hiltViewModel(),
-    downloadViewModel: PlaylistDownloadHelperViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -783,15 +771,6 @@ fun PlaylistDetailScreen(
                                     )
                                 }
                             }
-                            DropdownMenuItem(
-                                text = { Text("Download all songs") },
-                                leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
-                                onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    downloadViewModel.downloadAll(playlist.tracks)
-                                    overflowMenuOpen = false
-                                },
-                            )
                             DropdownMenuItem(
                                 text = { Text("Export / Share") },
                                 leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },

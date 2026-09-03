@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MusicNote
@@ -696,7 +697,7 @@ private fun PlaylistCard(
                     if (!playlist.isYouTubeOnly) {
                         DropdownMenuItem(
                             text = { Text("Export") },
-                            leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                            leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
                             onClick = { onExport(); menuExpanded = false },
                         )
                     }

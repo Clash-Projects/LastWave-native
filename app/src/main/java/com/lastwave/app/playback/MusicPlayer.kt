@@ -120,6 +120,7 @@ data class MusicPlayerState(
     val bitrateKbps: Int? = null,
     val audioCodec: String? = null,
     val isQobuz: Boolean = false,
+    val isLossless: Boolean = false,
     val bitDepth: Int? = null,
     val samplingRateKHz: Double? = null,
     val sleepTimerRemainingMs: Long? = null,
@@ -185,6 +186,8 @@ class MusicPlayer @Inject constructor(
     private val unavailableMediaIds = mutableSetOf<String>()
     private var sleepTimerDeadlineMs: Long? = null
     private var sleepTimerStep = 0
+    @Volatile
+    private var bitPerfectEnabled = false
     @Volatile
     private var crossfadeEnabled = false
     @Volatile
@@ -309,9 +312,7 @@ class MusicPlayer @Inject constructor(
                     }
                     return
                 }
-                val isNaturalTransition = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
-                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
-                if (crossfadeEnabled && crossfadeDurationMs > 0L && isNaturalTransition) {
+                if (crossfadeEnabled && crossfadeDurationMs > 0L) {
                     incomingCrossfadeMediaId = mediaItem.mediaId
                     incomingCrossfadeStartVolume = player.volume
                         .coerceIn(0f, 1f)
@@ -322,6 +323,7 @@ class MusicPlayer @Inject constructor(
                     incomingCrossfadeMediaId = null
                     player.volume = 1f
                 }
+                updateBitPerfectState()
                 if (currentTrack.playbackUrl != null) {
                     applicationScope.launch(Dispatchers.IO) {
                         publishLocalTrackQuality(currentTrack)
@@ -655,8 +657,10 @@ class MusicPlayer @Inject constructor(
 
         applicationScope.launch {
             settingsPreferences.settings.collect { settings ->
+                bitPerfectEnabled = settings.isBitPerfectEnabled
                 crossfadeEnabled = settings.crossfadeEnabled
-                crossfadeDurationMs = settings.crossfadeSeconds.coerceIn(1, 10) * 1000L
+                crossfadeDurationMs = settings.crossfadeSeconds.coerceIn(1, 12) * 1000L
+                updateBitPerfectState()
                 if (playerDelegate.isInitialized()) {
                     onMain {
                         if (settings.crossfadeEnabled) {
@@ -992,7 +996,7 @@ class MusicPlayer @Inject constructor(
         val isIncomingCrossfade = incomingCrossfadeMediaId == player.currentMediaItem?.mediaId
         if (isIncomingCrossfade) {
             val incomingFadeDuration = if (durationMs > 0L) {
-                minOf(crossfadeDurationMs, durationMs / 3).coerceAtLeast(500L)
+                minOf(crossfadeDurationMs, durationMs / 2).coerceAtLeast(500L)
             } else {
                 crossfadeDurationMs
             }
@@ -1006,14 +1010,19 @@ class MusicPlayer @Inject constructor(
         }
         if (durationMs <= 0L) return 1.0f
 
-        val effectiveCrossfade = minOf(crossfadeDurationMs, durationMs / 3).coerceAtLeast(500L)
-        if (durationMs < effectiveCrossfade * 2) return 1.0f
-
+        val effectiveCrossfade = minOf(crossfadeDurationMs, durationMs / 2).coerceAtLeast(500L)
         val remainingMs = durationMs - positionMs
         if (remainingMs >= effectiveCrossfade) return 1.0f
 
         val progress = (remainingMs.toFloat() / effectiveCrossfade.toFloat()).coerceIn(0f, 1f)
-        return kotlin.math.sin(progress * (Math.PI.toFloat() / 2f))
+        return kotlin.math.sin(progress * (Math.PI.toFloat() / 2f)).coerceIn(0f, 1f)
+    }
+
+    private fun updateBitPerfectState() {
+        val currentIsLossless = _state.value.isLossless
+        val effectiveBitPerfect = bitPerfectEnabled && currentIsLossless
+        runCatching { nativeAudioEngine.get().setBitPerfect(effectiveBitPerfect) }
+        audioEffectsEngine.setBitPerfectActive(effectiveBitPerfect)
     }
     fun seekToQueueItem(index: Int) = onMain {
         if (index in 0 until player.mediaItemCount) {
@@ -1701,6 +1710,7 @@ class MusicPlayer @Inject constructor(
                 samplingRateKHz = resolved.samplingRateKHz,
             )
         }
+        updateBitPerfectState()
     }
 
     private suspend fun resolveTrackAudioStreamWithRetry(
@@ -1830,6 +1840,7 @@ class MusicPlayer @Inject constructor(
                 isQobuz = false,
             )
         }
+        updateBitPerfectState()
     }
 
     private fun publishLocalTrackQuality(track: PlayableTrack) {
@@ -1874,8 +1885,10 @@ class MusicPlayer @Inject constructor(
                     bitDepth = bitDepth ?: if (isFlac) 16 else null,
                     samplingRateKHz = sampleRateKHz ?: if (isFlac) 44.1 else null,
                     isQobuz = isFlac && (bitDepth ?: 0) > 16,
+                    isLossless = isFlac,
                 )
             }
+            updateBitPerfectState()
         } catch (_: Exception) {
             val isFlac = url.endsWith(".flac", ignoreCase = true)
             _state.update {
@@ -1883,8 +1896,10 @@ class MusicPlayer @Inject constructor(
                     audioCodec = if (isFlac) "FLAC" else "AUDIO",
                     bitDepth = if (isFlac) 16 else null,
                     samplingRateKHz = if (isFlac) 44.1 else null,
+                    isLossless = isFlac,
                 )
             }
+            updateBitPerfectState()
         } finally {
             runCatching { retriever.release() }
         }

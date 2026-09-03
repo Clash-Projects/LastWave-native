@@ -132,10 +132,33 @@ class QobuzMusicApi @Inject constructor(
         }
 
         // Quality presets
-        const val QUALITY_MAX_HI_RES = 27 // Up to 24-bit / 192 kHz
-        const val QUALITY_HI_RES_96 = 7   // Up to 24-bit / 96 kHz
-        const val QUALITY_CD_LOSSLESS = 6 // 16-bit / 44.1 kHz FLAC
-        const val QUALITY_MP3_320 = 5     // 320 kbps MP3
+        const val QUALITY_MAX_HI_RES = 27 // Up to 24-bit / 192 kHz (Qobuz)
+        const val QUALITY_HI_RES_96 = 7   // Up to 24-bit / 96 kHz (Qobuz)
+        const val QUALITY_CD_LOSSLESS = 6 // 16-bit / 44.1 kHz FLAC (Qobuz)
+        const val QUALITY_MP3_320 = 5     // 320 kbps MP3 (Qobuz)
+        const val QUALITY_YOUTUBE = -1    // YouTube Music standard stream
+
+        /**
+         * Resolves the order of quality tiers to attempt.
+         * If the requested quality fails, it prioritizes the tiers ABOVE it in ascending order,
+         * followed by the tiers below it before falling back to YouTube Music.
+         */
+        fun getQualityAttemptOrder(preferred: Int): List<Int> {
+            val qobuzTiersAscending = listOf(
+                QUALITY_MP3_320,     // 5
+                QUALITY_CD_LOSSLESS, // 6
+                QUALITY_HI_RES_96,   // 7
+                QUALITY_MAX_HI_RES,  // 27
+            )
+            val index = qobuzTiersAscending.indexOf(preferred)
+            if (index == -1) return listOf(QUALITY_MAX_HI_RES, QUALITY_HI_RES_96, QUALITY_CD_LOSSLESS, QUALITY_MP3_320)
+
+            val preferredQuality = qobuzTiersAscending[index]
+            val above = qobuzTiersAscending.subList(index + 1, qobuzTiersAscending.size)
+            val below = qobuzTiersAscending.subList(0, index).reversed()
+
+            return (listOf(preferredQuality) + above + below).distinct()
+        }
 
         private const val TAG = "QobuzMusicApi"
         private const val MAX_DURATION_DIFFERENCE_SECONDS = 8
@@ -192,29 +215,50 @@ class QobuzMusicApi @Inject constructor(
                 expectedAlbum = expectedAlbum,
             ) ?: return@withContext null
 
-            // 2. Fetch direct CDN streaming URL
-            val urlBuilder = "$BACKEND_BASE_URL/api/track/${candidate.id}/url".toHttpUrlOrNull()?.newBuilder()
-                ?: return@withContext null
-            urlBuilder.addQueryParameter("quality", preferredQuality.toString())
-            urlBuilder.addQueryParameter("fallback", "true")
+            // 2. Fetch direct CDN streaming URL with upward/fallback tier resolution
+            val qualitiesToTry = getQualityAttemptOrder(preferredQuality)
+            for (quality in qualitiesToTry) {
+                currentCoroutineContext().ensureActive()
+                val stream = fetchTrackStreamUrl(candidate, quality, fallback = false)
+                if (stream != null) return@withContext stream
+            }
+            // Final fail-open fallback attempt
+            fetchTrackStreamUrl(candidate, preferredQuality, fallback = true)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.d(TAG, "Lossless resolution failed gracefully: ${e.message}")
+            null
+        }
+    }
 
-            currentCoroutineContext().ensureActive()
-            val requestBuilder = Request.Builder().url(urlBuilder.build()).get()
-            if (BACKEND_API_KEY.isNotBlank()) requestBuilder.addHeader("X-API-Key", BACKEND_API_KEY)
+    private fun fetchTrackStreamUrl(
+        candidate: LosslessTrackItem,
+        quality: Int,
+        fallback: Boolean,
+    ): LosslessAudioStream? {
+        val urlBuilder = "$BACKEND_BASE_URL/api/track/${candidate.id}/url".toHttpUrlOrNull()?.newBuilder()
+            ?: return null
+        urlBuilder.addQueryParameter("quality", quality.toString())
+        urlBuilder.addQueryParameter("fallback", fallback.toString())
 
+        val requestBuilder = Request.Builder().url(urlBuilder.build()).get()
+        if (BACKEND_API_KEY.isNotBlank()) requestBuilder.addHeader("X-API-Key", BACKEND_API_KEY)
+
+        return try {
             resolutionClient.newCall(requestBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful) {
-                    Log.w(TAG, "Qobuz stream request failed with HTTP ${response.code}")
-                    return@withContext null
+                    Log.w(TAG, "Qobuz stream request for track ${candidate.id} quality $quality failed with HTTP ${response.code}")
+                    return null
                 }
-                val body = response.body?.string() ?: return@withContext null
+                val body = response.body?.string() ?: return null
                 val parsed = json.decodeFromString<QobuzTrackUrlResponse>(body)
                 if (!parsed.success) {
-                    Log.w(TAG, "Qobuz stream response rejected: ${parsed.error.orEmpty()}")
-                    return@withContext null
+                    Log.w(TAG, "Qobuz stream response for track ${candidate.id} quality $quality rejected: ${parsed.error.orEmpty()}")
+                    return null
                 }
-                val data = parsed.data ?: return@withContext null
-                val streamUrl = data.url ?: return@withContext null
+                val data = parsed.data ?: return null
+                val streamUrl = data.url?.takeIf { it.isNotBlank() } ?: return null
 
                 val bitrateKbps = when (data.formatId) {
                     QUALITY_MAX_HI_RES -> ((data.bitDepth * data.samplingRate * 2 * 1000) / 1000).toInt()
@@ -234,10 +278,8 @@ class QobuzMusicApi @Inject constructor(
                     trackId = candidate.id,
                 )
             }
-        } catch (e: CancellationException) {
-            throw e
         } catch (e: Exception) {
-            Log.d(TAG, "Qobuz resolution failed gracefully: ${e.message}")
+            Log.d(TAG, "Qobuz stream fetch for quality $quality failed: ${e.message}")
             null
         }
     }

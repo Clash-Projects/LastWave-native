@@ -56,6 +56,7 @@ public:
     void setOutputVolume(float volume) noexcept;
 
     void setStudioMasterClarity(bool enabled) noexcept;
+    void setBitPerfect(bool enabled) noexcept;
     void setEqualizer(bool enabled, const float* gainsDb, std::size_t gainCount) noexcept;
 
     [[nodiscard]] bool configureMediaProcessor(

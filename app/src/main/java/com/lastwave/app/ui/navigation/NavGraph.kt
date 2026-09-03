@@ -170,7 +170,21 @@ fun LastWaveNavHost(
                 onOpenPlaylist = { playlistId ->
                     navController.navigate(Screen.PlaylistDetail.createRoute(playlistId))
                 },
+                onOpenGenerator = {
+                    navController.navigate(Screen.Create.route) { launchSingleTop = true }
+                },
             )
+        }
+
+        composable(Screen.Create.route) {
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.generate.GenerateScreen(
+                    onNavigateToPlaylist = {
+                        navController.popBackStack()
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
 
         // Friends is a real pushed screen (not a Dialog/ModalBottomSheet) —

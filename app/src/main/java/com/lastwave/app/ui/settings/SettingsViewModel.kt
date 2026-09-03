@@ -238,16 +238,23 @@ class SettingsViewModel @Inject constructor(
     fun setDynamicNowPlaying(enabled: Boolean) = launchSettingsAction("update dynamic theme") { themeRepository.setDynamicNowPlaying(enabled) }
     fun setUseCustomFont(enabled: Boolean) = launchSettingsAction("update the app font") { settingsPreferences.setUseCustomFont(enabled) }
     fun setPreferQobuzStreaming(enabled: Boolean) = launchSettingsAction("update streaming preference") { settingsPreferences.setPreferQobuzStreaming(enabled) }
+    fun setPreferLosslessStreaming(enabled: Boolean) = setPreferQobuzStreaming(enabled)
     fun setQobuzQuality(quality: Int) = launchSettingsAction("update streaming quality") { settingsPreferences.setQobuzQuality(quality) }
+    fun setLosslessQuality(quality: Int) = setQobuzQuality(quality)
+    fun setDownloadQuality(quality: Int) = launchSettingsAction("update download quality") { settingsPreferences.setDownloadQuality(quality) }
     fun setStudioMasterClarity(enabled: Boolean) {
         // Apply immediately; DataStore persists the same state for future engine instances.
         runCatching { audioEngine.get().setStudioMasterClarity(enabled) }
         launchSettingsAction("update Studio Master Clarity") { settingsPreferences.setStudioMasterClarity(enabled) }
     }
+    fun setBitPerfectEnabled(enabled: Boolean) {
+        runCatching { audioEngine.get().setBitPerfect(enabled) }
+        launchSettingsAction("update Bit-Perfect mode") { settingsPreferences.setBitPerfectEnabled(enabled) }
+    }
     fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
     fun setCrossfadeEnabled(enabled: Boolean) = launchSettingsAction("update crossfade") { settingsPreferences.setCrossfadeEnabled(enabled) }
     fun setCrossfadeSeconds(seconds: Int) = launchSettingsAction("update crossfade duration") {
-        settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 10))
+        settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 12))
     }
     fun setWavySeekbarEnabled(enabled: Boolean) = launchSettingsAction("update seekbar style") {
         settingsPreferences.setWavySeekbarEnabled(enabled)

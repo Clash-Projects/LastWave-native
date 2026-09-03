@@ -90,6 +90,7 @@ private val IconBadgeShape = RoundedCornerShape(14.dp)
 @Composable
 fun GenerateScreen(
     onNavigateToPlaylist: () -> Unit = {},
+    onBack: (() -> Unit)? = null,
     viewModel: GenerateViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -110,6 +111,7 @@ fun GenerateScreen(
         ExpressiveHeader(
             title = "Generator",
             subtitle = "Choose a mode to generate a playlist",
+            onBack = onBack,
         )
 
         com.lastwave.app.ui.common.WithoutPlatformOverscroll {

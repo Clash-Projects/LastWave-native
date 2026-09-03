@@ -203,7 +203,7 @@ class TrackDownloadManager @Inject constructor(
                         }?.takeIf { ArtworkNormalizer.isRealImage(it) }
                 }
 
-                // 1. Resolve source — respect user's Qobuz preference for downloads too
+                // 1. Resolve source — respect user's download quality preference (Qobuz tiers or YouTube Music)
                 val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
                 var resolvedUrl: String? = null
                 var mimeType = "audio/flac"
@@ -212,13 +212,16 @@ class TrackDownloadManager @Inject constructor(
                 var isQobuz = false
                 var durationMs = 0L
 
-                if (misc.preferQobuzStreaming) {
+                val downloadQuality = misc.downloadQuality
+                val isYouTubeRequested = downloadQuality == QobuzMusicApi.QUALITY_YOUTUBE
+
+                if (!isYouTubeRequested) {
                     val qobuzStream = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
                         runCatching {
                             qobuzMusicApi.resolveStream(
                                 title = title,
                                 artist = artist,
-                                preferredQuality = QobuzMusicApi.QUALITY_MAX_HI_RES,
+                                preferredQuality = downloadQuality,
                             )
                         }.getOrNull()
                     }

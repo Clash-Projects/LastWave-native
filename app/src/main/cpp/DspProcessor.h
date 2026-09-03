@@ -18,6 +18,7 @@ public:
     void configure(double sampleRate) noexcept;
     void reset() noexcept;
     void setStudioMasterClarity(bool enabled) noexcept;
+    void setBitPerfect(bool enabled) noexcept;
     void setPeakProtectionEnabled(bool enabled) noexcept;
     void setEqualizer(
         bool enabled,
@@ -30,6 +31,10 @@ public:
 
     [[nodiscard]] bool isStudioMasterClarityEnabled() const noexcept {
         return targetEnabled_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] bool isBitPerfectEnabled() const noexcept {
+        return bitPerfectEnabled_.load(std::memory_order_acquire);
     }
 
 private:
@@ -64,6 +69,9 @@ private:
             const double output = b0 * value + z1[channel];
             z1[channel] = b1 * value - a1 * output + z2[channel];
             z2[channel] = b2 * value - a2 * output;
+            // Anti-denormal guard: protects against CPU penalty on budget ARM cores
+            if (std::abs(z1[channel]) < 1.0e-20) z1[channel] = 0.0;
+            if (std::abs(z2[channel]) < 1.0e-20) z2[channel] = 0.0;
             if (!std::isfinite(output) || !std::isfinite(z1[channel]) || !std::isfinite(z2[channel])) {
                 z1[channel] = 0.0;
                 z2[channel] = 0.0;
@@ -117,6 +125,7 @@ private:
     float currentWet_{0.0F};
     float rampPerFrame_{1.0F / 2400.0F};
     std::atomic<bool> targetEnabled_{false};
+    std::atomic<bool> bitPerfectEnabled_{false};
     std::atomic<bool> peakProtectionEnabled_{false};
     std::atomic<bool> targetEqualizerEnabled_{false};
     std::atomic<std::uint32_t> targetEqualizerRevision_{0};
@@ -147,6 +156,8 @@ private:
     Biquad boxinessControl_{};
     Biquad presenceDetail_{};
     Biquad airDetail_{};
+    Biquad monoBassFilter_{};
+    Biquad airExciterFilter_{};
     Crossfeed crossfeed_{};
 };
 

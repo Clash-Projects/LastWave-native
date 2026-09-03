@@ -477,6 +477,36 @@ class InnerTubeMusicApi @Inject constructor(
         }
     }
 
+    suspend fun fetchNewReleases(): List<YouTubePlaylistSummary> = withContext(Dispatchers.IO) {
+        runCatching {
+            val root = browseRoot(YT_NEW_RELEASES_BROWSE_ID, authenticated = false)
+            parsePlaylistRenderers(root)
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun fetchCharts(): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
+        runCatching {
+            val root = browseRoot(YT_CHARTS_BROWSE_ID, authenticated = false)
+            parseSongRenderers(root)
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun fetchHomeMixes(): List<YouTubePlaylistSummary> = withContext(Dispatchers.IO) {
+        val isAuth = ytAuth.connection.value.isConnected
+        runCatching {
+            val root = browseRoot(YT_HOME_BROWSE_ID, authenticated = isAuth)
+            parsePlaylistRenderers(root)
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun fetchHomeSongs(): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
+        val isAuth = ytAuth.connection.value.isConnected
+        runCatching {
+            val root = browseRoot(YT_HOME_BROWSE_ID, authenticated = isAuth)
+            parseHomeFeedSongs(root)
+        }.getOrDefault(emptyList())
+    }
+
     /** Identity of the signed-in account (account_menu endpoint). */
     suspend fun fetchAccountInfo(): YtAccountInfo? = withContext(Dispatchers.IO) {
         if (!ytAuth.connection.value.isConnected) return@withContext null
@@ -2381,6 +2411,8 @@ class InnerTubeMusicApi @Inject constructor(
         const val YT_HISTORY_BROWSE_ID = "FEmusic_history"
         const val YT_LIKED_BROWSE_ID = "VLLM"
         const val YT_HOME_BROWSE_ID = "FEmusic_home"
+        const val YT_NEW_RELEASES_BROWSE_ID = "FEmusic_new_releases"
+        const val YT_CHARTS_BROWSE_ID = "FEmusic_charts"
         const val MAX_CONTINUATION_PAGES = 600
         const val WRITE_ACTIONS_PER_REQUEST = 50
 

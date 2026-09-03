@@ -122,6 +122,17 @@ Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetStudioMasterClarity(
     }
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_lastwave_app_playback_NativeAudioEngine_nativeSetBitPerfect(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jboolean enabled) {
+    if (auto* engine = fromHandle(handle); engine != nullptr) {
+        engine->setBitPerfect(enabled == JNI_TRUE);
+    }
+}
+
 
 
 extern "C" JNIEXPORT void JNICALL
