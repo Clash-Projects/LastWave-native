@@ -22,34 +22,6 @@
   Files changed:
   `app/src/main/java/com/lastwave/app/playback/MusicPlaybackService.kt`
 
-### Added
-- **"Continue as guest" option on the login screen.**
-  Login was previously required before reaching the main app at all —
-  `Screen.Splash` routed straight to `Screen.Login` whenever `AuthState`
-  was `SignedOut`, with no way past it. Playback itself never depended on
-  being signed in (`MusicPlayer`/`LinkPlaybackResolver` don't reference
-  `AuthState`), so this was a navigation gate, not a playback requirement.
-
-  Added a guest path that skips Last.fm sign-in entirely, with no network
-  call:
-  - `SessionPreferences.continueAsGuest()` sets the session username to
-    the existing `"Guest User"` sentinel that `HomeRepository`,
-    `GenerateRepository`, and `TasteProfileProvider` already check for to
-    skip personalized/authenticated Last.fm calls — so those features
-    degrade gracefully instead of erroring with no session.
-  - `AuthRepository.continueAsGuest()` / `AuthViewModel.continueAsGuest()`
-    wire it through to the UI.
-  - `LoginScreen` gets a new "Continue as guest" button; existing
-    sign-in-success navigation (on `AuthState.SignedIn`) picks it up
-    automatically since guest mode resolves to that same state.
-
-  Files changed:
-  `app/src/main/java/com/lastwave/app/data/local/SessionPreferences.kt`,
-  `app/src/main/java/com/lastwave/app/data/repository/AuthRepository.kt`,
-  `app/src/main/java/com/lastwave/app/ui/auth/AuthViewModel.kt`,
-  `app/src/main/java/com/lastwave/app/ui/auth/LoginScreen.kt`,
-  `app/src/main/java/com/lastwave/app/ui/navigation/NavGraph.kt`
-
 ## 2026-09-02 — musaibbhat120605
 
 ### Fixed
