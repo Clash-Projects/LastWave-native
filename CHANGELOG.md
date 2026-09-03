@@ -1,5 +1,55 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Duplicate/overlapping "now playing" notification on Android 10 (One UI 2.x).**
+  `buildNotification()` used `Notification.DecoratedMediaCustomViewStyle`
+  with a `MediaSession` attached, alongside a fully custom `RemoteViews`
+  player (own artwork, title, artist, transport buttons). On Android 10 +
+  Samsung One UI 2.x, SystemUI's older media-notification renderer drew
+  its own full media chrome as a second layer instead of just framing the
+  custom view, producing two overlapping players in the notification
+  shade/quick controls.
+
+  Now version-gated: Android 11+ keeps `DecoratedMediaCustomViewStyle`
+  with the session attached as before; Android 10 and below uses
+  `Notification.DecoratedCustomViewStyle` (no session tag on the
+  notification itself). Lock screen controls, Bluetooth, Android Auto,
+  and the in-app widget are unaffected, since they all read from
+  `mediaSession` directly rather than this notification's `Style` object.
+
+  Files changed:
+  `app/src/main/java/com/lastwave/app/playback/MusicPlaybackService.kt`
+
+### Added
+- **"Continue as guest" option on the login screen.**
+  Login was previously required before reaching the main app at all —
+  `Screen.Splash` routed straight to `Screen.Login` whenever `AuthState`
+  was `SignedOut`, with no way past it. Playback itself never depended on
+  being signed in (`MusicPlayer`/`LinkPlaybackResolver` don't reference
+  `AuthState`), so this was a navigation gate, not a playback requirement.
+
+  Added a guest path that skips Last.fm sign-in entirely, with no network
+  call:
+  - `SessionPreferences.continueAsGuest()` sets the session username to
+    the existing `"Guest User"` sentinel that `HomeRepository`,
+    `GenerateRepository`, and `TasteProfileProvider` already check for to
+    skip personalized/authenticated Last.fm calls — so those features
+    degrade gracefully instead of erroring with no session.
+  - `AuthRepository.continueAsGuest()` / `AuthViewModel.continueAsGuest()`
+    wire it through to the UI.
+  - `LoginScreen` gets a new "Continue as guest" button; existing
+    sign-in-success navigation (on `AuthState.SignedIn`) picks it up
+    automatically since guest mode resolves to that same state.
+
+  Files changed:
+  `app/src/main/java/com/lastwave/app/data/local/SessionPreferences.kt`,
+  `app/src/main/java/com/lastwave/app/data/repository/AuthRepository.kt`,
+  `app/src/main/java/com/lastwave/app/ui/auth/AuthViewModel.kt`,
+  `app/src/main/java/com/lastwave/app/ui/auth/LoginScreen.kt`,
+  `app/src/main/java/com/lastwave/app/ui/navigation/NavGraph.kt`
+
 ## 2026-09-02 — musaibbhat120605
 
 ### Fixed

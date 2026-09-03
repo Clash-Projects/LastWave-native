@@ -622,7 +622,7 @@ fun SettingsScreen(
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Audio & Streaming")
-                    val qualitySubtitle = when (misc.qobuzQuality) {
+                    val qualitySubtitle = when (misc.losslessQuality) {
                         27 -> "Max (Up to 24-bit / 192 kHz)"
                         7 -> "Hi-Res (24-bit / 96 kHz)"
                         6 -> "CD Lossless (16-bit / 44.1 kHz FLAC)"
@@ -638,7 +638,7 @@ fun SettingsScreen(
                                 icon = Icons.Filled.HighQuality,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Qobuz-first Streaming",
+                                title = "Lossless-first Streaming",
                                 subtitle = "$qualitySubtitle \u2022 YouTube Music fallback",
                                 onClick = { showQualityDialog = true },
                                 position = position,
@@ -1096,11 +1096,11 @@ fun SettingsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     tiers.forEach { (qualityId, title, meta) ->
                         val (subtitle, badge) = meta
-                        val isSelected = misc.qobuzQuality == qualityId
+                        val isSelected = misc.losslessQuality == qualityId
                         Surface(
                             onClick = {
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                viewModel.setQobuzQuality(qualityId)
+                                viewModel.setLosslessQuality(qualityId)
                                 showQualityDialog = false
                             },
                             shape = RoundedCornerShape(20.dp),

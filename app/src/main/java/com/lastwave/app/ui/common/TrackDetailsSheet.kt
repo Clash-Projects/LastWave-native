@@ -71,7 +71,7 @@ import com.lastwave.app.data.local.SessionPreferences
 import com.lastwave.app.data.model.RecentTracksEnvelope
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.data.network.LastFmApiService
-import com.lastwave.app.data.qobuz.QobuzMusicApi
+import com.lastwave.app.data.lossless.LosslessMusicApi
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -100,8 +100,8 @@ data class TrackSpecs(
     val qualityBadge: String = "Resolving...",
     val audioCodec: String = "Detecting...",
     val bitDepthSampleRate: String = "Analyzing...",
-    val provider: String = "Qobuz / YouTube",
-    val isQobuz: Boolean = false,
+    val provider: String = "Lossless / YouTube",
+    val isLossless: Boolean = false,
     val durationText: String = "--:--",
     val downloadedEntity: DownloadedTrackEntity? = null,
     val isDownloading: Boolean = false,
@@ -115,7 +115,7 @@ data class TrackSpecs(
 
 @HiltViewModel
 class TrackDetailsViewModel @Inject constructor(
-    private val qobuzMusicApi: QobuzMusicApi,
+    private val losslessMusicApi: LosslessMusicApi,
     private val innerTube: InnerTubeMusicApi,
     private val downloadedTrackDao: DownloadedTrackDao,
     private val downloadManager: TrackDownloadManager,
@@ -253,19 +253,19 @@ class TrackDetailsViewModel @Inject constructor(
                 }
 
                 // 3. Audio stream resolution
-                val qobuzStream = runCatching {
-                    qobuzMusicApi.resolveStream(title, artist, preferredQuality = QobuzMusicApi.QUALITY_MAX_HI_RES)
+                val losslessStream = runCatching {
+                    losslessMusicApi.resolveStream(title, artist, preferredQuality = LosslessMusicApi.QUALITY_MAX_HI_RES)
                 }.getOrNull()
 
-                if (qobuzStream != null) {
+                if (losslessStream != null) {
                     val badge = when {
-                        qobuzStream.bitDepth > 16 || qobuzStream.samplingRate > 48.0 -> "24-BIT HI-RES"
-                        qobuzStream.formatId == QobuzMusicApi.QUALITY_CD_LOSSLESS -> "CD LOSSLESS"
-                        qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320 -> "320k MP3"
+                        losslessStream.bitDepth > 16 || losslessStream.samplingRate > 48.0 -> "24-BIT HI-RES"
+                        losslessStream.formatId == LosslessMusicApi.QUALITY_CD_LOSSLESS -> "CD LOSSLESS"
+                        losslessStream.formatId == LosslessMusicApi.QUALITY_MP3_320 -> "320k MP3"
                         else -> "FLAC"
                     }
-                    val codec = if (qobuzStream.formatId == QobuzMusicApi.QUALITY_MP3_320) "MPEG Layer 3 (MP3)" else "Free Lossless Audio Codec (FLAC)"
-                    val depthRate = "${qobuzStream.bitDepth}-bit / ${qobuzStream.samplingRate} kHz (${qobuzStream.bitrateKbps ?: 0} kbps)"
+                    val codec = if (losslessStream.formatId == LosslessMusicApi.QUALITY_MP3_320) "MPEG Layer 3 (MP3)" else "Free Lossless Audio Codec (FLAC)"
+                    val depthRate = "${losslessStream.bitDepth}-bit / ${losslessStream.samplingRate} kHz (${losslessStream.bitrateKbps ?: 0} kbps)"
                     val durText = downloaded?.durationMs?.takeIf { it > 0L }?.let { ms ->
                         val dur = (ms / 1000).toInt()
                         "%d:%02d".format(dur / 60, dur % 60)
@@ -275,8 +275,8 @@ class TrackDetailsViewModel @Inject constructor(
                         qualityBadge = badge,
                         audioCodec = codec,
                         bitDepthSampleRate = depthRate,
-                        provider = "Qobuz Lossless Master CDN",
-                        isQobuz = true,
+                        provider = "Lossless Master CDN",
+                        isLossless = true,
                         durationText = durText,
                     )
                 } else {
@@ -295,7 +295,7 @@ class TrackDetailsViewModel @Inject constructor(
                         audioCodec = codec,
                         bitDepthSampleRate = "16-bit / 48.0 kHz ($bitrate)",
                         provider = "YouTube Music CDN",
-                        isQobuz = false,
+                        isLossless = false,
                     )
                 }
             }
