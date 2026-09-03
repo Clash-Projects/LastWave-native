@@ -233,10 +233,10 @@ class QobuzMusicApi @Inject constructor(
     }
 
     private fun fetchTrackStreamUrl(
-        candidate: LosslessTrackItem,
+        candidate: QobuzTrackItem,
         quality: Int,
         fallback: Boolean,
-    ): LosslessAudioStream? {
+    ): QobuzAudioStream? {
         val urlBuilder = "$BACKEND_BASE_URL/api/track/${candidate.id}/url".toHttpUrlOrNull()?.newBuilder()
             ?: return null
         urlBuilder.addQueryParameter("quality", quality.toString())
