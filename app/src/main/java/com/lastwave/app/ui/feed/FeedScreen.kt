@@ -82,16 +82,6 @@ fun FeedScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val liquidGlass = LocalLiquidGlass.current
 
-    val greeting = remember {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        when (hour) {
-            in 5..11 -> "Good morning"
-            in 12..16 -> "Good afternoon"
-            in 17..22 -> "Good evening"
-            else -> "Good night"
-        }
-    }
-
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,
         onRefresh = viewModel::refresh,
@@ -99,8 +89,8 @@ fun FeedScreen(
     ) {
         Column(Modifier.fillMaxSize()) {
             ExpressiveHeader(
-                title = greeting,
-                subtitle = "Discover & Listen",
+                title = "LastWave",
+                subtitle = null,
                 actions = {
                     HeaderActionIcon(
                         icon = Icons.Filled.Explore,
