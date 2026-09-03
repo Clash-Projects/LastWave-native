@@ -69,7 +69,6 @@ fun LoginScreen(
     onSignOut: () -> Unit,
     onRestoreBackupAndSignIn: (String) -> Unit,
     onDismissError: () -> Unit,
-    onContinueAsGuest: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var restoreReadError by remember { mutableStateOf<String?>(null) }
@@ -192,14 +191,6 @@ fun LoginScreen(
                                     modifier = Modifier.padding(end = 8.dp),
                                 )
                                 Text("Restore backup & login")
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            TextButton(
-                                onClick = onContinueAsGuest,
-                                enabled = !busy,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Text("Continue as guest")
                             }
                             Spacer(Modifier.height(12.dp))
                             Text(

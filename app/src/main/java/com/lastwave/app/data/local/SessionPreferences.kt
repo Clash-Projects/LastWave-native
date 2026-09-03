@@ -98,19 +98,6 @@ class SessionPreferences @Inject constructor(
         dataStore.edit { it[Keys.SESSION_KEY] = key }
     }
 
-    /** Guest mode — skips Last.fm sign-in entirely. Username is set to the
-     *  sentinel "Guest User" string that HomeRepository/GenerateRepository/
-     *  TasteProfileProvider already check for to skip personalized/
-     *  authenticated calls, so no other repository needs to special-case
-     *  GUEST_MODE directly. No network round-trip, unlike signIn(). */
-    suspend fun continueAsGuest() {
-        dataStore.edit {
-            it[Keys.USERNAME] = "Guest User"
-            it.remove(Keys.SESSION_KEY)
-            it[Keys.GUEST_MODE] = true
-        }
-    }
-
     suspend fun signOut() {
         dataStore.edit {
             it.remove(Keys.SESSION_KEY)

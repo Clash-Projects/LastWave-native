@@ -54,13 +54,6 @@ class AuthViewModel @Inject constructor(
         _webAuthState.value = WebAuthState.AwaitingApproval(authRepository.authUrl())
     }
 
-    /** Skips Last.fm sign-in entirely and drops straight into the app. */
-    fun continueAsGuest() {
-        viewModelScope.launch {
-            authRepository.continueAsGuest()
-        }
-    }
-
     fun signInDirect(username: String) {
         if (username.isBlank()) return
         _webAuthState.value = WebAuthState.CompletingSignIn
