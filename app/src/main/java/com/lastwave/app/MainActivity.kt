@@ -39,6 +39,11 @@ class MainActivity : ComponentActivity() {
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
+    /** Read access to the device's own music, so the local library can index
+     *  songs the user already has rather than only LastWave's downloads. */
+    private val audioLibraryPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must be called before super.onCreate() and before setContent().
         val splashScreen = runCatching { installSplashScreen() }
@@ -72,6 +77,16 @@ class MainActivity : ComponentActivity() {
         ) {
             runCatching { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
                 .onFailure { android.util.Log.w(STARTUP_TAG, "Notification permission request skipped", it) }
+        }
+
+        val audioPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        if (checkSelfPermission(audioPermission) != PackageManager.PERMISSION_GRANTED) {
+            runCatching { audioLibraryPermission.launch(audioPermission) }
+                .onFailure { android.util.Log.w(STARTUP_TAG, "Audio library permission request skipped", it) }
         }
 
         setContent {
