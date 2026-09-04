@@ -8,6 +8,7 @@ import com.lastwave.app.data.backup.RestoreResult
 import com.lastwave.app.data.generate.GenerateRepository
 import com.lastwave.app.data.local.AccentMode
 import com.lastwave.app.data.local.EqualizerSettings
+import com.lastwave.app.data.local.LyricsUiVersion
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.local.ScrobblerSettings
@@ -89,10 +90,15 @@ class SettingsViewModel @Inject constructor(
     private val downloadedTrackDao: com.lastwave.app.data.local.db.DownloadedTrackDao,
     val playlistImportManager: com.lastwave.app.data.playlist.PlaylistImportManager,
     val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
+    val appUpdateManager: com.lastwave.app.data.update.AppUpdateManager,
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
 
     val authState: StateFlow<com.lastwave.app.data.model.AuthState> = authRepository.authState
+    val updateInfo = appUpdateManager.updateInfo
+
+    fun checkForUpdates() = appUpdateManager.checkForUpdate(isSilent = false)
+    fun openUpdate(context: android.content.Context) = appUpdateManager.openUpdate(context)
 
     /** YouTube Music account connection + playlist-sync state (§ YouTube Music). */
     val ytConnection: StateFlow<com.lastwave.app.data.ytmusic.YtConnection> = ytAuthManager.connection
@@ -249,6 +255,7 @@ class SettingsViewModel @Inject constructor(
         runCatching { audioEngine.get().setBitPerfect(enabled) }
         launchSettingsAction("update Bit-Perfect mode") { settingsPreferences.setBitPerfectEnabled(enabled) }
     }
+    fun setLyricsUiVersion(version: LyricsUiVersion) = launchSettingsAction("update lyrics UI version") { settingsPreferences.setLyricsUiVersion(version) }
     fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
     fun setCrossfadeEnabled(enabled: Boolean) = launchSettingsAction("update crossfade") { settingsPreferences.setCrossfadeEnabled(enabled) }
     fun setCrossfadeSeconds(seconds: Int) = launchSettingsAction("update crossfade duration") {

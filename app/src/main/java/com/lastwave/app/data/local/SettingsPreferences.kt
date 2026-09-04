@@ -12,6 +12,16 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
+enum class LyricsUiVersion(val id: String, val title: String) {
+    CLASSIC("classic", "Classic"),
+    MODERN("modern", "Modern");
+
+    companion object {
+        fun fromId(id: String?): LyricsUiVersion =
+            entries.firstOrNull { it.id == id } ?: CLASSIC
+    }
+}
+
 enum class LyricsAnimation(val id: String, val title: String, val description: String) {
     APPLE_FLUID("apple_fluid", "Apple Fluid", "Smooth spring scaling with dynamic focal tracking"),
     KARAOKE_PULSE("karaoke_pulse", "Karaoke Pulse", "Rhythmic scale pop with energetic spring bounce"),
@@ -57,6 +67,8 @@ data class MiscSettings(
     val isStudioMasterClarityEnabled: Boolean = false,
     /** When true, completely bypasses DSP, EQ, tone effects, and software volume ducking for bit-exact audio. */
     val isBitPerfectEnabled: Boolean = false,
+    /** Lyrics UI layout version (Classic or Modern). */
+    val lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.CLASSIC,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     /** Blend the end of one queued track into the beginning of the next. */
@@ -85,6 +97,7 @@ class SettingsPreferences @Inject constructor(
         val DOWNLOAD_QUALITY = intPreferencesKey("lw_download_quality")
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
         val BIT_PERFECT_ENABLED = booleanPreferencesKey("lw_bit_perfect_enabled")
+        val LYRICS_UI_VERSION = stringPreferencesKey("lw_lyrics_ui_version")
         val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
         val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
@@ -104,6 +117,7 @@ class SettingsPreferences @Inject constructor(
                 downloadQuality = p.readSafely(Keys.DOWNLOAD_QUALITY)?.takeIf { it in DOWNLOAD_QUALITIES } ?: 27,
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: false,
                 isBitPerfectEnabled = p.readSafely(Keys.BIT_PERFECT_ENABLED) ?: false,
+                lyricsUiVersion = LyricsUiVersion.fromId(p.readSafely(Keys.LYRICS_UI_VERSION)),
                 lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 12),
@@ -142,6 +156,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setStudioMasterClarity(enabled: Boolean) {
         dataStore.edit { it[Keys.MUSIC_ENHANCER] = enabled }
+    }
+
+    suspend fun setLyricsUiVersion(version: LyricsUiVersion) {
+        dataStore.edit { it[Keys.LYRICS_UI_VERSION] = version.id }
     }
 
     suspend fun setBitPerfectEnabled(enabled: Boolean) {

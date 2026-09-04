@@ -13,6 +13,7 @@ private const val RTAG = "RecommendationEngine"
 /** Core recommendation constants plus a bounded API-refill guard. */
 private const val RECO_MAX_CYCLES = 5
 private const val RECO_REFILL_ATTEMPTS = 24
+private const val RECO_MAX_STALLED_ROUNDS = 2
 private const val RECO_ARTIST_CAP = 2
 private const val RECO_ALBUM_CAP = 2
 private const val RECO_GENRE_CAP_RATIO = 0.35
@@ -524,7 +525,9 @@ class RecommendationEngine(
         ctx.addAll(profile.ytMusicFeedRaw.take(40), 3, "yt-feed")
 
         var cycle = 1
+        var stalledCycles = 0
         while (cycle <= RECO_MAX_CYCLES && (cycle == 1 || ctx.pool.size < total)) {
+            val poolSizeBeforeCycle = ctx.pool.size
             onProgress(if (cycle == 1) "Reading your listening mood\u2026" else "Digging deeper for more discoveries (round $cycle)\u2026")
 
             srcSimilarTracks(ctx, cycle)
@@ -541,13 +544,19 @@ class RecommendationEngine(
             val freshCount = ctx.pool.keys.count { it in freshKeys }
             Log.d(RTAG, "cycle $cycle: pool=${ctx.pool.size} unique, fresh=$freshCount, need=$total")
 
+            stalledCycles = if (ctx.pool.size == poolSizeBeforeCycle) stalledCycles + 1 else 0
+            if (stalledCycles >= RECO_MAX_STALLED_ROUNDS) break
             cycle++
         }
 
         var refillAttempt = 0
+        var stalledRefills = 0
         while (ctx.pool.size < total && refillAttempt < RECO_REFILL_ATTEMPTS) {
+            val poolSizeBeforeRefill = ctx.pool.size
             onProgress("Finding fresh tracks\u2026 ${ctx.pool.size}/$total")
             srcFreshRefill(ctx, refillAttempt)
+            stalledRefills = if (ctx.pool.size == poolSizeBeforeRefill) stalledRefills + 1 else 0
+            if (stalledRefills >= RECO_MAX_STALLED_ROUNDS) break
             refillAttempt++
         }
 

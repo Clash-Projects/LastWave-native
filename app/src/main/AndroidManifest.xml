@@ -3,6 +3,7 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
@@ -127,12 +128,13 @@
                 android:resource="@xml/now_playing_widget_info" />
         </receiver>
 
-        <!-- Receiver for canceling active background downloads from the notification action -->
+        <!-- Receiver for cancel/reconnect actions on background-download notifications -->
         <receiver
             android:name=".data.download.DownloadCancelReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.lastwave.app.ACTION_CANCEL_DOWNLOAD" />
+                <action android:name="com.lastwave.app.ACTION_RECONNECT_DOWNLOAD" />
             </intent-filter>
         </receiver>
 

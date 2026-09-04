@@ -59,6 +59,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -162,6 +163,7 @@ class MusicPlayer @Inject constructor(
     private val nativeAudioEngine: dagger.Lazy<NativeAudioEngine>,
     private val audioEffectsEngine: AudioEffectsEngine,
     private val applicationScope: CoroutineScope,
+    private val downloadedTrackDao: dagger.Lazy<com.lastwave.app.data.local.db.DownloadedTrackDao>,
 ) {
     private val appContext = context.applicationContext
     private val playbackPreferences = appContext.getSharedPreferences(
@@ -295,6 +297,19 @@ class MusicPlayer @Inject constructor(
                     ?.customCacheKey
                     ?.let(preparedStreams::get)
                     ?.let(::publishResolvedQuality)
+                val isNaturalTransition = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
+                if (crossfadeEnabled && crossfadeDurationMs > 0L && isNaturalTransition) {
+                    incomingCrossfadeMediaId = mediaItem.mediaId
+                    incomingCrossfadeStartVolume = player.volume
+                        .coerceIn(0f, 1f)
+                        .takeIf { it < 0.99f }
+                        ?: 0f
+                    player.volume = incomingCrossfadeStartVolume
+                } else {
+                    incomingCrossfadeMediaId = null
+                    player.volume = 1f
+                }
                 // Queue placeholders are intentionally non-playable until
                 // their signed stream has been resolved. Resolve an item
                 // before Media3 can attempt to open its lastwave:// URI.
@@ -309,19 +324,6 @@ class MusicPlayer @Inject constructor(
                         resolveAndPlayQueueItem(currentIndex)
                     }
                     return
-                }
-                val isNaturalTransition = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
-                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
-                if (crossfadeEnabled && crossfadeDurationMs > 0L && isNaturalTransition) {
-                    incomingCrossfadeMediaId = mediaItem.mediaId
-                    incomingCrossfadeStartVolume = player.volume
-                        .coerceIn(0f, 1f)
-                        .takeIf { it < 0.99f }
-                        ?: 0f
-                    player.volume = incomingCrossfadeStartVolume
-                } else {
-                    incomingCrossfadeMediaId = null
-                    player.volume = 1f
                 }
                 if (currentTrack.playbackUrl != null) {
                     applicationScope.launch(Dispatchers.IO) {
@@ -347,6 +349,9 @@ class MusicPlayer @Inject constructor(
             val trackVideoId = currentTrack?.videoId
             val failedIndex = player.currentMediaItemIndex
             val failedMediaId = player.currentMediaItem?.mediaId
+            if (failedMediaId != null && resolvingMediaIds.containsKey(failedMediaId)) {
+                return
+            }
             val rejectedStream = player.currentMediaItem
                 ?.localConfiguration
                 ?.customCacheKey
@@ -1312,8 +1317,17 @@ class MusicPlayer @Inject constructor(
                 val index = item.index
                 withContext(Dispatchers.Main.immediate) {
                     // NEVER replace the currently playing item, as replaceMediaItem resets the player buffer and interrupts playback midway
-                    if (index != player.currentMediaItemIndex && index in 0 until player.mediaItemCount && player.getMediaItemAt(index).mediaId == expectedMediaId) {
-                        player.replaceMediaItem(index, enriched.toMediaItem())
+                    val queuedItem = if (index in 0 until player.mediaItemCount) player.getMediaItemAt(index) else null
+                    if (index != player.currentMediaItemIndex && queuedItem?.mediaId == expectedMediaId) {
+                        val prepared = queuedItem.localConfiguration
+                            ?.customCacheKey
+                            ?.let(preparedStreams::get)
+                            ?.takeUnless { it.isExpired() }
+                            ?.takeIf { stream ->
+                                val streamVideoId = stream.youtubeCandidate?.videoId
+                                streamVideoId == null || enriched.videoId == null || streamVideoId == enriched.videoId
+                            }
+                        player.replaceMediaItem(index, enriched.toMediaItem(prepared))
                     }
                 }
             }
@@ -1337,7 +1351,7 @@ class MusicPlayer @Inject constructor(
 
     private fun preloadNextTrack(nextIndex: Int, nextTrack: PlayableTrack?) {
         if (nextTrack == null) return
-        val expectedMediaId = nextTrack.mediaIdKey()
+        val expectedQueueKey = nextTrack.queueKey()
         preloadJob?.cancel()
         preloadJob = applicationScope.launch(Dispatchers.IO) {
             delay(NEXT_TRACK_PREFETCH_DELAY_MS)
@@ -1348,14 +1362,20 @@ class MusicPlayer @Inject constructor(
                 .getOrNull() ?: return@launch
 
             val installed = withContext(Dispatchers.Main.immediate) {
-                if (nextIndex !in 0 until player.mediaItemCount ||
-                    player.getMediaItemAt(nextIndex).mediaId != expectedMediaId ||
-                    nextIndex == player.currentMediaItemIndex
+                val queuedTrack = (if (nextIndex in 0 until player.mediaItemCount) {
+                    player.getMediaItemAt(nextIndex).toPlayableTrack()
+                } else null) ?: return@withContext false
+                if (queuedTrack.queueKey() != expectedQueueKey || nextIndex == player.currentMediaItemIndex) {
+                    return@withContext false
+                }
+                val resolvedVideoId = resolved.youtubeCandidate?.videoId
+                if (resolvedVideoId != null && queuedTrack.videoId != null &&
+                    resolvedVideoId != queuedTrack.videoId
                 ) {
                     return@withContext false
                 }
                 registerPreparedStream(resolved)
-                player.replaceMediaItem(nextIndex, nextTrack.toMediaItem(resolved))
+                player.replaceMediaItem(nextIndex, queuedTrack.toMediaItem(resolved))
                 logStreamEvent("next-prepared", resolved, retry = 0)
                 true
             }
@@ -1603,11 +1623,103 @@ class MusicPlayer @Inject constructor(
         val youtubeCandidate: YouTubeAudioStream? = null,
     )
 
+    private suspend fun resolveLocalDownloadedAudioStream(track: PlayableTrack): ResolvedStream? {
+        val title = track.title.trim()
+        val artist = track.artist.trim()
+        if (title.isBlank() || artist.isBlank()) return null
+
+        val trackKey = "${artist.lowercase()}_${title.lowercase()}"
+        val downloaded = runCatching {
+            val dao = downloadedTrackDao.get()
+            dao.findByTrackKey(trackKey) ?: dao.findByTitleAndArtist(title, artist)
+        }.getOrNull() ?: return null
+
+        val uriString = downloaded.mediaStoreUri?.takeIf(String::isNotBlank)
+            ?: downloaded.filePath.takeIf(String::isNotBlank)
+            ?: return null
+
+        val isAccessible = when {
+            uriString.startsWith("content://") -> runCatching {
+                appContext.contentResolver.openInputStream(Uri.parse(uriString))?.use { }
+                true
+            }.getOrDefault(false)
+            else -> runCatching {
+                val file = if (uriString.startsWith("file://")) {
+                    File(Uri.parse(uriString).path.orEmpty())
+                } else {
+                    File(uriString)
+                }
+                file.exists() && file.length() > 0
+            }.getOrDefault(false)
+        }
+
+        if (!isAccessible) {
+            // Stale database record; file was deleted externally outside the app
+            runCatching { downloadedTrackDao.get().delete(downloaded) }
+            return null
+        }
+
+        val playbackUri = if (uriString.startsWith("/") && !uriString.startsWith("file://")) {
+            Uri.fromFile(File(uriString)).toString()
+        } else {
+            uriString
+        }
+
+        val mime = when {
+            downloaded.filePath.endsWith(".flac", ignoreCase = true) || downloaded.formatBadge.contains("FLAC") -> "audio/flac"
+            downloaded.filePath.endsWith(".m4a", ignoreCase = true) || downloaded.filePath.endsWith(".mp4", ignoreCase = true) || downloaded.formatBadge.contains("M4A") -> "audio/mp4"
+            downloaded.filePath.endsWith(".opus", ignoreCase = true) || downloaded.formatBadge.contains("OPUS") -> "audio/ogg"
+            downloaded.filePath.endsWith(".mp3", ignoreCase = true) || downloaded.formatBadge.contains("MP3") -> "audio/mpeg"
+            else -> "audio/flac"
+        }
+
+        var bitDepth: Int? = null
+        var samplingRateKHz: Double? = null
+        var bitrateKbps: Int? = downloaded.bitrateKbps
+
+        runCatching {
+            val retriever = android.media.MediaMetadataRetriever()
+            try {
+                if (playbackUri.startsWith("content://")) {
+                    retriever.setDataSource(appContext, Uri.parse(playbackUri))
+                } else {
+                    retriever.setDataSource(playbackUri.removePrefix("file://"))
+                }
+                if (bitrateKbps == null || bitrateKbps == 0) {
+                    bitrateKbps = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toIntOrNull()?.let { it / 1000 }
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    samplingRateKHz = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_SAMPLERATE)?.toDoubleOrNull()?.let { it / 1000.0 }
+                    bitDepth = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_BITS_PER_SAMPLE)?.toIntOrNull()
+                }
+            } finally {
+                retriever.release()
+            }
+        }
+
+        return ResolvedStream(
+            url = playbackUri,
+            mimeType = mime,
+            bitrateKbps = bitrateKbps,
+            audioCodec = downloaded.formatBadge,
+            cacheKey = "local:$trackKey",
+            isLossless = downloaded.isLossless,
+            bitDepth = bitDepth,
+            samplingRateKHz = samplingRateKHz,
+        )
+    }
+
     private suspend fun resolveTrackAudioStream(
         track: PlayableTrack,
         videoId: String?,
         allowLossless: Boolean = true,
     ): ResolvedStream = withContext(Dispatchers.IO) {
+        // Prioritize locally downloaded file if already saved to storage — enables
+        // seamless offline playback across all screens and saves mobile data (Issue #31).
+        resolveLocalDownloadedAudioStream(track)?.let { localStream ->
+            return@withContext localStream
+        }
+
         val misc = runCatching { settingsPreferences.settings.first() }.getOrDefault(MiscSettings())
         if (!allowLossless) return@withContext resolveYoutubeTrackAudioStream(track, videoId)
 

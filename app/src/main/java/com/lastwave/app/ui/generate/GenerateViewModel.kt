@@ -7,9 +7,12 @@ import com.lastwave.app.data.generate.GenerateRepository
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.GenerationStatus
 import com.lastwave.app.data.generate.RECOMMENDATION_TRACK_COUNT
+import com.lastwave.app.data.generate.youtubeVideoIdOrNull
 import com.lastwave.app.data.naming.PlaylistNamer
 import com.lastwave.app.data.playlist.PlaylistRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -17,17 +20,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import javax.inject.Inject
+
+private const val GENERATION_TIMEOUT_MS = 60_000L
 
 /** Port of generator.html's exact 8-mode list (data-mode attributes, in order). */
 enum class GenerateMode(val label: String, val description: String, val storageValue: String) {
     TOP("Top Tracks", "Your most played tracks of all time", "top"),
     RECENT("Recent Tracks", "What you've been listening to lately", "recent"),
-    SIMILAR_TRACKS("Similar Tracks", "Tracks similar to one you love", "similar-tracks"),
-    SIMILAR_ARTISTS("Similar Artists", "Discover artists like your favourites", "similar-artists"),
-    TAG("By Tag / Genre", "Browse by genre like rock, lofi, jazz", "tag"),
-    MIX("My Mix", "Smart blend of top, recent & similar", "mix"),
-    RECOMMENDATIONS("My Recommendation", "35 fresh tracks for you", "recommendations"),
+    SIMILAR_TRACKS("Song Radio", "Related picks from Last.fm + YouTube Music", "similar-tracks"),
+    SIMILAR_ARTISTS("Similar Artists", "Cross-engine artist discovery", "similar-artists"),
+    TAG("By Tag / Genre", "Genre picks from Last.fm + YouTube Music", "tag"),
+    MIX("My Mix", "Smart blend of taste, radio & deep cuts", "mix"),
+    RECOMMENDATIONS("My Recommendation", "35 dual-engine discoveries", "recommendations"),
     LIBRARY("My Library", "Re-discover the sounds of your past", "library"),
 }
 
@@ -51,6 +57,7 @@ data class GenerateUiState(
     val period: String = "overall",
     val seedTrackName: String = "",
     val seedArtistName: String = "",
+    val seedVideoId: String? = null,
     val seedArtistQuery: String = "",
     val tagInput: String = "",
     val seedTrackResults: List<GeneratedTrack> = emptyList(),
@@ -95,6 +102,7 @@ class GenerateViewModel @Inject constructor(
                         selectedMode = GenerateMode.SIMILAR_TRACKS,
                         seedTrackName = seed.trackName,
                         seedArtistName = seed.artistName,
+                        seedVideoId = null,
                         error = null,
                     )
                 }
@@ -115,8 +123,8 @@ class GenerateViewModel @Inject constructor(
     fun setPeriod(value: String) = _uiState.update { it.copy(period = value) }
     fun setTagInput(value: String) = _uiState.update { it.copy(tagInput = value) }
     fun setSeedArtistQuery(value: String) = _uiState.update { it.copy(seedArtistQuery = value) }
-    fun setSeedTrackName(value: String) = _uiState.update { it.copy(seedTrackName = value) }
-    fun setSeedArtistName(value: String) = _uiState.update { it.copy(seedArtistName = value) }
+    fun setSeedTrackName(value: String) = _uiState.update { it.copy(seedTrackName = value, seedVideoId = null) }
+    fun setSeedArtistName(value: String) = _uiState.update { it.copy(seedArtistName = value, seedVideoId = null) }
 
     fun loadTopTracksForSeed() {
         viewModelScope.launch {
@@ -170,7 +178,14 @@ class GenerateViewModel @Inject constructor(
         }
     }
 
-    fun pickSeedTrack(track: GeneratedTrack) = _uiState.update { it.copy(seedTrackName = track.name, seedArtistName = track.artist, seedTrackResults = emptyList()) }
+    fun pickSeedTrack(track: GeneratedTrack) = _uiState.update {
+        it.copy(
+            seedTrackName = track.name,
+            seedArtistName = track.artist,
+            seedVideoId = track.youtubeVideoIdOrNull(),
+            seedTrackResults = emptyList(),
+        )
+    }
     fun pickSeedArtist(name: String) = _uiState.update { it.copy(seedArtistQuery = name, seedArtistResults = emptyList()) }
     fun setGenreChip(tag: String) = _uiState.update { it.copy(tagInput = tag) }
 
@@ -203,7 +218,7 @@ class GenerateViewModel @Inject constructor(
                     generationStatus.update(isGenerating = true, message = msg)
                 }
 
-                onProgress("Gathering recommendations\u2026")
+                onProgress("Blending Last.fm and YouTube Music\u2026")
 
                 val targetCount = if (mode == GenerateMode.RECOMMENDATIONS) {
                     RECOMMENDATION_TRACK_COUNT
@@ -218,15 +233,22 @@ class GenerateViewModel @Inject constructor(
                     (targetCount + maxOf(10, targetCount / 2)).coerceAtMost(60)
                 }
 
-                val raw: List<GeneratedTrack> = when (mode) {
-                    GenerateMode.TOP -> repository.fetchTopTracks(candidateCount, state.period)
-                    GenerateMode.LIBRARY -> repository.fetchTopTracks(candidateCount, state.period)
-                    GenerateMode.RECENT -> repository.fetchRecentTracks(candidateCount)
-                    GenerateMode.SIMILAR_TRACKS -> repository.fetchSimilarTracks(state.seedTrackName, state.seedArtistName, candidateCount)
-                    GenerateMode.SIMILAR_ARTISTS -> repository.fetchSimilarArtistTracks(state.seedArtistQuery, candidateCount)
-                    GenerateMode.TAG -> repository.fetchTagTracks(state.tagInput, candidateCount)
-                    GenerateMode.MIX -> repository.fetchMix(candidateCount, onProgress)
-                    GenerateMode.RECOMMENDATIONS -> repository.fetchRecommendations(targetCount, onProgress)
+                val raw: List<GeneratedTrack> = withTimeout(GENERATION_TIMEOUT_MS) {
+                    when (mode) {
+                        GenerateMode.TOP -> repository.fetchTopTracks(candidateCount, state.period)
+                        GenerateMode.LIBRARY -> repository.fetchTopTracks(candidateCount, state.period)
+                        GenerateMode.RECENT -> repository.fetchRecentTracks(candidateCount)
+                        GenerateMode.SIMILAR_TRACKS -> repository.fetchSimilarTracks(
+                            track = state.seedTrackName,
+                            artist = state.seedArtistName,
+                            limit = candidateCount,
+                            seedVideoId = state.seedVideoId,
+                        )
+                        GenerateMode.SIMILAR_ARTISTS -> repository.fetchSimilarArtistTracks(state.seedArtistQuery, candidateCount)
+                        GenerateMode.TAG -> repository.fetchTagTracks(state.tagInput, candidateCount)
+                        GenerateMode.MIX -> repository.fetchMix(candidateCount, onProgress)
+                        GenerateMode.RECOMMENDATIONS -> repository.fetchRecommendations(targetCount, onProgress)
+                    }
                 }
 
                 onProgress("Pre-checking availability\u2026")
@@ -272,8 +294,6 @@ class GenerateViewModel @Inject constructor(
                 // Cover-art enrichment keeps running in the background and
                 // updates rows reactively via ArtworkRepository's own flow,
                 // so we don't make the user wait on it before showing the result.
-                _uiState.update { it.copy(isGenerating = false) }
-                generationStatus.update(isGenerating = false)
                 viewModelScope.launch {
                     try {
                         artworkRepository.enrichBatch(finalTracks.take(8).map { it.name to it.artist })
@@ -281,8 +301,14 @@ class GenerateViewModel @Inject constructor(
                 }
 
                 _navEvents.tryEmit(GenerateNavEvent.NavigateToPlaylistLoading)
+            } catch (_: TimeoutCancellationException) {
+                _uiState.update { it.copy(error = "Playlist generation timed out. Check your connection and try again.") }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
             } catch (e: Exception) {
-                _uiState.update { it.copy(isGenerating = false, error = e.message ?: "Couldn't generate a playlist") }
+                _uiState.update { it.copy(error = e.message ?: "Couldn't generate a playlist") }
+            } finally {
+                _uiState.update { it.copy(isGenerating = false) }
                 generationStatus.update(isGenerating = false)
             }
         }

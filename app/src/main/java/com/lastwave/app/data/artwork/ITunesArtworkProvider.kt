@@ -52,22 +52,21 @@ class ITunesArtworkProvider @Inject constructor(
             }
     }
 
-    private fun fetchByTerm(term: String): String? {
+    private suspend fun fetchByTerm(term: String): String? {
         val url = "https://itunes.apple.com/search?term=${URLEncoder.encode(term, "UTF-8")}&media=music&entity=song&limit=1"
         try {
             val request = Request.Builder().url(url).build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val body = response.body?.string().orEmpty()
-                val parsed = json.decodeFromString<ITunesSearchResponse>(body)
-                val raw = parsed.results.firstOrNull()?.let { it.artworkUrl100 ?: it.artworkUrl60 }
-                return raw?.let { upscale(it) }
-            }
+            val body = client.newCall(request).awaitSuccessfulBodyOrNull() ?: return null
+            val parsed = json.decodeFromString<ITunesSearchResponse>(body)
+            val raw = parsed.results.firstOrNull()?.let { it.artworkUrl100 ?: it.artworkUrl60 }
+            return raw?.let { upscale(it) }
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
         } catch (e: Exception) {
             return null
         }
     }
 
-    /** …/100x100bb.jpg -> …/1200x1200bb.jpg */
-    private fun upscale(rawUrl: String): String = upscalePattern.replace(rawUrl, "/1200x1200bb.jpg")
+    /** …/100x100bb.jpg -> …/600x600bb.jpg */
+    private fun upscale(rawUrl: String): String = upscalePattern.replace(rawUrl, "/600x600bb.jpg")
 }

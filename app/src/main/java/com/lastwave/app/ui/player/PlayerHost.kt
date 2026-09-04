@@ -170,6 +170,8 @@ import com.lastwave.app.data.lyrics.LyricsResult
 import com.lastwave.app.data.playlist.PlaylistRepository
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.data.playlist.LIKED_SONGS_MODE
+import com.lastwave.app.data.local.LyricsAnimation
+import com.lastwave.app.data.local.LyricsUiVersion
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.MusicPlayerState
 import com.lastwave.app.playback.PlaybackChromeState
@@ -562,6 +564,7 @@ private fun ExpandedPlayer(
         progressState = viewModel.progressState,
         player = viewModel.player,
         lyricsState = lyricsState,
+        lyricsUiVersion = settings.lyricsUiVersion,
         lyricsAnimation = settings.lyricsAnimation,
         wavySeekbarEnabled = settings.wavySeekbarEnabled,
         currentTab = currentTab,
@@ -1231,7 +1234,8 @@ private fun FullPlayer(
     progressState: StateFlow<PlaybackProgressState>,
     player: MusicPlayer,
     lyricsState: LyricsUiState,
-    lyricsAnimation: com.lastwave.app.data.local.LyricsAnimation = com.lastwave.app.data.local.LyricsAnimation.APPLE_FLUID,
+    lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.CLASSIC,
+    lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     wavySeekbarEnabled: Boolean = true,
     currentTab: FullPlayerTab,
     onTabChange: (FullPlayerTab) -> Unit,
@@ -1548,16 +1552,28 @@ private fun FullPlayer(
                 ) { tab ->
                     when (tab) {
                         FullPlayerTab.LYRICS -> {
-                            LyricsPanel(
-                                state = state,
-                                progressState = progressState,
-                                player = player,
-                                lyricsState = lyricsState,
-                                lyricsAnimation = lyricsAnimation,
-                                wavySeekbarEnabled = wavySeekbarEnabled,
-                                onRetry = onRetryLyrics,
-                                modifier = Modifier.fillMaxSize(),
-                            )
+                            if (lyricsUiVersion == LyricsUiVersion.MODERN) {
+                                ModernLyricsPanel(
+                                    state = state,
+                                    player = player,
+                                    lyricsState = lyricsState,
+                                    progressState = progressState,
+                                    wavySeekbarEnabled = wavySeekbarEnabled,
+                                    onRetry = onRetryLyrics,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                LyricsPanel(
+                                    state = state,
+                                    progressState = progressState,
+                                    player = player,
+                                    lyricsState = lyricsState,
+                                    lyricsAnimation = lyricsAnimation,
+                                    wavySeekbarEnabled = wavySeekbarEnabled,
+                                    onRetry = onRetryLyrics,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
                         }
 
                         FullPlayerTab.QUEUE -> {

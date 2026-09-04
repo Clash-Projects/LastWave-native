@@ -54,7 +54,6 @@ class PlaylistPublicMirror @Inject constructor(
     suspend fun restoreIfDatabaseEmpty(): Int = mutex.withLock {
         val local = dao.getAll()
         if (local.isNotEmpty()) {
-            writeLocked(local)
             return@withLock 0
         }
 
@@ -70,7 +69,6 @@ class PlaylistPublicMirror @Inject constructor(
         val mirror = listOfNotNull(primaryMirror, recoveryMirror).maxByOrNull { it.updatedAtMillis }
 
         if (mirror == null && primaryContent == null && recoveryContent == null && primaryRead.isSuccess && recoveryRead.isSuccess) {
-            writeLocked(emptyList())
             return@withLock 0
         }
         if (mirror == null) {
@@ -79,7 +77,6 @@ class PlaylistPublicMirror @Inject constructor(
         }
 
         dao.upsertAll(mirror.playlists.map { it.toEntity() })
-        writeLocked(dao.getAll())
         mirror.playlists.size
     }
 

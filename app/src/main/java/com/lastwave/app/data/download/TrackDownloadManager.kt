@@ -7,6 +7,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.media.MediaScannerConnection
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -28,24 +30,45 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import java.io.EOFException
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InterruptedIOException
 import java.io.IOException
+import java.io.RandomAccessFile
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketException
+import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 data class DownloadProgress(
     val key: String,
@@ -55,9 +78,34 @@ data class DownloadProgress(
     val bytesDownloaded: Long = 0L,
     val totalBytes: Long = -1L,
     val formatBadge: String = "AUDIO",
+    val isWaitingForConnection: Boolean = false,
     val isFinished: Boolean = false,
     val error: String? = null,
 )
+
+private data class DownloadTransfer(
+    val bytesDownloaded: Long,
+    val totalBytes: Long,
+    val contentType: String,
+)
+
+private data class DownloadRange(val start: Long, val endInclusive: Long) {
+    val length: Long get() = endInclusive - start + 1L
+}
+
+private data class ParsedContentRange(
+    val start: Long,
+    val endInclusive: Long,
+    val total: Long,
+)
+
+private class DownloadHttpException(val statusCode: Int) :
+    IOException("HTTP $statusCode downloading track")
+
+private class DownloadProtocolException(message: String) : IOException(message)
+
+private class DownloadInterruptedException(message: String, cause: Throwable? = null) :
+    IOException(message, cause)
 
 @Singleton
 class TrackDownloadManager @Inject constructor(
@@ -75,10 +123,26 @@ class TrackDownloadManager @Inject constructor(
     companion object {
         const val CHANNEL_ID = "lastwave_downloads"
         const val ACTION_CANCEL_DOWNLOAD = "com.lastwave.app.ACTION_CANCEL_DOWNLOAD"
+        const val ACTION_RECONNECT_DOWNLOAD = "com.lastwave.app.ACTION_RECONNECT_DOWNLOAD"
+        const val ACTION_VIEW_DOWNLOADS = "com.lastwave.app.ACTION_VIEW_DOWNLOADS"
         const val EXTRA_DOWNLOAD_KEY = "download_key"
+        const val EXTRA_DOWNLOAD_TITLE = "download_title"
+        const val EXTRA_DOWNLOAD_ARTIST = "download_artist"
+        const val EXTRA_NAVIGATE_TO = "navigate_to"
         private const val PUBLIC_DIR_NAME = "LastWave"
         private const val DOWNLOAD_BUFFER_SIZE = 512 * 1024 // 512 KB
-        private const val MAX_DOWNLOAD_RETRIES = 1
+        private const val PARALLEL_YOUTUBE_PARTS = 4
+        private const val MIN_PARALLEL_DOWNLOAD_BYTES = 2L * 1024 * 1024
+        private const val MIN_VALID_AUDIO_BYTES = 1_024L
+        private const val RECONNECT_POLL_INTERVAL_MS = 500L
+        private const val RECONNECT_RETRY_BASE_DELAY_MS = 1_000L
+        private const val RECONNECT_RETRY_MAX_DELAY_MS = 30_000L
+        private const val DOWNLOAD_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+        private val CONTENT_RANGE_PATTERN = Regex("""bytes\s+(\d+)-(\d+)/(\d+)""", RegexOption.IGNORE_CASE)
+
+        fun makeDownloadKey(title: String, artist: String): String =
+            "${artist.trim().lowercase()}_${title.trim().lowercase()}"
     }
 
     // Dedicated HTTP client with extended timeouts and high-throughput connection pooling
@@ -106,6 +170,7 @@ class TrackDownloadManager @Inject constructor(
     private val activeJobs = ConcurrentHashMap<String, Job>()
     private val activeUris = ConcurrentHashMap<String, Uri>()
     private val activeFiles = ConcurrentHashMap<String, File>()
+    private val reconnectGenerations = ConcurrentHashMap<String, AtomicLong>()
 
     private val _downloads = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
     val downloads: StateFlow<Map<String, DownloadProgress>> = _downloads.asStateFlow()
@@ -141,8 +206,47 @@ class TrackDownloadManager @Inject constructor(
         return activeKeys.contains(key) || (progress != null && !progress.isFinished && progress.error == null)
     }
 
+    suspend fun isTrackDownloaded(title: String, artist: String): Boolean = withContext(Dispatchers.IO) {
+        val key = makeDownloadKey(title, artist)
+        val existing = runCatching {
+            downloadedTrackDao.findByTrackKey(key)
+                ?: downloadedTrackDao.findByTitleAndArtist(title.trim(), artist.trim())
+        }.getOrNull()
+
+        if (existing != null) {
+            val fileStillPresent = when {
+                existing.mediaStoreUri != null -> runCatching {
+                    context.contentResolver.openInputStream(Uri.parse(existing.mediaStoreUri))?.use { }
+                    true
+                }.getOrDefault(false)
+                else -> runCatching {
+                    val f = File(existing.filePath)
+                    f.exists() && f.length() > 0
+                }.getOrDefault(false)
+            }
+            if (fileStillPresent) return@withContext true
+        }
+
+        // Check if file already exists in public Music/LastWave directory
+        val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
+        if (publicDir.exists() && publicDir.isDirectory) {
+            val sanitizedBase = sanitizeFilename("${artist.trim()} - ${title.trim()}")
+            val candidateExtensions = listOf("flac", "m4a", "opus", "mp3", "webm")
+            if (candidateExtensions.any { ext ->
+                    val f = File(publicDir, "$sanitizedBase.$ext")
+                    f.exists() && f.length() > 0
+                }
+            ) {
+                return@withContext true
+            }
+        }
+
+        false
+    }
+
     fun cancelDownload(key: String) {
         activeKeys.remove(key)
+        reconnectGenerations.remove(key)?.incrementAndGet()
         val job = activeJobs.remove(key)
         job?.cancel()
 
@@ -158,6 +262,12 @@ class TrackDownloadManager @Inject constructor(
         _downloads.update { it - key }
     }
 
+    fun reconnectDownload(key: String): Boolean {
+        if (key !in activeKeys) return false
+        reconnectGenerations[key]?.incrementAndGet() ?: return false
+        return true
+    }
+
     fun downloadTrack(
         title: String,
         artist: String,
@@ -167,8 +277,46 @@ class TrackDownloadManager @Inject constructor(
     ) {
         val key = makeDownloadKey(title, artist)
         if (!activeKeys.add(key)) return
+        reconnectGenerations[key] = AtomicLong()
 
         val job = applicationScope.launch(Dispatchers.IO) {
+            // Already downloaded? Skip re-downloading entirely rather than
+            // re-fetching the file and inserting a duplicate DB row or (1).flac file.
+            val existing = runCatching {
+                downloadedTrackDao.findByTrackKey(key)
+                    ?: downloadedTrackDao.findByTitleAndArtist(title.trim(), artist.trim())
+            }.getOrNull()
+            if (existing != null) {
+                val fileStillPresent = when {
+                    existing.mediaStoreUri != null -> runCatching {
+                        context.contentResolver.openInputStream(Uri.parse(existing.mediaStoreUri))?.use { }
+                        true
+                    }.getOrDefault(false)
+                    else -> runCatching {
+                        val f = File(existing.filePath)
+                        f.exists() && f.length() > 0
+                    }.getOrDefault(false)
+                }
+                if (fileStillPresent) {
+                    activeKeys.remove(key)
+                    return@launch
+                }
+                // Row is stale (file was deleted outside the app) — fall through
+                // and re-download; the unique trackKey index means the insert
+                // below will REPLACE this row instead of duplicating it.
+            } else {
+                val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
+                if (publicDir.exists() && publicDir.isDirectory) {
+                    val sanitizedBase = sanitizeFilename("${artist.trim()} - ${title.trim()}")
+                    val candidateExtensions = listOf("flac", "m4a", "opus", "mp3", "webm")
+                    val existingFile = candidateExtensions.map { File(publicDir, "$sanitizedBase.$it") }
+                        .firstOrNull { it.exists() && it.length() > 0 }
+                    if (existingFile != null) {
+                        activeKeys.remove(key)
+                        return@launch
+                    }
+                }
+            }
             val notifId = key.hashCode()
             updateProgress(DownloadProgress(key = key, title = title, artist = artist, progressPercent = 0))
             showDownloadNotification(notifId, key, title, artist, 0, false, "Preparing high-res stream...")
@@ -184,7 +332,9 @@ class TrackDownloadManager @Inject constructor(
                 var resolvedAlbum = album?.takeIf { it.isNotBlank() }
 
                 if (resolvedArtworkUrl == null || resolvedAlbum == null) {
-                    val best = runCatching { innerTube.findBestMatch(title, artist) }.getOrNull()
+                    val best = runCatching {
+                        innerTube.findBestMatch(title, artist, prefetchStreams = false)
+                    }.getOrNull()
                     if (resolvedArtworkUrl == null) {
                         resolvedArtworkUrl = best?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                     }
@@ -193,14 +343,18 @@ class TrackDownloadManager @Inject constructor(
                     }
                 }
 
-                if (resolvedArtworkUrl == null) {
-                    artworkRepository.resolve(title, artist)
-                    val cacheKey = ArtworkNormalizer.cacheKey(title, artist)
-                    resolvedArtworkUrl = artworkRepository.resolved.value[cacheKey]
-                        ?.takeIf { ArtworkNormalizer.isRealImage(it) }
-                        ?: kotlinx.coroutines.withTimeoutOrNull(3_500L) {
-                            artworkRepository.resolved.first { it.containsKey(cacheKey) }[cacheKey]
-                        }?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                val artworkFallback = if (resolvedArtworkUrl == null) {
+                    async(Dispatchers.IO) {
+                        artworkRepository.resolve(title, artist)
+                        val cacheKey = ArtworkNormalizer.cacheKey(title, artist)
+                        artworkRepository.resolved.value[cacheKey]
+                            ?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                            ?: kotlinx.coroutines.withTimeoutOrNull(3_500L) {
+                                artworkRepository.resolved.first { it.containsKey(cacheKey) }[cacheKey]
+                            }?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                    }
+                } else {
+                    null
                 }
 
                 // 1. Resolve source — respect user's download quality preference (Lossless tiers or YouTube Music)
@@ -211,6 +365,9 @@ class TrackDownloadManager @Inject constructor(
                 var formatBadge = "24-BIT FLAC"
                 var isLossless = false
                 var durationMs = 0L
+                var downloadHeaders = emptyMap<String, String>()
+                var expectedContentLength: Long? = null
+                var useParallelDownload = false
 
                 val downloadQuality = misc.downloadQuality
                 val isYouTubeRequested = downloadQuality == LosslessMusicApi.QUALITY_YOUTUBE
@@ -243,7 +400,7 @@ class TrackDownloadManager @Inject constructor(
 
                 if (resolvedUrl == null) {
                     // Fallback to YouTube Music (prefer M4A/AAC for universal media player compatibility)
-                    val bestMatch = innerTube.findBestMatch(title, artist)
+                    val bestMatch = innerTube.findBestMatch(title, artist, prefetchStreams = false)
                     val videoId = bestMatch.videoId ?: error("No audio source found for $title")
                     if (resolvedArtworkUrl == null) {
                         resolvedArtworkUrl = bestMatch.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
@@ -251,6 +408,10 @@ class TrackDownloadManager @Inject constructor(
                     if (resolvedAlbum == null) resolvedAlbum = bestMatch.album
                     val ytStream = innerTube.resolveDownloadStream(videoId)
                     resolvedUrl = ytStream.url
+                    downloadHeaders = ytStream.requestHeaders
+                    expectedContentLength = ytStream.contentLength
+                        ?: runCatching { Uri.parse(ytStream.url).getQueryParameter("clen")?.toLongOrNull() }.getOrNull()
+                    useParallelDownload = true
                     val rawMime = ytStream.mimeType.orEmpty().lowercase()
                     if (rawMime.contains("mp4") || rawMime.contains("m4a") || rawMime.contains("aac")) {
                         extension = "m4a"
@@ -264,6 +425,10 @@ class TrackDownloadManager @Inject constructor(
                         extension = "opus"
                         mimeType = "audio/ogg"
                         formatBadge = "OPUS"
+                    } else if (rawMime.contains("mpeg") || rawMime.contains("mp3")) {
+                        extension = "mp3"
+                        mimeType = "audio/mpeg"
+                        formatBadge = "MP3"
                     } else {
                         extension = "m4a"
                         mimeType = "audio/mp4"
@@ -276,101 +441,86 @@ class TrackDownloadManager @Inject constructor(
                 val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
                 tempDownloadFile = rawFile
 
-                    var bytesReadTotal = 0L
-                    var totalLength = -1L
-                    var downloadAttempt = 0
-                    var downloadSuccess = false
-
-                    while (downloadAttempt <= MAX_DOWNLOAD_RETRIES && !downloadSuccess) {
-                        val requestBuilder = Request.Builder().url(resolvedUrl!!)
-                        requestBuilder.header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36")
-                        requestBuilder.header("Accept", "*/*")
-                        val request = requestBuilder.build()
-                        val response = downloadClient.newCall(request).execute()
-
-                        if (!response.isSuccessful) throw IOException("HTTP ${response.code} downloading track")
-
-                        // Validate response is actual media payload and not an HTML/JSON error page
-                        val contentType = response.header("Content-Type").orEmpty().lowercase()
-                        if (contentType.contains("text/html") || contentType.contains("application/json")) {
-                            response.close()
-                            throw IOException("Invalid download payload ($contentType)")
-                        }
-                        if (contentType.contains("webm")) {
-                            extension = "webm"
-                            mimeType = "audio/webm"
-                            formatBadge = "WEBM OPUS"
-                        } else if (contentType.contains("ogg") || contentType.contains("opus")) {
-                            extension = "opus"
-                            mimeType = "audio/ogg"
-                            formatBadge = "OPUS"
-                        }
-
-                        val body = response.body ?: throw IOException("Empty response body")
-                        totalLength = body.contentLength()
-                        val source = body.byteStream()
-
-                        bytesReadTotal = 0L
-                        val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
-                        var bytesRead: Int
-                        var lastProgress = 0
-                        val isChunked = totalLength <= 0
-
-                        if (isChunked) {
-                            updateProgress(
-                                DownloadProgress(
-                                    key = key, title = title, artist = artist,
-                                    progressPercent = 0, formatBadge = formatBadge,
-                                ),
-                            )
-                            showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
-                        }
-
-                        FileOutputStream(tempDownloadFile).use { fos ->
-                            while (source.read(buffer).also { bytesRead = it } != -1) {
-                                fos.write(buffer, 0, bytesRead)
-                                bytesReadTotal += bytesRead
-
-                                if (!isChunked && totalLength > 0) {
-                                    val progress = ((bytesReadTotal * 100) / totalLength).toInt().coerceIn(0, 100)
-                                    if (progress != lastProgress) {
-                                        lastProgress = progress
-                                        updateProgress(
-                                            DownloadProgress(
-                                                key = key, title = title, artist = artist,
-                                                progressPercent = progress,
-                                                bytesDownloaded = bytesReadTotal,
-                                                totalBytes = totalLength,
-                                                formatBadge = formatBadge,
-                                            ),
-                                        )
-                                        showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
-                                    }
-                                } else if (isChunked) {
-                                    val mbDown = String.format("%.1f MB", bytesReadTotal / (1024.0 * 1024.0))
+                    var lastProgress = 0
+                    var lastUnknownProgressBytes = 0L
+                    val progressLock = Any()
+                    val transfer = downloadToTempFile(
+                        downloadKey = key,
+                        url = checkNotNull(resolvedUrl),
+                        target = rawFile,
+                        requestHeaders = downloadHeaders,
+                        expectedContentLength = expectedContentLength,
+                        useParallelRanges = useParallelDownload,
+                        onConnectionStateChanged = { isWaiting ->
+                            _downloads.value[key]?.let { current ->
+                                val updated = current.copy(isWaitingForConnection = isWaiting)
+                                updateProgress(updated)
+                                showDownloadNotification(
+                                    notificationId = notifId,
+                                    downloadKey = key,
+                                    title = title,
+                                    artist = artist,
+                                    progress = updated.progressPercent,
+                                    isIndeterminate = updated.totalBytes <= 0L,
+                                    badgeText = updated.formatBadge,
+                                    isWaitingForConnection = isWaiting,
+                                )
+                            }
+                        },
+                    ) { downloadedBytes, totalBytes ->
+                        synchronized(progressLock) {
+                            if (totalBytes > 0) {
+                                val progress = ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
+                                if (progress > lastProgress) {
+                                    lastProgress = progress
                                     updateProgress(
                                         DownloadProgress(
                                             key = key, title = title, artist = artist,
-                                            progressPercent = 0,
-                                            bytesDownloaded = bytesReadTotal,
-                                            totalBytes = -1L,
-                                            formatBadge = "$formatBadge • $mbDown",
+                                            progressPercent = progress,
+                                            bytesDownloaded = downloadedBytes,
+                                            totalBytes = totalBytes,
+                                            formatBadge = formatBadge,
                                         ),
                                     )
+                                    showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
                                 }
+                            } else if (downloadedBytes - lastUnknownProgressBytes >= 1024 * 1024) {
+                                lastUnknownProgressBytes = downloadedBytes
+                                val mbDown = String.format("%.1f MB", downloadedBytes / (1024.0 * 1024.0))
+                                updateProgress(
+                                    DownloadProgress(
+                                        key = key, title = title, artist = artist,
+                                        progressPercent = 0,
+                                        bytesDownloaded = downloadedBytes,
+                                        totalBytes = -1L,
+                                        formatBadge = "$formatBadge • $mbDown",
+                                    ),
+                                )
+                                showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
                             }
-                            fos.flush()
                         }
-
-                        if (totalLength > 0 && bytesReadTotal != totalLength) {
-                            downloadAttempt++
-                            if (downloadAttempt > MAX_DOWNLOAD_RETRIES) {
-                                throw IOException("Download truncated: received $bytesReadTotal of $totalLength bytes")
-                            }
-                            continue
-                        }
-
-                        downloadSuccess = true
+                    }
+                    val bytesReadTotal = transfer.bytesDownloaded
+                    val contentType = transfer.contentType.lowercase()
+                    if (contentType.contains("webm")) {
+                        extension = "webm"
+                        mimeType = "audio/webm"
+                        formatBadge = "WEBM OPUS"
+                    } else if (contentType.contains("ogg") || contentType.contains("opus")) {
+                        extension = "opus"
+                        mimeType = "audio/ogg"
+                        formatBadge = "OPUS"
+                    } else if (contentType.contains("mpeg") || contentType.contains("mp3")) {
+                        extension = "mp3"
+                        mimeType = "audio/mpeg"
+                        formatBadge = "MP3"
+                    } else if (contentType.contains("mp4") || contentType.contains("m4a") || contentType.contains("aac")) {
+                        extension = "m4a"
+                        mimeType = "audio/mp4"
+                        formatBadge = "M4A AAC"
+                    }
+                    if (useParallelDownload && !hasExpectedContainer(rawFile, extension)) {
+                        throw IOException("Downloaded payload is not a valid ${extension.uppercase()} audio file")
                     }
 
                     val safeFilename = sanitizeFilename("$artist - $title") + ".$extension"
@@ -415,6 +565,12 @@ class TrackDownloadManager @Inject constructor(
                         }
                     }
 
+                    if (resolvedArtworkUrl == null) {
+                        resolvedArtworkUrl = artworkFallback?.await()
+                    } else {
+                        artworkFallback?.cancel()
+                    }
+
                     // 4. Embed metadata, cover art AND lyrics directly into the
                     // downloaded audio file (container-aware: Vorbis comments +
                     // PICTURE for FLAC/Opus, Matroska tags for WebM,
@@ -447,11 +603,17 @@ class TrackDownloadManager @Inject constructor(
                     if (uri != null) activeUris[key] = uri
                     if (file != null) activeFiles[key] = file
 
-                    tempDownloadFile.inputStream().use { input ->
+                    val taggedFileLength = tempDownloadFile.length()
+                    val copiedBytes = tempDownloadFile.inputStream().use { input ->
                         destStream.use { output ->
-                            input.copyTo(output)
+                            val copied = input.copyTo(output, DOWNLOAD_BUFFER_SIZE)
                             output.flush()
+                            if (output is FileOutputStream) output.fd.sync()
+                            copied
                         }
+                    }
+                    if (copiedBytes != taggedFileLength) {
+                        throw IOException("Public file copy truncated: received $copiedBytes of $taggedFileLength bytes")
                     }
 
                     // 6. Mark public MediaStore file as finished (IS_PENDING = 0)
@@ -479,6 +641,7 @@ class TrackDownloadManager @Inject constructor(
 
                 // 6. Persist to Room database
                 val entity = DownloadedTrackEntity(
+                    trackKey = key,
                     title = title,
                     artist = artist,
                     album = resolvedAlbum.orEmpty(),
@@ -504,7 +667,7 @@ class TrackDownloadManager @Inject constructor(
                         artist = artist,
                         progressPercent = 100,
                         bytesDownloaded = bytesReadTotal,
-                        totalBytes = bytesReadTotal,
+                        totalBytes = transfer.totalBytes,
                         formatBadge = formatBadge,
                         isFinished = true,
                     ),
@@ -528,18 +691,454 @@ class TrackDownloadManager @Inject constructor(
                         error = error.localizedMessage ?: error.message ?: "Download failed",
                     ),
                 )
-                showErrorNotification(notifId, title, artist, error.localizedMessage ?: "Failed")
+                showErrorNotification(notifId, key, title, artist, error.localizedMessage ?: "Failed")
             } finally {
                 activeKeys.remove(key)
                 activeJobs.remove(key)
                 activeUris.remove(key)
                 activeFiles.remove(key)
+                reconnectGenerations.remove(key)
                 tempDownloadFile?.let { runCatching { if (it.exists()) it.delete() } }
             }
 
         }
         activeJobs[key] = job
     }
+
+    private suspend fun downloadToTempFile(
+        downloadKey: String,
+        url: String,
+        target: File,
+        requestHeaders: Map<String, String>,
+        expectedContentLength: Long?,
+        useParallelRanges: Boolean,
+        onConnectionStateChanged: (Boolean) -> Unit,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit,
+    ): DownloadTransfer {
+        val parallelLength = expectedContentLength
+            ?.takeIf { useParallelRanges && it >= MIN_PARALLEL_DOWNLOAD_BYTES }
+        if (parallelLength != null) {
+            try {
+                return downloadInParallel(
+                    url = url,
+                    target = target,
+                    requestHeaders = requestHeaders,
+                    totalLength = parallelLength,
+                    downloadKey = downloadKey,
+                    onConnectionStateChanged = onConnectionStateChanged,
+                    onProgress = onProgress,
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: DownloadProtocolException) {
+                android.util.Log.w(
+                    "TrackDownloadManager",
+                    "Validated range download unavailable; using one stream",
+                    error,
+                )
+                truncateFile(target)
+            }
+        }
+
+        return downloadSingleStream(
+            downloadKey = downloadKey,
+            url = url,
+            target = target,
+            requestHeaders = requestHeaders,
+            expectedContentLength = expectedContentLength,
+            onConnectionStateChanged = onConnectionStateChanged,
+            onProgress = onProgress,
+        )
+    }
+
+    private suspend fun downloadInParallel(
+        url: String,
+        target: File,
+        requestHeaders: Map<String, String>,
+        totalLength: Long,
+        downloadKey: String,
+        onConnectionStateChanged: (Boolean) -> Unit,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit,
+    ): DownloadTransfer = coroutineScope {
+        val partSize = (totalLength + PARALLEL_YOUTUBE_PARTS - 1L) / PARALLEL_YOUTUBE_PARTS
+        val ranges = (0 until PARALLEL_YOUTUBE_PARTS).mapNotNull { index ->
+            val start = index * partSize
+            if (start >= totalLength) return@mapNotNull null
+            DownloadRange(start, minOf(totalLength - 1L, start + partSize - 1L))
+        }
+        RandomAccessFile(target, "rw").use { it.setLength(totalLength) }
+
+        val downloadedBytes = AtomicLong(0L)
+        val waitingRanges = AtomicInteger(0)
+        val rangeConnectionStateChanged: (Boolean) -> Unit = { isWaiting ->
+            val waitingCount = if (isWaiting) {
+                waitingRanges.incrementAndGet()
+            } else {
+                waitingRanges.updateAndGet { count -> (count - 1).coerceAtLeast(0) }
+            }
+            onConnectionStateChanged(waitingCount > 0)
+        }
+        val contentTypes = ranges.map { range ->
+            async {
+                var downloadedBytesInRange = 0L
+                retryInterruptedTransfer(downloadKey, rangeConnectionStateChanged) {
+                    downloadRange(
+                        url = url,
+                        target = target,
+                        requestHeaders = requestHeaders,
+                        range = DownloadRange(range.start + downloadedBytesInRange, range.endInclusive),
+                        expectedTotal = totalLength,
+                    ) { delta ->
+                        downloadedBytesInRange += delta
+                        onProgress(downloadedBytes.addAndGet(delta.toLong()), totalLength)
+                    }
+                }
+            }
+        }.awaitAll()
+
+        val finalLength = downloadedBytes.get()
+        if (finalLength != totalLength || target.length() != totalLength) {
+            throw IOException("Parallel download truncated: received $finalLength of $totalLength bytes")
+        }
+        RandomAccessFile(target, "rw").use { it.fd.sync() }
+        DownloadTransfer(
+            bytesDownloaded = finalLength,
+            totalBytes = totalLength,
+            contentType = contentTypes.firstOrNull { it.isNotBlank() }.orEmpty(),
+        )
+    }
+
+    private suspend fun downloadRange(
+        url: String,
+        target: File,
+        requestHeaders: Map<String, String>,
+        range: DownloadRange,
+        expectedTotal: Long,
+        onBytesRead: (Int) -> Unit,
+    ): String = suspendCancellableCoroutine { continuation ->
+        val request = buildDownloadRequest(url, requestHeaders, range)
+        val call = downloadClient.newCall(request)
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, error: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(error)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val contentType = response.use { currentResponse ->
+                        validateMediaResponse(currentResponse, expectedCode = 206)
+                        val parsedRange = parseContentRange(currentResponse.header("Content-Range"))
+                            ?: throw DownloadProtocolException("Missing Content-Range for parallel download")
+                        if (parsedRange.start != range.start ||
+                            parsedRange.endInclusive != range.endInclusive ||
+                            parsedRange.total != expectedTotal
+                        ) {
+                            throw DownloadProtocolException("Mismatched Content-Range ${currentResponse.header("Content-Range")}")
+                        }
+
+                        val body = currentResponse.body
+                            ?: throw DownloadProtocolException("Empty range response body")
+                        val bodyLength = body.contentLength()
+                        if (bodyLength > 0L && bodyLength != range.length) {
+                            throw DownloadProtocolException("Range length mismatch: received $bodyLength of ${range.length} bytes")
+                        }
+
+                        RandomAccessFile(target, "rw").use { output ->
+                            output.seek(range.start)
+                            body.byteStream().use { input ->
+                                val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+                                var remaining = range.length
+                                while (remaining > 0L) {
+                                    if (!continuation.isActive) throw CancellationException("Download cancelled")
+                                    val read = try {
+                                        input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                                    } catch (error: IOException) {
+                                        throw DownloadInterruptedException("Connection interrupted while reading audio", error)
+                                    }
+                                    if (read < 0) {
+                                        throw DownloadInterruptedException("Range truncated with $remaining bytes remaining")
+                                    }
+                                    output.write(buffer, 0, read)
+                                    remaining -= read
+                                    onBytesRead(read)
+                                }
+                            }
+                        }
+                        currentResponse.header("Content-Type").orEmpty()
+                    }
+                    if (continuation.isActive) continuation.resume(contentType)
+                } catch (error: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                }
+            }
+        })
+    }
+
+    private suspend fun downloadSingleStream(
+        downloadKey: String,
+        url: String,
+        target: File,
+        requestHeaders: Map<String, String>,
+        expectedContentLength: Long?,
+        onConnectionStateChanged: (Boolean) -> Unit,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit,
+    ): DownloadTransfer {
+        val expectedLength = expectedContentLength?.takeIf { it > 0L }
+        return retryInterruptedTransfer(downloadKey, onConnectionStateChanged) {
+            if (expectedLength != null && target.length() > expectedLength) truncateFile(target)
+            if (expectedLength != null && target.length() == expectedLength && expectedLength >= MIN_VALID_AUDIO_BYTES) {
+                onProgress(expectedLength, expectedLength)
+                return@retryInterruptedTransfer DownloadTransfer(expectedLength, expectedLength, "")
+            }
+            downloadSingleStreamAttempt(
+                url = url,
+                target = target,
+                requestHeaders = requestHeaders,
+                expectedContentLength = expectedLength,
+                onProgress = onProgress,
+            )
+        }
+    }
+
+    private suspend fun downloadSingleStreamAttempt(
+        url: String,
+        target: File,
+        requestHeaders: Map<String, String>,
+        expectedContentLength: Long?,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit,
+    ): DownloadTransfer = suspendCancellableCoroutine { continuation ->
+        val resumeOffset = target.length().coerceAtLeast(0L)
+        val call = downloadClient.newCall(
+            buildDownloadRequest(url, requestHeaders, range = null, resumeOffset = resumeOffset),
+        )
+        continuation.invokeOnCancellation { call.cancel() }
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, error: IOException) {
+                if (continuation.isActive) continuation.resumeWithException(error)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                try {
+                    val transfer = response.use { currentResponse ->
+                        validateMediaResponse(currentResponse)
+                        val body = currentResponse.body
+                            ?: throw DownloadProtocolException("Empty response body")
+                        val responseLength = body.contentLength().takeIf { it > 0L }
+                        val partialRange = if (currentResponse.code == 206) {
+                            parseContentRange(currentResponse.header("Content-Range"))
+                                ?: throw DownloadProtocolException("Missing Content-Range for partial response")
+                        } else {
+                            null
+                        }
+                        if (partialRange != null && (partialRange.start != resumeOffset ||
+                                partialRange.endInclusive + 1L != partialRange.total)
+                        ) {
+                            throw DownloadProtocolException("Server returned an unexpected audio range")
+                        }
+                        if (partialRange != null && expectedContentLength != null &&
+                            partialRange.total != expectedContentLength
+                        ) {
+                            throw DownloadProtocolException(
+                                "Download size changed: expected $expectedContentLength, received ${partialRange.total}",
+                            )
+                        }
+
+                        val totalLength = partialRange?.total
+                            ?: responseLength
+                            ?: expectedContentLength?.takeIf { it > 0L }
+                            ?: -1L
+                        if (responseLength != null && expectedContentLength != null &&
+                            currentResponse.code == 200 && responseLength != expectedContentLength
+                        ) {
+                            throw DownloadProtocolException(
+                                "Download size changed: expected $expectedContentLength, received $responseLength",
+                            )
+                        }
+
+                        val append = resumeOffset > 0L && partialRange != null
+                        var downloadedBytes = if (append) resumeOffset else 0L
+                        FileOutputStream(target, append).use { output ->
+                            body.byteStream().use { input ->
+                                val buffer = ByteArray(DOWNLOAD_BUFFER_SIZE)
+                                while (true) {
+                                    if (!continuation.isActive) throw CancellationException("Download cancelled")
+                                    val read = try {
+                                        input.read(buffer)
+                                    } catch (error: IOException) {
+                                        throw DownloadInterruptedException("Connection interrupted while reading audio", error)
+                                    }
+                                    if (read < 0) break
+                                    output.write(buffer, 0, read)
+                                    downloadedBytes += read
+                                    onProgress(downloadedBytes, totalLength)
+                                }
+                            }
+                            output.flush()
+                            output.fd.sync()
+                        }
+                        if (downloadedBytes < MIN_VALID_AUDIO_BYTES) {
+                            throw DownloadProtocolException("Downloaded audio payload is too small")
+                        }
+                        if (totalLength > 0L && downloadedBytes != totalLength) {
+                            if (downloadedBytes < totalLength) {
+                                throw DownloadInterruptedException(
+                                    "Download truncated: received $downloadedBytes of $totalLength bytes",
+                                )
+                            }
+                            throw DownloadProtocolException(
+                                "Download exceeded expected size: received $downloadedBytes of $totalLength bytes",
+                            )
+                        }
+
+                        DownloadTransfer(
+                            bytesDownloaded = downloadedBytes,
+                            totalBytes = totalLength.takeIf { it > 0L } ?: downloadedBytes,
+                            contentType = currentResponse.header("Content-Type").orEmpty(),
+                        )
+                    }
+                    if (continuation.isActive) continuation.resume(transfer)
+                } catch (error: Exception) {
+                    if (continuation.isActive) continuation.resumeWithException(error)
+                }
+            }
+        })
+    }
+
+    private suspend fun <T> retryInterruptedTransfer(
+        downloadKey: String,
+        onConnectionStateChanged: (Boolean) -> Unit,
+        transfer: suspend () -> T,
+    ): T {
+        var failureCount = 0
+        while (true) {
+            try {
+                return transfer()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: IOException) {
+                if (!error.isReconnectableTransferFailure()) throw error
+                failureCount++
+                onConnectionStateChanged(true)
+                try {
+                    awaitRetryOpportunity(downloadKey, failureCount)
+                } finally {
+                    onConnectionStateChanged(false)
+                }
+            }
+        }
+    }
+
+    private suspend fun awaitRetryOpportunity(downloadKey: String, failureCount: Int) {
+        val reconnectGeneration = reconnectGenerations[downloadKey]
+            ?: throw CancellationException("Download cancelled")
+        val observedGeneration = reconnectGeneration.get()
+        val retryDelayMs = (RECONNECT_RETRY_BASE_DELAY_MS *
+            (1L shl (failureCount - 1).coerceIn(0, 5)))
+            .coerceAtMost(RECONNECT_RETRY_MAX_DELAY_MS)
+        var elapsedMs = 0L
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            if (reconnectGeneration.get() != observedGeneration) return
+            if (elapsedMs >= retryDelayMs && hasUsableNetwork()) return
+            delay(RECONNECT_POLL_INTERVAL_MS)
+            elapsedMs += RECONNECT_POLL_INTERVAL_MS
+        }
+    }
+
+    private fun hasUsableNetwork(): Boolean = runCatching {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return@runCatching true
+        val network = manager.activeNetwork ?: return@runCatching false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return@runCatching false
+        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    }.getOrDefault(true)
+
+    private fun IOException.isReconnectableTransferFailure(): Boolean {
+        if (this is DownloadProtocolException) return false
+        if (this is DownloadHttpException) {
+            return statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode in 500..599
+        }
+        return generateSequence<Throwable>(this) { it.cause }
+            .take(8)
+            .any {
+                it is DownloadInterruptedException ||
+                    it is EOFException ||
+                    it is ConnectException ||
+                    it is NoRouteToHostException ||
+                    it is SocketException ||
+                    it is UnknownHostException ||
+                    it is InterruptedIOException
+            }
+    }
+
+    private fun buildDownloadRequest(
+        url: String,
+        requestHeaders: Map<String, String>,
+        range: DownloadRange?,
+        resumeOffset: Long = 0L,
+    ): Request {
+        val builder = Request.Builder().url(url)
+        requestHeaders.forEach { (name, value) -> builder.header(name, value) }
+        if (requestHeaders.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
+            builder.header("User-Agent", DOWNLOAD_USER_AGENT)
+        }
+        builder.header("Accept", "*/*")
+        builder.header("Accept-Encoding", "identity")
+        when {
+            range != null -> builder.header("Range", "bytes=${range.start}-${range.endInclusive}")
+            resumeOffset > 0L -> builder.header("Range", "bytes=$resumeOffset-")
+        }
+        return builder.build()
+    }
+
+    private fun validateMediaResponse(response: Response, expectedCode: Int? = null) {
+        if (response.code != 200 && response.code != 206) {
+            throw DownloadHttpException(response.code)
+        }
+        if (expectedCode != null && response.code != expectedCode) {
+            throw DownloadProtocolException("Server does not support resumable byte ranges")
+        }
+
+        val contentType = response.header("Content-Type").orEmpty().lowercase()
+        if (contentType.contains("text/html") ||
+            contentType.contains("application/json") ||
+            contentType.contains("text/plain")
+        ) {
+            throw DownloadProtocolException("Invalid download payload ($contentType)")
+        }
+    }
+
+    private fun parseContentRange(header: String?): ParsedContentRange? {
+        val match = header?.trim()?.let(CONTENT_RANGE_PATTERN::matchEntire) ?: return null
+        return ParsedContentRange(
+            start = match.groupValues[1].toLongOrNull() ?: return null,
+            endInclusive = match.groupValues[2].toLongOrNull() ?: return null,
+            total = match.groupValues[3].toLongOrNull() ?: return null,
+        )
+    }
+
+    private fun truncateFile(file: File) {
+        RandomAccessFile(file, "rw").use { it.setLength(0L) }
+    }
+
+    private fun hasExpectedContainer(file: File, extension: String): Boolean = runCatching {
+        if (file.length() < 12L) return@runCatching false
+        val header = ByteArray(12)
+        RandomAccessFile(file, "r").use { input ->
+            if (input.read(header) != header.size) return@runCatching false
+        }
+        when (extension.lowercase()) {
+            "flac" -> header.copyOfRange(0, 4).contentEquals(byteArrayOf('f'.code.toByte(), 'L'.code.toByte(), 'a'.code.toByte(), 'C'.code.toByte()))
+            "m4a" -> header.copyOfRange(4, 8).contentEquals(byteArrayOf('f'.code.toByte(), 't'.code.toByte(), 'y'.code.toByte(), 'p'.code.toByte()))
+            "webm" -> header.copyOfRange(0, 4).contentEquals(byteArrayOf(0x1A, 0x45, 0xDF.toByte(), 0xA3.toByte()))
+            "opus" -> header.copyOfRange(0, 4).contentEquals(byteArrayOf('O'.code.toByte(), 'g'.code.toByte(), 'g'.code.toByte(), 'S'.code.toByte()))
+            "mp3" -> header.copyOfRange(0, 3).contentEquals(byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte())) ||
+                ((header[0].toInt() and 0xFF) == 0xFF && (header[1].toInt() and 0xE0) == 0xE0)
+            else -> false
+        }
+    }.getOrDefault(false)
 
     private fun updateProgress(progress: DownloadProgress) {
         _downloads.update { it + (progress.key to progress) }
@@ -659,6 +1258,7 @@ class TrackDownloadManager @Inject constructor(
         progress: Int,
         isIndeterminate: Boolean,
         badgeText: String,
+        isWaitingForConnection: Boolean = false,
     ) {
         val cancelIntent = Intent(context, DownloadCancelReceiver::class.java).apply {
             action = ACTION_CANCEL_DOWNLOAD
@@ -671,24 +1271,26 @@ class TrackDownloadManager @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0),
         )
 
-        val mainIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val contentPendingIntent = PendingIntent.getActivity(
-            context,
-            0,
-            mainIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0),
-        )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle("Downloading \"$title\"")
-            .setContentText("$artist \u2022 $badgeText ($progress%)")
+            .setContentTitle(if (isWaitingForConnection) "Waiting for connection" else "Downloading \"$title\"")
+            .setContentText(
+                if (isWaitingForConnection) "\"$title\" by $artist \u2022 $progress% saved"
+                else "$artist \u2022 $badgeText ($progress%)",
+            )
             .setProgress(100, progress, isIndeterminate)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setContentIntent(contentPendingIntent)
+            .setContentIntent(viewDownloadsPendingIntent(notificationId))
+
+        if (isWaitingForConnection) {
+            builder.addAction(
+                android.R.drawable.ic_popup_sync,
+                "Reconnect",
+                reconnectPendingIntent(notificationId, downloadKey, title, artist),
+            )
+        }
+        val notification = builder
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
             .build()
 
@@ -701,23 +1303,13 @@ class TrackDownloadManager @Inject constructor(
         artist: String,
         badgeText: String,
     ) {
-        val mainIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val contentPendingIntent = PendingIntent.getActivity(
-            context,
-            0,
-            mainIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0),
-        )
-
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Download Complete")
             .setContentText("\"$title\" by $artist ($badgeText)")
             .setOngoing(false)
             .setAutoCancel(true)
-            .setContentIntent(contentPendingIntent)
+            .setContentIntent(viewDownloadsPendingIntent(notificationId))
             .build()
 
         runCatching { notificationManager?.notify(notificationId, notification) }
@@ -725,6 +1317,7 @@ class TrackDownloadManager @Inject constructor(
 
     private fun showErrorNotification(
         notificationId: Int,
+        downloadKey: String,
         title: String,
         artist: String,
         error: String,
@@ -735,9 +1328,49 @@ class TrackDownloadManager @Inject constructor(
             .setContentText("\"$title\" by $artist: $error")
             .setOngoing(false)
             .setAutoCancel(true)
+            .setContentIntent(viewDownloadsPendingIntent(notificationId))
+            .addAction(
+                android.R.drawable.ic_popup_sync,
+                "Reconnect",
+                reconnectPendingIntent(notificationId, downloadKey, title, artist),
+            )
             .build()
 
         runCatching { notificationManager?.notify(notificationId, notification) }
+    }
+
+    private fun viewDownloadsPendingIntent(requestCode: Int): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = ACTION_VIEW_DOWNLOADS
+            putExtra(EXTRA_NAVIGATE_TO, "downloads")
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun reconnectPendingIntent(
+        requestCode: Int,
+        downloadKey: String,
+        title: String,
+        artist: String,
+    ): PendingIntent {
+        val intent = Intent(context, DownloadCancelReceiver::class.java).apply {
+            action = ACTION_RECONNECT_DOWNLOAD
+            putExtra(EXTRA_DOWNLOAD_KEY, downloadKey)
+            putExtra(EXTRA_DOWNLOAD_TITLE, title)
+            putExtra(EXTRA_DOWNLOAD_ARTIST, artist)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
     }
 
     private fun writePublicCompanionFile(
@@ -903,6 +1536,7 @@ class TrackDownloadManager @Inject constructor(
                     val lrcText = if (hasLyrics) runCatching { lrcFile.readText() }.getOrNull() else null
 
                     val entity = DownloadedTrackEntity(
+                        trackKey = trackKey,
                         title = title,
                         artist = artist,
                         album = album,
@@ -992,6 +1626,7 @@ class TrackDownloadManager @Inject constructor(
                         }
 
                         val entity = DownloadedTrackEntity(
+                            trackKey = trackKey,
                             title = title,
                             artist = artist,
                             album = album,

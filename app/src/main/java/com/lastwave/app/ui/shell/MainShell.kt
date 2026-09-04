@@ -67,13 +67,34 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.launch
 
-/** Thin bridge exposing MixLauncher's requests to MainShell — MainShell
- *  itself isn't a screen with its own ViewModel, so this is the smallest
- *  way to reach the same singleton GenerateViewModel already listens to
- *  (see MixLauncher's doc comment for the full "Start Mix" flow). */
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.zIndex
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
+/** Thin bridge exposing MixLauncher's requests and Update alerts to MainShell */
 @HiltViewModel
-class MainShellViewModel @Inject constructor(mixLauncher: MixLauncher) : ViewModel() {
+class MainShellViewModel @Inject constructor(
+    mixLauncher: MixLauncher,
+    val appUpdateManager: com.lastwave.app.data.update.AppUpdateManager,
+) : ViewModel() {
     val mixRequests = mixLauncher.requests
+    val updateInfo = appUpdateManager.updateInfo
+
+    fun dismissUpdate(version: String) {
+        appUpdateManager.dismissUpdate(version)
+    }
+
+    fun openUpdate(context: android.content.Context) {
+        appUpdateManager.openUpdate(context)
+    }
 }
 
 private enum class MainTab(val label: String) { FEED("Feed"), STATS("Stats"), PLAYLISTS("Playlists") }
@@ -116,6 +137,7 @@ fun MainShell(
     onOpenDiscover: () -> Unit,
     onOpenGenres: () -> Unit,
     onOpenFriends: () -> Unit,
+    onOpenFeedPlaylist: (String) -> Unit,
     onOpenPlaylist: (Long) -> Unit = {},
     onOpenGenerator: () -> Unit = {},
     mainShellViewModel: MainShellViewModel = hiltViewModel(),
@@ -123,6 +145,9 @@ fun MainShell(
     val tabs = MainTab.entries
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val updateInfo by mainShellViewModel.updateInfo.collectAsStateWithLifecycle()
+    val showUpdateBanner = updateInfo.isUpdateAvailable && !updateInfo.isDismissed
 
     // "Start Mix with this Song" (§6) opens the Generator from anywhere
     LaunchedEffect(Unit) {
@@ -152,6 +177,8 @@ fun MainShell(
                         onOpenSearch = onOpenSearch,
                         onOpenDiscover = onOpenDiscover,
                         onOpenPlaylist = onOpenPlaylist,
+                        onOpenFeedPlaylist = onOpenFeedPlaylist,
+                        onOpenGenerator = onOpenGenerator,
                     )
                     MainTab.STATS -> HomeScreen(
                         onOpenSettings = onOpenSettings,
@@ -165,6 +192,24 @@ fun MainShell(
             }
         }
 
+        // App update prompt banner (only shown on app open when an update is available and not dismissed)
+        AnimatedVisibility(
+            visible = showUpdateBanner,
+            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .zIndex(10f),
+        ) {
+            UpdatePromptCard(
+                version = updateInfo.latestVersion,
+                onUpdate = { mainShellViewModel.openUpdate(context) },
+                onDismiss = { mainShellViewModel.dismissUpdate(updateInfo.latestVersion) },
+            )
+        }
+
         FloatingNavBar(
             tabs = tabs,
             selectedIndex = pagerState.currentPage,
@@ -172,6 +217,73 @@ fun MainShell(
             onOpenGenerator = onOpenGenerator,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+    }
+}
+
+@Composable
+private fun UpdatePromptCard(
+    version: String,
+    onUpdate: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shadowElevation = 8.dp,
+        tonalElevation = 6.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Filled.CloudDownload,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(24.dp),
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Update Available",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Text(
+                    text = "LastWave v$version is ready to install",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .clickable(onClick = onUpdate),
+            ) {
+                Text(
+                    text = "Update",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(28.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Dismiss update",
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
     }
 }
 

@@ -19,6 +19,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -54,6 +55,7 @@ val SavedPlaylist.isYouTubeOnly: Boolean
     get() = remotePlaylistId != null
 
 private const val MAX_SAVED_PLAYLISTS = 20
+private const val STARTUP_SYNC_WAIT_MS = 2_000L
 private const val TAG = "PlaylistRepository"
 const val LIKED_SONGS_MODE = "liked"
 const val LIKED_SONGS_TITLE = "Liked Songs"
@@ -91,9 +93,13 @@ class PlaylistRepository @Inject constructor(
                 Log.e(TAG, "Playlist JSON startup sync failed; continuing with Room", error)
             }
     }
+    @Volatile private var startupSyncTimedOut = false
 
     private suspend fun awaitStartupSync() {
-        startupSync.await()
+        if (startupSyncTimedOut) return
+        if (withTimeoutOrNull(STARTUP_SYNC_WAIT_MS) { startupSync.await() } == null) {
+            startupSyncTimedOut = true
+        }
     }
 
     private suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> = tracks
@@ -102,12 +108,10 @@ class PlaylistRepository @Inject constructor(
     /** Newest first — matches _plRenderSaved()'s display order (the
      *  original reverses its append-ordered array before rendering). */
     suspend fun getAll(): List<SavedPlaylist> {
-        awaitStartupSync()
         return dao.getAll().map { it.toDomain() }.sortedByDescending { it.createdAtMillis }
     }
 
     suspend fun getById(id: Long): SavedPlaylist? {
-        awaitStartupSync()
         return dao.getById(id)?.toDomain()
     }
 
@@ -140,7 +144,7 @@ class PlaylistRepository @Inject constructor(
         dao.upsert(entity)
         dao.trimGeneratedToNewest(MAX_SAVED_PLAYLISTS)
         val saved = entity.toDomain()
-        syncPublicMirror()
+        syncPublicMirrorInBackground()
         _changes.tryEmit(Unit)
 
         // Best-effort copy to the public Downloads folder. Room is already
@@ -319,6 +323,10 @@ class PlaylistRepository @Inject constructor(
         publicMirror.writeFromDatabase().onFailure { e ->
             Log.e(TAG, "Public playlist JSON sync failed", e)
         }
+    }
+
+    private fun syncPublicMirrorInBackground() {
+        exportScope.launch { syncPublicMirror() }
     }
 
     private fun SavedPlaylistEntity.toDomain(): SavedPlaylist {

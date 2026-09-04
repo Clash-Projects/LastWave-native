@@ -117,6 +117,32 @@ object DatabaseModule {
         }
     }
 
+    /** Adds a normalized trackKey, collapses any pre-existing duplicate
+     * download rows down to the most recent copy of each track, then
+     * enforces uniqueness so downloading an already-downloaded track
+     * replaces its row instead of inserting a second one. */
+    private val migration10To11 = object : Migration(10, 11) {
+        override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+            database.execSQL(
+                "ALTER TABLE downloaded_tracks ADD COLUMN trackKey TEXT NOT NULL DEFAULT ''",
+            )
+            database.execSQL(
+                """UPDATE downloaded_tracks
+                    SET trackKey = LOWER(TRIM(artist)) || '_' || LOWER(TRIM(title))""",
+            )
+            // Keep only the most recently downloaded row per trackKey.
+            database.execSQL(
+                """DELETE FROM downloaded_tracks
+                    WHERE id NOT IN (
+                        SELECT MAX(id) FROM downloaded_tracks GROUP BY trackKey
+                    )""",
+            )
+            database.execSQL(
+                "CREATE UNIQUE INDEX IF NOT EXISTS index_downloaded_tracks_trackKey ON downloaded_tracks(trackKey)",
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
@@ -132,6 +158,7 @@ object DatabaseModule {
                 migration7To8,
                 migration8To9,
                 migration9To10,
+                migration10To11,
             )
             .build()
 

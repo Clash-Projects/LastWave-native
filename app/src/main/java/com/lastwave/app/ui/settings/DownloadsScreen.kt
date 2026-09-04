@@ -479,7 +479,11 @@ private fun ActiveDownloadCard(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = "${download.artist} \u2022 ${download.formatBadge} \u2022 ${download.progressPercent}%",
+                        text = if (download.isWaitingForConnection) {
+                            "${download.artist} \u2022 Waiting for connection \u2022 ${download.progressPercent}% saved"
+                        } else {
+                            "${download.artist} \u2022 ${download.formatBadge} \u2022 ${download.progressPercent}%"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
