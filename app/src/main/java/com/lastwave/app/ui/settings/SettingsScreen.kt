@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Waves
 import com.lastwave.app.data.local.LyricsAnimation
+import com.lastwave.app.data.local.LyricsUiVersion
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Palette
@@ -569,7 +570,11 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 title = "Lyrics Animation",
-                                subtitle = "${misc.lyricsAnimation.title} \u2022 ${misc.lyricsAnimation.description}",
+                                subtitle = if (misc.lyricsUiVersion == LyricsUiVersion.MODERN) {
+                                    "New UI (Modern)"
+                                } else {
+                                    "${misc.lyricsAnimation.title} \u2022 ${misc.lyricsAnimation.description}"
+                                },
                                 onClick = { showLyricsAnimationSheet = true },
                                 position = position,
                             )
@@ -992,6 +997,8 @@ fun SettingsScreen(
     // -- Experimental Lyrics Animation Sheet --
     if (showLyricsAnimationSheet) {
         LyricsAnimationSheet(
+            version = misc.lyricsUiVersion,
+            onSelectVersion = viewModel::setLyricsUiVersion,
             current = misc.lyricsAnimation,
             onSelect = {
                 viewModel.setLyricsAnimation(it)
@@ -2858,6 +2865,8 @@ private fun SyncPlaylistsSheet(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LyricsAnimationSheet(
+    version: LyricsUiVersion,
+    onSelectVersion: (LyricsUiVersion) -> Unit,
     current: LyricsAnimation,
     onSelect: (LyricsAnimation) -> Unit,
     onDismiss: () -> Unit,
@@ -2913,99 +2922,173 @@ private fun LyricsAnimationSheet(
                 }
             }
 
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 480.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(LyricsAnimation.entries.toTypedArray(), key = { it.id }) { anim ->
-                    val isSelected = anim == current
-                    val cardShape = RoundedCornerShape(18.dp)
-
+                val versions = listOf(
+                    LyricsUiVersion.CLASSIC to "Classic",
+                    LyricsUiVersion.MODERN to "New UI",
+                )
+                versions.forEach { (ver, label) ->
+                    val isVerSelected = ver == version
+                    val chipShape = RoundedCornerShape(14.dp)
                     Surface(
-                        shape = cardShape,
-                        color = if (isSelected) {
-                            if (liquidGlass) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
-                            else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.70f)
-                        } else {
-                            if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.90f)
-                            else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.50f)
+                        onClick = {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            onSelectVersion(ver)
                         },
-                        border = if (isSelected) {
-                            BorderStroke(
-                                1.5.dp,
-                                if (liquidGlass) {
-                                    Brush.linearGradient(
-                                        listOf(
-                                            Color.White.copy(alpha = 0.50f),
-                                            MaterialTheme.colorScheme.primary,
-                                            Color.White.copy(alpha = 0.15f),
-                                        ),
-                                    )
-                                } else {
-                                    Brush.linearGradient(
-                                        listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary),
-                                    )
-                                },
-                            )
-                        } else if (liquidGlass) {
-                            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f))
+                        shape = chipShape,
+                        color = if (isVerSelected) {
+                            if (liquidGlass) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
+                            else MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.60f)
+                            else MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                        border = if (isVerSelected) {
+                            BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
                         } else null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(cardShape)
-                            .liquidGlassChrome(cardShape, liquidGlass)
-                            .clickable {
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
-                                onSelect(anim)
-                            },
+                        modifier = Modifier.weight(1f),
                     ) {
-                        Row(
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.surfaceContainerLowest,
-                                modifier = Modifier.size(24.dp),
-                            ) {
-                                if (isSelected) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Check,
-                                            contentDescription = "Selected",
-                                            tint = MaterialTheme.colorScheme.onPrimary,
-                                            modifier = Modifier.size(16.dp),
-                                        )
-                                    }
-                                }
-                            }
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = if (isVerSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isVerSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+            }
 
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = anim.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                    color = if (isSelected && liquidGlass) MaterialTheme.colorScheme.onPrimaryContainer
-                                    else if (isSelected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurface,
-                                )
-                                Text(
-                                    text = anim.description,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isSelected && liquidGlass) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+            if (version == LyricsUiVersion.CLASSIC) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 440.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(LyricsAnimation.entries.toTypedArray(), key = { it.id }) { anim ->
+                        val isSelected = anim == current
+                        val cardShape = RoundedCornerShape(18.dp)
+
+                        Surface(
+                            shape = cardShape,
+                            color = if (isSelected) {
+                                if (liquidGlass) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f)
+                                else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.70f)
+                            } else {
+                                if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.90f)
+                                else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.50f)
+                            },
+                            border = if (isSelected) {
+                                BorderStroke(
+                                    1.5.dp,
+                                    if (liquidGlass) {
+                                        Brush.linearGradient(
+                                            listOf(
+                                                Color.White.copy(alpha = 0.50f),
+                                                MaterialTheme.colorScheme.primary,
+                                                Color.White.copy(alpha = 0.15f),
+                                            ),
+                                        )
                                     } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                        Brush.linearGradient(
+                                            listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary),
+                                        )
                                     },
                                 )
+                            } else if (liquidGlass) {
+                                BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.20f))
+                            } else null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(cardShape)
+                                .liquidGlassChrome(cardShape, liquidGlass)
+                                .clickable {
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                    onSelect(anim)
+                                },
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.surfaceContainerLowest,
+                                    modifier = Modifier.size(24.dp),
+                                ) {
+                                    if (isSelected) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Check,
+                                                contentDescription = "Selected",
+                                                tint = MaterialTheme.colorScheme.onPrimary,
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = anim.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                        color = if (isSelected && liquidGlass) MaterialTheme.colorScheme.onPrimaryContainer
+                                        else if (isSelected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        text = anim.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (isSelected && liquidGlass) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                }
                             }
                         }
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = if (liquidGlass) MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.70f)
+                    else MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = "New Lyrics UI",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = "Modern lyrics rendering active",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
                     }
                 }
             }

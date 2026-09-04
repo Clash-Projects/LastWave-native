@@ -8,6 +8,8 @@ import com.lastwave.app.data.backup.RestoreResult
 import com.lastwave.app.data.generate.GenerateRepository
 import com.lastwave.app.data.local.AccentMode
 import com.lastwave.app.data.local.EqualizerSettings
+import com.lastwave.app.data.local.LyricsAnimation
+import com.lastwave.app.data.local.LyricsUiVersion
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.ScrobblerPreferences
 import com.lastwave.app.data.local.ScrobblerSettings
@@ -244,7 +246,8 @@ class SettingsViewModel @Inject constructor(
         runCatching { audioEngine.get().setStudioMasterClarity(enabled) }
         launchSettingsAction("update Studio Master Clarity") { settingsPreferences.setStudioMasterClarity(enabled) }
     }
-    fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
+    fun setLyricsUiVersion(version: LyricsUiVersion) = launchSettingsAction("update lyrics UI version") { settingsPreferences.setLyricsUiVersion(version) }
+    fun setLyricsAnimation(animation: LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
     fun setCrossfadeEnabled(enabled: Boolean) = launchSettingsAction("update crossfade") { settingsPreferences.setCrossfadeEnabled(enabled) }
     fun setCrossfadeSeconds(seconds: Int) = launchSettingsAction("update crossfade duration") {
         settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 10))

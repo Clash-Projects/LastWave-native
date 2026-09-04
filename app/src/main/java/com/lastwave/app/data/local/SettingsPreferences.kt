@@ -12,6 +12,16 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
+enum class LyricsUiVersion(val id: String, val title: String) {
+    CLASSIC("classic", "Classic"),
+    MODERN("modern", "Modern");
+
+    companion object {
+        fun fromId(id: String?): LyricsUiVersion =
+            entries.firstOrNull { it.id == id } ?: CLASSIC
+    }
+}
+
 enum class LyricsAnimation(val id: String, val title: String, val description: String) {
     APPLE_FLUID("apple_fluid", "Apple Fluid", "Smooth spring scaling with dynamic focal tracking"),
     KARAOKE_PULSE("karaoke_pulse", "Karaoke Pulse", "Rhythmic scale pop with energetic spring bounce"),
@@ -53,6 +63,8 @@ data class MiscSettings(
     /** Optional studio-clarity curve. Disabled by default because fixed tone
      *  shaping cannot be neutral on every speaker, headset and OEM spatializer. */
     val isStudioMasterClarityEnabled: Boolean = false,
+    /** Lyrics UI layout version (Classic or Modern). */
+    val lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.CLASSIC,
     /** Experimental lyrics animation style (Settings -> Experimental -> Lyrics Animation). */
     val lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     /** Blend the end of one queued track into the beginning of the next. */
@@ -79,6 +91,7 @@ class SettingsPreferences @Inject constructor(
         val PREFER_LOSSLESS_STREAMING = booleanPreferencesKey("lw_prefer_lossless_streaming")
         val LOSSLESS_QUALITY = intPreferencesKey("lw_lossless_quality")
         val MUSIC_ENHANCER = booleanPreferencesKey("lw_music_enhancer")
+        val LYRICS_UI_VERSION = stringPreferencesKey("lw_lyrics_ui_version")
         val LYRICS_ANIMATION = stringPreferencesKey("lw_lyrics_animation")
         val CROSSFADE_ENABLED = booleanPreferencesKey("lw_crossfade_enabled")
         val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
@@ -96,6 +109,7 @@ class SettingsPreferences @Inject constructor(
                 preferLosslessStreaming = p.readSafely(Keys.PREFER_LOSSLESS_STREAMING) ?: true,
                 losslessQuality = p.readSafely(Keys.LOSSLESS_QUALITY)?.takeIf { it in LOSSLESS_QUALITIES } ?: 27,
                 isStudioMasterClarityEnabled = p.readSafely(Keys.MUSIC_ENHANCER) ?: false,
+                lyricsUiVersion = LyricsUiVersion.fromId(p.readSafely(Keys.LYRICS_UI_VERSION)),
                 lyricsAnimation = LyricsAnimation.fromId(p.readSafely(Keys.LYRICS_ANIMATION)),
                 crossfadeEnabled = p.readSafely(Keys.CROSSFADE_ENABLED) ?: false,
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 10),
@@ -127,6 +141,10 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setStudioMasterClarity(enabled: Boolean) {
         dataStore.edit { it[Keys.MUSIC_ENHANCER] = enabled }
+    }
+
+    suspend fun setLyricsUiVersion(version: LyricsUiVersion) {
+        dataStore.edit { it[Keys.LYRICS_UI_VERSION] = version.id }
     }
 
     suspend fun setLyricsAnimation(animation: LyricsAnimation) {

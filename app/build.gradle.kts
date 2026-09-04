@@ -45,7 +45,7 @@ android {
 
     defaultConfig {
         applicationId = "com.lastwave.app"
-        minSdk = 24
+        minSdk = 29
         targetSdk = 35
         versionCode = 15
         versionName = "3.4.1"
@@ -84,6 +84,7 @@ android {
                     // libraries must be built/aligned accordingly. Ignored
                     // harmlessly by NDK toolchains that predate the flag.
                     "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON",
+                    "-DCMAKE_POLICY_VERSION_MINIMUM=3.5",
                 )
                 cFlags += "-Wl,-z,max-page-size=16384"
                 cppFlags += "-Wl,-z,max-page-size=16384"
@@ -157,6 +158,10 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        freeCompilerArgs += listOf(
+            "-Xskip-metadata-version-check",
+            "-Xskip-prerelease-check",
+        )
     }
 
     buildFeatures {
@@ -238,6 +243,8 @@ dependencies {
 
     implementation(libs.datastore.preferences)
     implementation(libs.coil.compose)
+    implementation(libs.lyrics.ui)
+    implementation(libs.lyrics.core)
     // Installs the baseline profiles bundled inside Compose (and other
     // androidx) AARs so hot UI paths are AOT-compiled on device instead of
     // running through JIT on first use — a large, zero-code smoothness win
@@ -286,7 +293,11 @@ dependencies {
 configurations.all {
     resolutionStrategy.eachDependency {
         if (requested.group == "org.jetbrains.kotlin") {
-            useVersion("1.9.24")
+            if (requested.name.startsWith("kotlin-stdlib")) {
+                useVersion("2.1.21")
+            } else {
+                useVersion("1.9.24")
+            }
         }
         if (requested.group == "org.jetbrains.kotlinx" && requested.name.startsWith("kotlinx-coroutines")) {
             useVersion("1.8.1")
