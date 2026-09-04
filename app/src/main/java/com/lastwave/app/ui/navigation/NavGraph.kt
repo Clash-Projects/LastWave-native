@@ -51,10 +51,25 @@ class GenreExplorerNavBridge @Inject constructor(genreExplorer: GenreExplorer) :
 @HiltViewModel
 class ArtistAlbumNavBridge @Inject constructor(val navigator: ArtistAlbumNavigator) : androidx.lifecycle.ViewModel()
 
+@HiltViewModel
+class AppRouteNavBridge @Inject constructor(val routeNavigator: AppRouteNavigator) : androidx.lifecycle.ViewModel()
+
 @Composable
 fun LastWaveNavHost(
     navController: NavHostController = rememberNavController(),
 ) {
+    val appRouteBridge: AppRouteNavBridge = hiltViewModel()
+    val pendingAppRoute by appRouteBridge.routeNavigator.pendingRoute.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingAppRoute) {
+        val route = pendingAppRoute
+        if (route != null) {
+            appRouteBridge.routeNavigator.consumeRoute()
+            navController.navigate(route) {
+                launchSingleTop = true
+            }
+        }
+    }
+
     // "Explore this genre" from any track's context menu, anywhere in the
     // app — Home, Discover, Playlist, Search — routes here since Genres
     // is a pushed destination on THIS nav controller and none of those

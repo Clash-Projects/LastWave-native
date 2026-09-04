@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -51,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -116,10 +118,24 @@ class StartMixMenuViewModel @Inject constructor(private val mixLauncher: MixLaun
     }
 }
 
+enum class TrackDownloadStatus {
+    NOT_DOWNLOADED,
+    DOWNLOADING,
+    DOWNLOADED,
+}
+
 @HiltViewModel
 class DownloadMenuViewModel @Inject constructor(
     private val downloadManager: com.lastwave.app.data.download.TrackDownloadManager,
 ) : ViewModel() {
+    val activeDownloads = downloadManager.downloads
+
+    suspend fun checkStatus(title: String, artist: String): TrackDownloadStatus {
+        if (downloadManager.isDownloading(title, artist)) return TrackDownloadStatus.DOWNLOADING
+        if (downloadManager.isTrackDownloaded(title, artist)) return TrackDownloadStatus.DOWNLOADED
+        return TrackDownloadStatus.NOT_DOWNLOADED
+    }
+
     fun download(title: String, artist: String, album: String? = null, artworkUrl: String? = null) {
         downloadManager.downloadTrack(title, artist, album, artworkUrl)
     }
@@ -232,6 +248,14 @@ fun TrackContextMenuSheet(
     var showDetailsSheet by remember { mutableStateOf(false) }
     var resolvedGenre by remember(target) { mutableStateOf<String?>(null) }
     var resolvingGenre by remember(target) { mutableStateOf(false) }
+    val activeDownloads by downloadViewModel.activeDownloads.collectAsState()
+    var isDownloaded by remember(target) { mutableStateOf(false) }
+
+    LaunchedEffect(target, activeDownloads) {
+        if (target is TrackMenuTarget.Track) {
+            isDownloaded = downloadViewModel.checkStatus(target.name, target.artist) == TrackDownloadStatus.DOWNLOADED
+        }
+    }
 
     LaunchedEffect(target) {
         if (target is TrackMenuTarget.Track) {
@@ -335,10 +359,36 @@ fun TrackContextMenuSheet(
                             }
                         }
                     }
+                    val downloadKey = com.lastwave.app.data.download.TrackDownloadManager.makeDownloadKey(t.name, t.artist)
+                    val isDownloading = activeDownloads[downloadKey]?.let { !it.isFinished } == true
                     add { pos ->
-                        MenuActionRow(Icons.Filled.Download, "Download (Max Quality)", position = pos) {
-                            downloadViewModel.download(t.name, t.artist, playable.album, playable.artworkUrl)
-                            onDismiss()
+                        when {
+                            isDownloaded -> {
+                                MenuActionRow(Icons.Filled.CheckCircle, "Downloaded", position = pos) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Track is already downloaded",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                    onDismiss()
+                                }
+                            }
+                            isDownloading -> {
+                                MenuActionRow(Icons.Filled.Download, "Downloading\u2026", position = pos) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Download is in progress",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                    onDismiss()
+                                }
+                            }
+                            else -> {
+                                MenuActionRow(Icons.Filled.Download, "Download (Max Quality)", position = pos) {
+                                    downloadViewModel.download(t.name, t.artist, playable.album, playable.artworkUrl)
+                                    onDismiss()
+                                }
+                            }
                         }
                     }
                     add { pos -> MenuActionRow(Icons.Filled.QueuePlayNext, "Play next", position = pos) { musicPlayer.playNext(playable); onDismiss() } }

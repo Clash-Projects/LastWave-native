@@ -19,6 +19,9 @@ interface DownloadedTrackDao {
     @Query("SELECT * FROM downloaded_tracks WHERE LOWER(title) = LOWER(:title) AND LOWER(artist) = LOWER(:artist) LIMIT 1")
     suspend fun findByTitleAndArtist(title: String, artist: String): DownloadedTrackEntity?
 
+    @Query("SELECT * FROM downloaded_tracks WHERE trackKey = :trackKey LIMIT 1")
+    suspend fun findByTrackKey(trackKey: String): DownloadedTrackEntity?
+
     @Query("SELECT * FROM downloaded_tracks WHERE id = :id LIMIT 1")
     suspend fun findById(id: Long): DownloadedTrackEntity?
 

@@ -75,10 +75,15 @@ class TrackDownloadManager @Inject constructor(
     companion object {
         const val CHANNEL_ID = "lastwave_downloads"
         const val ACTION_CANCEL_DOWNLOAD = "com.lastwave.app.ACTION_CANCEL_DOWNLOAD"
+        const val ACTION_VIEW_DOWNLOADS = "com.lastwave.app.ACTION_VIEW_DOWNLOADS"
         const val EXTRA_DOWNLOAD_KEY = "download_key"
+        const val EXTRA_NAVIGATE_TO = "navigate_to"
         private const val PUBLIC_DIR_NAME = "LastWave"
         private const val DOWNLOAD_BUFFER_SIZE = 512 * 1024 // 512 KB
         private const val MAX_DOWNLOAD_RETRIES = 1
+
+        fun makeDownloadKey(title: String, artist: String): String =
+            "${artist.trim().lowercase()}_${title.trim().lowercase()}"
     }
 
     // Dedicated HTTP client with extended timeouts and high-throughput connection pooling
@@ -141,6 +146,44 @@ class TrackDownloadManager @Inject constructor(
         return activeKeys.contains(key) || (progress != null && !progress.isFinished && progress.error == null)
     }
 
+    suspend fun isTrackDownloaded(title: String, artist: String): Boolean = withContext(Dispatchers.IO) {
+        val key = makeDownloadKey(title, artist)
+        val existing = runCatching {
+            downloadedTrackDao.findByTrackKey(key)
+                ?: downloadedTrackDao.findByTitleAndArtist(title.trim(), artist.trim())
+        }.getOrNull()
+
+        if (existing != null) {
+            val fileStillPresent = when {
+                existing.mediaStoreUri != null -> runCatching {
+                    context.contentResolver.openInputStream(Uri.parse(existing.mediaStoreUri))?.use { }
+                    true
+                }.getOrDefault(false)
+                else -> runCatching {
+                    val f = File(existing.filePath)
+                    f.exists() && f.length() > 0
+                }.getOrDefault(false)
+            }
+            if (fileStillPresent) return@withContext true
+        }
+
+        // Check if file already exists in public Music/LastWave directory
+        val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
+        if (publicDir.exists() && publicDir.isDirectory) {
+            val sanitizedBase = sanitizeFilename("${artist.trim()} - ${title.trim()}")
+            val candidateExtensions = listOf("flac", "m4a", "opus", "mp3", "webm")
+            if (candidateExtensions.any { ext ->
+                    val f = File(publicDir, "$sanitizedBase.$ext")
+                    f.exists() && f.length() > 0
+                }
+            ) {
+                return@withContext true
+            }
+        }
+
+        false
+    }
+
     fun cancelDownload(key: String) {
         activeKeys.remove(key)
         val job = activeJobs.remove(key)
@@ -170,15 +213,21 @@ class TrackDownloadManager @Inject constructor(
 
         val job = applicationScope.launch(Dispatchers.IO) {
             // Already downloaded? Skip re-downloading entirely rather than
-            // re-fetching the file and inserting a duplicate DB row.
-            val existing = runCatching { downloadedTrackDao.findByTitleAndArtist(title, artist) }.getOrNull()
+            // re-fetching the file and inserting a duplicate DB row or (1).flac file.
+            val existing = runCatching {
+                downloadedTrackDao.findByTrackKey(key)
+                    ?: downloadedTrackDao.findByTitleAndArtist(title.trim(), artist.trim())
+            }.getOrNull()
             if (existing != null) {
                 val fileStillPresent = when {
                     existing.mediaStoreUri != null -> runCatching {
                         context.contentResolver.openInputStream(Uri.parse(existing.mediaStoreUri))?.use { }
                         true
                     }.getOrDefault(false)
-                    else -> runCatching { File(existing.filePath).exists() }.getOrDefault(false)
+                    else -> runCatching {
+                        val f = File(existing.filePath)
+                        f.exists() && f.length() > 0
+                    }.getOrDefault(false)
                 }
                 if (fileStillPresent) {
                     activeKeys.remove(key)
@@ -187,6 +236,18 @@ class TrackDownloadManager @Inject constructor(
                 // Row is stale (file was deleted outside the app) — fall through
                 // and re-download; the unique trackKey index means the insert
                 // below will REPLACE this row instead of duplicating it.
+            } else {
+                val publicDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), PUBLIC_DIR_NAME)
+                if (publicDir.exists() && publicDir.isDirectory) {
+                    val sanitizedBase = sanitizeFilename("${artist.trim()} - ${title.trim()}")
+                    val candidateExtensions = listOf("flac", "m4a", "opus", "mp3", "webm")
+                    val existingFile = candidateExtensions.map { File(publicDir, "$sanitizedBase.$it") }
+                        .firstOrNull { it.exists() && it.length() > 0 }
+                    if (existingFile != null) {
+                        activeKeys.remove(key)
+                        return@launch
+                    }
+                }
             }
             val notifId = key.hashCode()
             updateProgress(DownloadProgress(key = key, title = title, artist = artist, progressPercent = 0))
@@ -689,11 +750,13 @@ class TrackDownloadManager @Inject constructor(
         )
 
         val mainIntent = Intent(context, MainActivity::class.java).apply {
+            action = ACTION_VIEW_DOWNLOADS
+            putExtra(EXTRA_NAVIGATE_TO, "downloads")
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val contentPendingIntent = PendingIntent.getActivity(
             context,
-            0,
+            notificationId,
             mainIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0),
         )
@@ -719,11 +782,13 @@ class TrackDownloadManager @Inject constructor(
         badgeText: String,
     ) {
         val mainIntent = Intent(context, MainActivity::class.java).apply {
+            action = ACTION_VIEW_DOWNLOADS
+            putExtra(EXTRA_NAVIGATE_TO, "downloads")
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val contentPendingIntent = PendingIntent.getActivity(
             context,
-            0,
+            notificationId,
             mainIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0),
         )
@@ -746,12 +811,25 @@ class TrackDownloadManager @Inject constructor(
         artist: String,
         error: String,
     ) {
+        val mainIntent = Intent(context, MainActivity::class.java).apply {
+            action = ACTION_VIEW_DOWNLOADS
+            putExtra(EXTRA_NAVIGATE_TO, "downloads")
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            mainIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0),
+        )
+
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_error)
             .setContentTitle("Download Failed")
             .setContentText("\"$title\" by $artist: $error")
             .setOngoing(false)
             .setAutoCancel(true)
+            .setContentIntent(contentPendingIntent)
             .build()
 
         runCatching { notificationManager?.notify(notificationId, notification) }

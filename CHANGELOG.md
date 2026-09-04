@@ -19,8 +19,30 @@
   and the in-app widget are unaffected, since they all read from
   `mediaSession` directly rather than this notification's `Style` object.
 
+### Added
+- **Offline playback priority across all screens (Fixes #31).**
+  `MusicPlayer.resolveTrackAudioStream()` now checks the local Room database (`DownloadedTrackDao`) and verifies file presence on disk before attempting remote network resolution (Lossless / YouTube Music / InnerTube). When a track has already been downloaded, LastWave plays the local media file directly without making network calls, enabling seamless offline playback across Home, Search, Playlists, Album, and Artist screens and saving cellular data when online.
+
   Files changed:
-  `app/src/main/java/com/lastwave/app/playback/MusicPlaybackService.kt`
+  `app/src/main/java/com/lastwave/app/playback/MusicPlayer.kt`
+
+- **Download state awareness and duplicate download prevention.**
+  - Added `DownloadedTrackDao.findByTrackKey` and deduplication checks in `TrackDownloadManager.downloadTrack` to prevent duplicate download jobs, redundant network requests, and duplicate files (e.g. `(1).flac`) in MediaStore.
+  - The 3-dot context menu sheet (`TrackContextMenuSheet`) now dynamically reflects the track's status (`Downloaded` with check icon, `Downloading…`, or `Download (Max Quality)`), giving instant visual feedback and preventing accidental re-downloads.
+
+  Files changed:
+  `app/src/main/java/com/lastwave/app/data/local/db/DownloadedTrackDao.kt`
+  `app/src/main/java/com/lastwave/app/data/download/TrackDownloadManager.kt`
+  `app/src/main/java/com/lastwave/app/ui/common/TrackContextMenuSheet.kt`
+
+- **Direct navigation from download notifications to the Downloads screen.**
+  `TrackDownloadManager` now fires pending intents with `ACTION_VIEW_DOWNLOADS` targeting `DownloadsScreen` (`AppRoute.Downloads`). Integrated an `AppRouteNavigator` singleton and `AppRouteNavBridge` into `NavGraph` and `MainActivity` so tapping download notifications opens the Downloads screen directly instead of only bringing the app to the foreground.
+
+  Files changed:
+  `app/src/main/java/com/lastwave/app/data/download/TrackDownloadManager.kt`
+  `app/src/main/java/com/lastwave/app/MainActivity.kt`
+  `app/src/main/java/com/lastwave/app/ui/navigation/AppRouteNavigator.kt`
+  `app/src/main/java/com/lastwave/app/ui/navigation/NavGraph.kt`
 
 ## 2026-09-02 — musaibbhat120605
 

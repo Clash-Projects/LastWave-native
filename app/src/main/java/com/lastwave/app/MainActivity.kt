@@ -34,6 +34,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var linkPlaybackResolver: dagger.Lazy<com.lastwave.app.playback.LinkPlaybackResolver>
 
+    @Inject
+    lateinit var appRouteNavigator: dagger.Lazy<com.lastwave.app.ui.navigation.AppRouteNavigator>
+
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,6 +48,7 @@ class MainActivity : ComponentActivity() {
         runCatching { lastFmAuthCallback.capture(intent) }
             .onFailure { android.util.Log.e(STARTUP_TAG, "Auth callback ignored during startup", it) }
         handlePlaybackIntent(intent)
+        handleNavigationIntent(intent)
         runCatching {
             splashScreen?.setOnExitAnimationListener { provider ->
                 runCatching {
@@ -152,11 +156,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun handleNavigationIntent(intent: Intent?) {
+        if (intent == null) return
+        val isDownloadsTarget = intent.action == com.lastwave.app.data.download.TrackDownloadManager.ACTION_VIEW_DOWNLOADS ||
+            intent.getStringExtra(com.lastwave.app.data.download.TrackDownloadManager.EXTRA_NAVIGATE_TO) == Screen.Downloads.route
+        if (isDownloadsTarget) {
+            runCatching { appRouteNavigator.get().navigateTo(Screen.Downloads.route) }
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         runCatching { lastFmAuthCallback.capture(intent) }
         handlePlaybackIntent(intent)
+        handleNavigationIntent(intent)
     }
 
     private companion object {
