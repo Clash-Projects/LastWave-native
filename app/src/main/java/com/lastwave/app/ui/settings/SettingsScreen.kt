@@ -73,6 +73,11 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.AllInclusive
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -87,7 +92,7 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
+import com.lastwave.app.ui.common.ExpressiveSlider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -740,6 +745,44 @@ fun SettingsScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    SectionLabel("Playback & Local Library")
+                    SettingsGroup(rowCount = 2) { index, position ->
+                        when (index) {
+                            0 -> SettingsToggleCard(
+                                icon = Icons.Filled.AllInclusive,
+                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                title = "Autoplay",
+                                subtitle = if (misc.autoplayEnabled) {
+                                    "Keep playing similar songs when a queue ends"
+                                } else {
+                                    "Stop playback when the queue ends"
+                                },
+                                checked = misc.autoplayEnabled,
+                                onCheckedChange = viewModel::setAutoplayEnabled,
+                                position = position,
+                            )
+                            1 -> SettingsToggleCard(
+                                icon = Icons.Filled.LibraryMusic,
+                                iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
+                                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                title = "Scan Device Music",
+                                subtitle = if (misc.scanFullDeviceAudio) {
+                                    "Index every song on this phone, not just downloads"
+                                } else {
+                                    "Only show songs downloaded by LastWave"
+                                },
+                                checked = misc.scanFullDeviceAudio,
+                                onCheckedChange = viewModel::setScanFullDeviceAudio,
+                                position = position,
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     SectionLabel("Library & Playlist Imports")
                     SettingsGroup(rowCount = 1) { _, position ->
                         SettingsActionCard(
@@ -903,7 +946,6 @@ fun SettingsScreen(
                         }
                     }
                     Spacer(Modifier.height(4.dp))
-
                     // Prominent Update Available Banner Card (if newer version detected)
                     if (updateInfo.isUpdateAvailable) {
                         Surface(
@@ -964,7 +1006,6 @@ fun SettingsScreen(
                         }
                         Spacer(Modifier.height(8.dp))
                     }
-
                     AboutCard(versionName = appVersionName(context))
 
                     SettingsActionCard(
@@ -1615,7 +1656,7 @@ private fun ScrobbleThresholdRow(percent: Int, onPercentChange: (Int) -> Unit, p
                     )
                 }
             }
-            Slider(
+            ExpressiveSlider(
                 value = sliderValue,
                 onValueChange = { sliderValue = it },
                 onValueChangeFinished = { onPercentChange(sliderValue.toInt()) },
@@ -1682,7 +1723,7 @@ private fun CrossfadeDurationRow(
                     )
                 }
             }
-            Slider(
+            ExpressiveSlider(
                 value = sliderValue,
                 onValueChange = { value ->
                     val rounded = value.roundToInt().coerceIn(1, 12)
@@ -1839,6 +1880,64 @@ private fun relativeTime(timestampMillis: Long): String {
         else -> "${minutes / (60 * 24)}d ago"
     }
 }
+
+/** Shown instead of [AccountCard] while running as a guest: the app works
+ *  fully offline/local, but scrobbling and taste-based mixes need Last.fm. */
+@Composable
+private fun GuestAccountCard(onConnect: () -> Unit) {
+    Card(
+        shape = CardOuterShape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Person,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Last.fm Account",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Browsing as Guest",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Connect Last.fm to scrobble your plays and unlock personalised mixes, " +
+                    "recommendations and friends.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(
+                onClick = onConnect,
+                shape = ExpressivePillShape,
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+            ) {
+                Text("Connect Last.fm account", fontWeight = FontWeight.Medium)
+            }
+        }
+    }
+}
+
 
 @Composable
 private fun AccountCard(
@@ -2259,11 +2358,11 @@ private fun ColorWheelSheet(onDismiss: () -> Unit, onApply: (Color) -> Unit) {
             )
             Spacer(Modifier.height(20.dp))
             Text("Hue", style = MaterialTheme.typography.labelLarge)
-            Slider(value = hue, onValueChange = { hue = it }, valueRange = 0f..360f)
+            ExpressiveSlider(value = hue, onValueChange = { hue = it }, valueRange = 0f..360f)
             Text("Saturation", style = MaterialTheme.typography.labelLarge)
-            Slider(value = saturation, onValueChange = { saturation = it }, valueRange = 0f..1f)
+            ExpressiveSlider(value = saturation, onValueChange = { saturation = it }, valueRange = 0f..1f)
             Text("Lightness", style = MaterialTheme.typography.labelLarge)
-            Slider(value = lightness, onValueChange = { lightness = it }, valueRange = 0.15f..0.85f)
+            ExpressiveSlider(value = lightness, onValueChange = { lightness = it }, valueRange = 0.15f..0.85f)
             Spacer(Modifier.height(12.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = onDismiss, shape = ExpressivePillShape, modifier = Modifier.weight(1f).height(48.dp)) { Text("Cancel") }

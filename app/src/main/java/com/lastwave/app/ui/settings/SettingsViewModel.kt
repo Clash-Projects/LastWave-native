@@ -88,6 +88,7 @@ class SettingsViewModel @Inject constructor(
     private val ytMusicPreferences: com.lastwave.app.data.ytmusic.YtMusicPreferences,
     private val ytMusicLibraryManager: com.lastwave.app.data.ytmusic.YtMusicLibraryManager,
     private val downloadedTrackDao: com.lastwave.app.data.local.db.DownloadedTrackDao,
+    private val downloadManager: com.lastwave.app.data.download.TrackDownloadManager,
     val playlistImportManager: com.lastwave.app.data.playlist.PlaylistImportManager,
     val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
     val appUpdateManager: com.lastwave.app.data.update.AppUpdateManager,
@@ -281,6 +282,16 @@ class SettingsViewModel @Inject constructor(
     fun setDownloadLyrics(enabled: Boolean) = launchSettingsAction("update download lyrics setting") {
         settingsPreferences.setDownloadLyrics(enabled)
     }
+    fun setAutoplayEnabled(enabled: Boolean) = launchSettingsAction("update autoplay setting") {
+        settingsPreferences.setAutoplayEnabled(enabled)
+    }
+    fun setScanFullDeviceAudio(enabled: Boolean) = launchSettingsAction("update device library scanning") {
+        settingsPreferences.setScanFullDeviceAudio(enabled)
+        // Re-index straight away so the change is visible without a restart.
+        runCatching { downloadManager.syncDownloadsFromStorage() }
+            .onFailure { android.util.Log.e(SETTINGS_TAG, "Local library rescan failed", it) }
+    }
+
 
     // ── Experimental: 15-band equalizer ──
 

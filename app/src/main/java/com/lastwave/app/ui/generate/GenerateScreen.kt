@@ -47,8 +47,8 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import com.lastwave.app.ui.common.ExpressiveSlider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -200,7 +200,7 @@ fun GenerateScreen(
                                     )
                                 } else {
                                     Text("Track count: ${state.trackCount}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
-                                    Slider(
+                                    ExpressiveSlider(
                                         value = state.trackCount.toFloat(),
                                         onValueChange = { viewModel.setTrackCount(it.toInt()) },
                                         valueRange = 5f..35f,

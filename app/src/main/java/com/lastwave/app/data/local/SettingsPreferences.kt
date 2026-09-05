@@ -80,6 +80,13 @@ data class MiscSettings(
     val wavySeekbarEnabled: Boolean = true,
     /** When true (default), downloads fetch and save synced lyrics (.lrc companion files and embedded tags). */
     val downloadLyrics: Boolean = true,
+    /** YouTube-Music-style endless playback: when a finite queue runs out, keep
+     *  going with tracks similar to what just played instead of stopping. */
+    val autoplayEnabled: Boolean = true,
+    /** Include every audio file on the device in the local library, not just
+     *  the app's own Music/LastWave downloads folder. Imported device files are
+     *  never deleted by the app — see TrackDownloadManager.isAppOwned. */
+    val scanFullDeviceAudio: Boolean = true,
 )
 
 /** Small dedicated prefs object for settings that don't fit ThemePreferences
@@ -103,6 +110,8 @@ class SettingsPreferences @Inject constructor(
         val CROSSFADE_SECONDS = intPreferencesKey("lw_crossfade_seconds")
         val WAVY_SEEKBAR_ENABLED = booleanPreferencesKey("lw_wavy_seekbar_enabled")
         val DOWNLOAD_LYRICS = booleanPreferencesKey("lw_download_lyrics")
+        val AUTOPLAY_ENABLED = booleanPreferencesKey("lw_autoplay_enabled")
+        val SCAN_FULL_DEVICE_AUDIO = booleanPreferencesKey("lw_scan_full_device_audio")
     }
 
     val settings: Flow<MiscSettings> = dataStore.data
@@ -123,6 +132,8 @@ class SettingsPreferences @Inject constructor(
                 crossfadeSeconds = (p.readSafely(Keys.CROSSFADE_SECONDS) ?: 5).coerceIn(1, 12),
                 wavySeekbarEnabled = p.readSafely(Keys.WAVY_SEEKBAR_ENABLED) ?: true,
                 downloadLyrics = p.readSafely(Keys.DOWNLOAD_LYRICS) ?: true,
+                autoplayEnabled = p.readSafely(Keys.AUTOPLAY_ENABLED) ?: true,
+                scanFullDeviceAudio = p.readSafely(Keys.SCAN_FULL_DEVICE_AUDIO) ?: true,
             )
         }
 
@@ -184,6 +195,14 @@ class SettingsPreferences @Inject constructor(
 
     suspend fun setDownloadLyrics(enabled: Boolean) {
         dataStore.edit { it[Keys.DOWNLOAD_LYRICS] = enabled }
+    }
+
+    suspend fun setAutoplayEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.AUTOPLAY_ENABLED] = enabled }
+    }
+
+    suspend fun setScanFullDeviceAudio(enabled: Boolean) {
+        dataStore.edit { it[Keys.SCAN_FULL_DEVICE_AUDIO] = enabled }
     }
 
     suspend fun toggleFriendPinned(username: String) {

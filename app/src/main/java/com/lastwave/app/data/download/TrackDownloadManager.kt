@@ -141,9 +141,25 @@ class TrackDownloadManager @Inject constructor(
         private const val DOWNLOAD_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
         private val CONTENT_RANGE_PATTERN = Regex("""bytes\s+(\d+)-(\d+)/(\d+)""", RegexOption.IGNORE_CASE)
+        private const val MAX_DOWNLOAD_RETRIES = 1
+        /** Device-wide scanning floor. Keeps voice memos, message tones and
+         *  other stray short clips out of the music library. */
+        private const val MIN_LIBRARY_TRACK_MS = 30_000L
+        private const val MEDIASTORE_UNKNOWN = "<unknown>"
 
         fun makeDownloadKey(title: String, artist: String): String =
             "${artist.trim().lowercase()}_${title.trim().lowercase()}"
+    }
+
+    /** Whether the user has granted the read-audio permission this scan needs. */
+    private fun hasAudioReadPermission(): Boolean {
+        val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            android.Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            android.Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        return androidx.core.content.ContextCompat.checkSelfPermission(context, permission) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
     // Dedicated HTTP client with extended timeouts and high-throughput connection pooling
@@ -1477,13 +1493,42 @@ class TrackDownloadManager @Inject constructor(
     }
 
 
-    suspend fun deleteDownloadedTrack(track: DownloadedTrackEntity) = withContext(Dispatchers.IO) {
-        downloadedTrackDao.delete(track)
-        // Delete physical audio file
+    /**
+     * True only for files this app downloaded into Music/LastWave.
+     *
+     * The local library also indexes the user's own music from anywhere on the
+     * device (see [syncDownloadsFromStorage]). Those files are borrowed, not
+     * owned — removing them from the library must never delete them from the
+     * phone, so every deletion path checks this first.
+     */
+    private fun isAppOwned(track: DownloadedTrackEntity): Boolean {
+        val ownedSegment = "${Environment.DIRECTORY_MUSIC}/$PUBLIC_DIR_NAME"
+        if (track.filePath.isNotBlank() && !track.filePath.startsWith("content://")) {
+            return track.filePath.replace('\\', '/').contains(ownedSegment)
+        }
+        val uri = track.mediaStoreUri?.takeIf { it.isNotBlank() } ?: return false
+        return runCatching {
+            context.contentResolver.query(
+                Uri.parse(uri),
+                arrayOf(MediaStore.Audio.Media.RELATIVE_PATH),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use false
+                val path = cursor.getString(0).orEmpty()
+                path.startsWith(ownedSegment, ignoreCase = true)
+            } ?: false
+        }.getOrDefault(false)
+    }
+
+    /** Removes the physical file only when this app put it there. */
+    private fun deletePhysicalCopy(track: DownloadedTrackEntity) {
+        if (!isAppOwned(track)) return
         if (!track.mediaStoreUri.isNullOrBlank()) {
             runCatching { context.contentResolver.delete(Uri.parse(track.mediaStoreUri), null, null) }
         }
-        if (track.filePath.isNotBlank()) {
+        if (track.filePath.isNotBlank() && !track.filePath.startsWith("content://")) {
             runCatching {
                 val f = File(track.filePath)
                 if (f.exists()) f.delete()
@@ -1502,29 +1547,13 @@ class TrackDownloadManager @Inject constructor(
         }
     }
 
+    suspend fun deleteDownloadedTrack(track: DownloadedTrackEntity) = withContext(Dispatchers.IO) {
+        downloadedTrackDao.delete(track)
+        deletePhysicalCopy(track)
+    }
+
     suspend fun clearAllDownloads() = withContext(Dispatchers.IO) {
-        val all = downloadedTrackDao.getAllList()
-        all.forEach { track ->
-            if (!track.mediaStoreUri.isNullOrBlank()) {
-                runCatching { context.contentResolver.delete(Uri.parse(track.mediaStoreUri), null, null) }
-            }
-            if (track.filePath.isNotBlank()) {
-                runCatching {
-                    val f = File(track.filePath)
-                    if (f.exists()) f.delete()
-                }
-            }
-            if (!track.lrcFilePath.isNullOrBlank()) {
-                if (track.lrcFilePath.startsWith("content://")) {
-                    runCatching { context.contentResolver.delete(Uri.parse(track.lrcFilePath), null, null) }
-                } else {
-                    runCatching {
-                        val lf = File(track.lrcFilePath)
-                        if (lf.exists()) lf.delete()
-                    }
-                }
-            }
-        }
+        downloadedTrackDao.getAllList().forEach(::deletePhysicalCopy)
         downloadedTrackDao.clearAll()
     }
 
@@ -1619,8 +1648,22 @@ class TrackDownloadManager @Inject constructor(
                 MediaStore.Audio.Media.RELATIVE_PATH,
                 MediaStore.Audio.Media.DATE_ADDED,
             )
-            val selection = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
-            val selectionArgs = arrayOf("Music/$PUBLIC_DIR_NAME%")
+            // With full-device scanning on, take every real music file on the
+            // phone (IS_MUSIC already excludes ringtones, alarms and
+            // notifications); otherwise stay inside the app's own folder.
+            val scanWholeDevice = runCatching {
+                settingsPreferences.settings.first().scanFullDeviceAudio
+            }.getOrDefault(true) && hasAudioReadPermission()
+
+            val selection: String
+            val selectionArgs: Array<String>
+            if (scanWholeDevice) {
+                selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} > ?"
+                selectionArgs = arrayOf(MIN_LIBRARY_TRACK_MS.toString())
+            } else {
+                selection = "${MediaStore.Audio.Media.RELATIVE_PATH} LIKE ?"
+                selectionArgs = arrayOf("${Environment.DIRECTORY_MUSIC}/$PUBLIC_DIR_NAME%")
+            }
 
             runCatching {
                 context.contentResolver.query(
@@ -1644,8 +1687,14 @@ class TrackDownloadManager @Inject constructor(
                         val uri = Uri.withAppendedPath(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id.toString())
                         if (uri.toString() in existingUris) continue
 
-                        val title = cursor.getString(titleCol) ?: "Unknown Track"
-                        val artist = cursor.getString(artistCol) ?: "Unknown Artist"
+                        // MediaStore writes the literal "<unknown>" for
+                        // untagged files rather than leaving the column null.
+                        val title = cursor.getString(titleCol)
+                            ?.takeUnless { it.isBlank() || it == MEDIASTORE_UNKNOWN }
+                            ?: "Unknown Track"
+                        val artist = cursor.getString(artistCol)
+                            ?.takeUnless { it.isBlank() || it == MEDIASTORE_UNKNOWN }
+                            ?: "Unknown Artist"
                         val trackKey = makeDownloadKey(title, artist)
                         if (trackKey in existingKeys) continue
 

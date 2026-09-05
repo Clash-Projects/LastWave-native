@@ -14,6 +14,9 @@
         android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <!-- Android 13+ replacement for READ_EXTERNAL_STORAGE. Lets the local
+         library index the music the user already has on the device. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
     <application
         android:name=".LastWaveApplication"

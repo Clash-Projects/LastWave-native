@@ -70,6 +70,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AllInclusive
 import androidx.compose.material.icons.filled.ClearAll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -105,6 +106,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -180,6 +182,7 @@ import com.lastwave.app.playback.PlayableTrack
 import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveInlineLoadingIndicator
 import com.lastwave.app.ui.common.ExpressiveMotion
+import com.lastwave.app.ui.common.ExpressiveSlider
 import com.lastwave.app.ui.common.PlaylistCover
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
@@ -295,6 +298,10 @@ class PlayerViewModel @Inject constructor(
         if (customPlaylistsLoaded) return
         customPlaylistsLoaded = true
         viewModelScope.launch { refreshCustomPlaylists() }
+    }
+
+    fun setAutoplayEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsPreferences.setAutoplayEnabled(enabled) }
     }
 
     fun loadLyrics(track: PlayableTrack, forceRefresh: Boolean = false) {
@@ -567,6 +574,8 @@ private fun ExpandedPlayer(
         lyricsUiVersion = settings.lyricsUiVersion,
         lyricsAnimation = settings.lyricsAnimation,
         wavySeekbarEnabled = settings.wavySeekbarEnabled,
+        autoplayEnabled = settings.autoplayEnabled,
+        onAutoplayChange = viewModel::setAutoplayEnabled,
         currentTab = currentTab,
         onTabChange = onTabChange,
         onRetryLyrics = onRetryLyrics,
@@ -1237,6 +1246,8 @@ private fun FullPlayer(
     lyricsUiVersion: LyricsUiVersion = LyricsUiVersion.CLASSIC,
     lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     wavySeekbarEnabled: Boolean = true,
+    autoplayEnabled: Boolean = true,
+    onAutoplayChange: (Boolean) -> Unit = {},
     currentTab: FullPlayerTab,
     onTabChange: (FullPlayerTab) -> Unit,
     onRetryLyrics: () -> Unit,
@@ -1577,7 +1588,13 @@ private fun FullPlayer(
                         }
 
                         FullPlayerTab.QUEUE -> {
-                            QueuePanel(state, player, Modifier.fillMaxSize().padding(horizontal = 20.dp))
+                            QueuePanel(
+                                state = state,
+                                player = player,
+                                autoplayEnabled = autoplayEnabled,
+                                onAutoplayChange = onAutoplayChange,
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                            )
                         }
 
                         FullPlayerTab.NOW_PLAYING -> {
@@ -2046,60 +2063,17 @@ internal fun PlayerProgressSlider(
     enabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val primary = MaterialTheme.colorScheme.primary
-    val tertiary = MaterialTheme.colorScheme.tertiary
-    val inactive = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.20f else 0.12f)
-    val range = (valueRange.endInclusive - valueRange.start).coerceAtLeast(0.0001f)
-    val fraction = ((value - valueRange.start) / range).coerceIn(0f, 1f)
-
-    Slider(
+    // Same circular knob as the Now Playing seekbar, so the classic slider and
+    // the wavy one read as the same control in different clothes.
+    ExpressiveSlider(
         value = value,
         onValueChange = onValueChange,
         onValueChangeFinished = onValueChangeFinished,
         valueRange = valueRange,
         enabled = enabled,
-        modifier = modifier.drawBehind {
-            val inset = 10.dp.toPx()
-            val startX = inset
-            val endX = (size.width - inset).coerceAtLeast(startX)
-            val activeEndX = startX + ((endX - startX) * fraction)
-            val centerY = size.height / 2f
-            drawLine(
-                color = inactive,
-                start = androidx.compose.ui.geometry.Offset(startX, centerY),
-                end = androidx.compose.ui.geometry.Offset(endX, centerY),
-                strokeWidth = 3.dp.toPx(),
-                cap = StrokeCap.Round,
-            )
-            if (activeEndX > startX) {
-                drawLine(
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            primary.copy(alpha = if (enabled) 1f else 0.42f),
-                            tertiary.copy(alpha = if (enabled) 0.92f else 0.36f),
-                        ),
-                        startX = startX,
-                        endX = activeEndX,
-                    ),
-                    start = androidx.compose.ui.geometry.Offset(startX, centerY),
-                    end = androidx.compose.ui.geometry.Offset(activeEndX, centerY),
-                    strokeWidth = 4.dp.toPx(),
-                    cap = StrokeCap.Round,
-                )
-            }
-        },
-        colors = SliderDefaults.colors(
-            thumbColor = primary,
-            activeTrackColor = Color.Transparent,
-            inactiveTrackColor = Color.Transparent,
-            activeTickColor = Color.Transparent,
-            inactiveTickColor = Color.Transparent,
-            disabledThumbColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f),
-            disabledActiveTrackColor = Color.Transparent,
-            disabledInactiveTrackColor = Color.Transparent,
-            disabledActiveTickColor = Color.Transparent,
-            disabledInactiveTickColor = Color.Transparent,
-        ),
+        modifier = modifier,
+        activeColor = MaterialTheme.colorScheme.primary,
+        inactiveColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.20f else 0.12f),
     )
 }
 
@@ -2157,25 +2131,25 @@ private fun SeekBar(
                 .height(44.dp),
             contentAlignment = Alignment.Center,
         ) {
+            val surfaceColor = MaterialTheme.colorScheme.surface
             Canvas(modifier = Modifier.fillMaxWidth().height(44.dp)) {
                 val width = size.width
                 val height = size.height
                 val centerY = height / 2f
                 val trackHeightPx = 14.dp.toPx()
                 val cornerRadius = CornerRadius(trackHeightPx / 2f, trackHeightPx / 2f)
-                val thumbWidthPx = 5.dp.toPx()
-                val thumbHeightPx = 38.dp.toPx()
-                val thumbClearancePx = 9.dp.toPx()
+                val thumbRadiusPx = 10.dp.toPx()
+                val thumbClearancePx = thumbRadiusPx + 3.dp.toPx()
                 val rawThumbCenterX = fraction * width
-                val thumbCenterX = if (width > thumbWidthPx) {
-                    rawThumbCenterX.coerceIn(thumbWidthPx / 2f, width - thumbWidthPx / 2f)
+                val thumbCenterX = if (width > thumbRadiusPx * 2f) {
+                    rawThumbCenterX.coerceIn(thumbRadiusPx, width - thumbRadiusPx)
                 } else {
                     width / 2f
                 }
                 val activeEndX = (thumbCenterX - thumbClearancePx).coerceIn(0f, width)
                 val inactiveStartX = (thumbCenterX + thumbClearancePx).coerceIn(0f, width)
 
-                // Thick active capsule ending before the vertical thumb.
+                // Thick active capsule ending before the circular thumb.
                 if (activeEndX > 0f) {
                     drawRoundRect(
                         color = primaryColor,
@@ -2185,7 +2159,7 @@ private fun SeekBar(
                     )
                 }
 
-                // Thick inactive capsule starting after the vertical thumb.
+                // Thick inactive capsule starting after the circular thumb.
                 if (inactiveStartX < width) {
                     drawRoundRect(
                         color = inactiveColor,
@@ -2205,15 +2179,21 @@ private fun SeekBar(
                     )
                 }
 
-                // Tall vertical pill thumb with clear space on both sides.
-                val thumbX = thumbCenterX - thumbWidthPx / 2f
-                val thumbCornerRadius = CornerRadius(thumbWidthPx / 2f, thumbWidthPx / 2f)
-
-                drawRoundRect(
+                // Sleek circular thumb knob with subtle depth halo and crisp inner core
+                drawCircle(
+                    color = primaryColor.copy(alpha = 0.22f),
+                    radius = thumbRadiusPx + 3.dp.toPx(),
+                    center = Offset(thumbCenterX, centerY),
+                )
+                drawCircle(
                     color = primaryColor,
-                    topLeft = Offset(thumbX, centerY - thumbHeightPx / 2f),
-                    size = Size(thumbWidthPx, thumbHeightPx),
-                    cornerRadius = thumbCornerRadius,
+                    radius = thumbRadiusPx,
+                    center = Offset(thumbCenterX, centerY),
+                )
+                drawCircle(
+                    color = surfaceColor,
+                    radius = 3.5.dp.toPx(),
+                    center = Offset(thumbCenterX, centerY),
                 )
             }
 
@@ -2457,7 +2437,13 @@ private fun PlayerUtilityControls(state: MusicPlayerState, player: MusicPlayer, 
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: Modifier = Modifier) {
+private fun QueuePanel(
+    state: MusicPlayerState,
+    player: MusicPlayer,
+    autoplayEnabled: Boolean = true,
+    onAutoplayChange: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     Column(modifier) {
         Row(
             Modifier.fillMaxWidth().padding(vertical = 12.dp, horizontal = 4.dp),
@@ -2486,6 +2472,43 @@ private fun QueuePanel(state: MusicPlayerState, player: MusicPlayer, modifier: M
                 Icon(Icons.Filled.ClearAll, "Clear upcoming songs")
             }
         }
+
+        // Endless playback: keeps the queue growing with similar songs once
+        // the loaded tail runs out, instead of stopping at the last track.
+        Surface(
+            onClick = { onAutoplayChange(!autoplayEnabled) },
+            shape = RoundedCornerShape(20.dp),
+            color = if (autoplayEnabled) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 2.dp),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Filled.AllInclusive,
+                    contentDescription = null,
+                    tint = if (autoplayEnabled) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    Text("Autoplay", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (autoplayEnabled) "Keep playing similar songs when the queue ends"
+                        else "Stop when the queue ends",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = autoplayEnabled, onCheckedChange = onAutoplayChange)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
         LazyColumn(
             Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(6.dp),

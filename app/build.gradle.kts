@@ -181,6 +181,17 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+            // libsoxr 0.1.3's own CMake passes unquoted paths to
+            // cmake_dependent_option, so a space anywhere in the CMake binary
+            // directory breaks configuration. The default binary dir is
+            // <project>/.cxx, so when the checkout itself sits in a path with a
+            // space ("...\Wave app\"), stage the native build somewhere safe.
+            if (rootDir.absolutePath.contains(' ')) {
+                buildStagingDirectory = File(
+                    System.getProperty("java.io.tmpdir"),
+                    "lastwave-cxx",
+                )
+            }
         }
     }
     composeOptions {
