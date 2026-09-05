@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -306,10 +307,8 @@ fun TrackContextMenuSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp)
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 24.dp + safeDrawingBottomPadding()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (target is TrackMenuTarget.Track) {
                 StartMixCard {
@@ -317,16 +316,16 @@ fun TrackContextMenuSheet(
                     else startMixViewModel.startMix(target.name, target.artist)
                     onDismiss()
                 }
+                Spacer(Modifier.height(4.dp))
 
-                val rows = buildList<@Composable (GroupPosition) -> Unit> {
+                val rows = buildList<@Composable () -> Unit> {
                     val t = target
                     if (resolvingGenre || !resolvedGenre.isNullOrBlank()) {
-                        add { pos ->
+                        add {
                             MenuInfoRow(
                                 icon = Icons.Filled.Sell,
                                 text = if (resolvingGenre) "Resolving genre\u2026" else "Genre: ${resolvedGenre?.takeIf { it.isNotBlank() } ?: "Unknown"}",
                                 loading = resolvingGenre,
-                                position = pos,
                                 onClick = if (!resolvingGenre && !resolvedGenre.isNullOrBlank()) {
                                     { exploreGenre(resolvedGenre!!); onDismiss() }
                                 } else null,
@@ -334,26 +333,26 @@ fun TrackContextMenuSheet(
                         }
                     }
                     val playable = playableTrack ?: PlayableTrack(title = t.name, artist = t.artist)
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.PlayCircle, "Play in LastWave", position = pos) {
+                    add {
+                        MenuActionRow(Icons.Filled.PlayCircle, "Play in LastWave") {
                             onPlayInLastWave?.invoke() ?: musicPlayer.play(playable, sourceLabel = playbackSourceLabel)
                             onDismiss()
                         }
                     }
-                    add { pos -> MenuActionRow(Icons.Filled.PlaylistAdd, "Add to playlist", position = pos) { addToPlaylist(playable); onDismiss() } }
+                    add { MenuActionRow(Icons.Filled.PlaylistAdd, "Add to playlist") { addToPlaylist(playable); onDismiss() } }
                     val splitArtists = com.lastwave.app.util.ArtistHelper.splitArtists(t.artist)
                     for (art in splitArtists) {
-                        add { pos ->
-                            MenuActionRow(Icons.Filled.Person, "Go to Artist ($art)", position = pos) {
+                        add {
+                            MenuActionRow(Icons.Filled.Person, "Go to Artist ($art)") {
                                 artistAlbumViewModel.openArtist(art)
                                 onDismiss()
                             }
                         }
                     }
                     if (!playable.album.isNullOrBlank()) {
-                        add { pos ->
+                        add {
                             val primaryArt = splitArtists.firstOrNull() ?: t.artist
-                            MenuActionRow(Icons.Filled.Album, "Go to Album (${playable.album})", position = pos) {
+                            MenuActionRow(Icons.Filled.Album, "Go to Album (${playable.album})") {
                                 artistAlbumViewModel.openAlbum(playable.album!!, primaryArt)
                                 onDismiss()
                             }
@@ -361,10 +360,10 @@ fun TrackContextMenuSheet(
                     }
                     val downloadKey = com.lastwave.app.data.download.TrackDownloadManager.makeDownloadKey(t.name, t.artist)
                     val isDownloading = activeDownloads[downloadKey]?.let { !it.isFinished } == true
-                    add { pos ->
+                    add {
                         when {
                             isDownloaded -> {
-                                MenuActionRow(Icons.Filled.CheckCircle, "Downloaded", position = pos) {
+                                MenuActionRow(Icons.Filled.CheckCircle, "Downloaded") {
                                     android.widget.Toast.makeText(
                                         context,
                                         "Track is already downloaded",
@@ -374,7 +373,7 @@ fun TrackContextMenuSheet(
                                 }
                             }
                             isDownloading -> {
-                                MenuActionRow(Icons.Filled.Download, "Downloading\u2026", position = pos) {
+                                MenuActionRow(Icons.Filled.Download, "Downloading\u2026") {
                                     android.widget.Toast.makeText(
                                         context,
                                         "Download is in progress",
@@ -384,83 +383,67 @@ fun TrackContextMenuSheet(
                                 }
                             }
                             else -> {
-                                MenuActionRow(Icons.Filled.Download, "Download (Max Quality)", position = pos) {
+                                MenuActionRow(Icons.Filled.Download, "Download (Max Quality)") {
                                     downloadViewModel.download(t.name, t.artist, playable.album, playable.artworkUrl)
                                     onDismiss()
                                 }
                             }
                         }
                     }
-                    add { pos -> MenuActionRow(Icons.Filled.QueuePlayNext, "Play next", position = pos) { musicPlayer.playNext(playable); onDismiss() } }
-                    add { pos -> MenuActionRow(Icons.Filled.QueueMusic, "Add to queue", position = pos) { musicPlayer.addToQueue(playable); onDismiss() } }
-                    add { pos -> MenuActionRow(Icons.Filled.Language, "Open in Last.fm", position = pos) { openUrl(context, buildLastFmUrl(target)); onDismiss() } }
+                    add { MenuActionRow(Icons.Filled.QueuePlayNext, "Play next") { musicPlayer.playNext(playable); onDismiss() } }
+                    add { MenuActionRow(Icons.Filled.QueueMusic, "Add to queue") { musicPlayer.addToQueue(playable); onDismiss() } }
+                    add { MenuActionRow(Icons.Filled.Language, "Open in Last.fm") { openUrl(context, buildLastFmUrl(target)); onDismiss() } }
                     if (onRefreshArtwork != null) {
-                        add { pos -> MenuActionRow(Icons.Filled.Refresh, "Refresh Cover Art", position = pos) { onRefreshArtwork(); onDismiss() } }
+                        add { MenuActionRow(Icons.Filled.Refresh, "Refresh Cover Art") { onRefreshArtwork(); onDismiss() } }
                     }
                     if (capabilities.showCopyActions) {
-                        add { pos -> MenuActionRow(Icons.Filled.ContentCopy, "Copy Song", position = pos) { clipboard.setText(AnnotatedString("${t.name} \u2014 ${t.artist}")); onDismiss() } }
+                        add { MenuActionRow(Icons.Filled.ContentCopy, "Copy Song") { clipboard.setText(AnnotatedString("${t.name} \u2014 ${t.artist}")); onDismiss() } }
                     }
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.Info, "Details & Audio Specs", position = pos) {
+                    add {
+                        MenuActionRow(Icons.Filled.Info, "Details & Audio Specs") {
                             showDetailsSheet = true
                         }
                     }
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.ThumbDown, "Don't recommend again", danger = true, position = pos) {
+                    add {
+                        MenuActionRow(Icons.Filled.ThumbDown, "Don't recommend again", danger = true) {
                             exclusionViewModel.exclude(t.name, t.artist)
                             onDismiss()
                         }
                     }
                     if (onRemoveFromPlaylist != null) {
-                        add { pos ->
-                            MenuActionRow(Icons.Filled.Delete, "Remove from Playlist", danger = true, position = pos) {
+                        add {
+                            MenuActionRow(Icons.Filled.Delete, "Remove from Playlist", danger = true) {
                                 onRemoveFromPlaylist()
                                 onDismiss()
                             }
                         }
                     }
                 }
-                ExpressiveGroup(rowCount = rows.size) { index, position -> rows[index](position) }
+                rows.forEach { it() }
             } else if (target is TrackMenuTarget.Artist) {
-                val rows = buildList<@Composable (GroupPosition) -> Unit> {
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.Person, "View Artist Page", position = pos) {
-                            artistAlbumViewModel.openArtist(target.name)
-                            onDismiss()
-                        }
-                    }
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.Language, "Open in Last.fm", position = pos) {
-                            openUrl(context, buildLastFmUrl(target))
-                            onDismiss()
-                        }
-                    }
+                MenuActionRow(Icons.Filled.Person, "View Artist Page") {
+                    artistAlbumViewModel.openArtist(target.name)
+                    onDismiss()
                 }
-                ExpressiveGroup(rowCount = rows.size) { index, position -> rows[index](position) }
+                MenuActionRow(Icons.Filled.Language, "Open in Last.fm") {
+                    openUrl(context, buildLastFmUrl(target))
+                    onDismiss()
+                }
             } else if (target is TrackMenuTarget.Album) {
-                val rows = buildList<@Composable (GroupPosition) -> Unit> {
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.Album, "View Album Page", position = pos) {
-                            artistAlbumViewModel.openAlbum(target.name, target.artist)
-                            onDismiss()
-                        }
-                    }
-                    if (target.artist.isNotBlank()) {
-                        add { pos ->
-                            MenuActionRow(Icons.Filled.Person, "View Artist (${target.artist})", position = pos) {
-                                artistAlbumViewModel.openArtist(target.artist)
-                                onDismiss()
-                            }
-                        }
-                    }
-                    add { pos ->
-                        MenuActionRow(Icons.Filled.Language, "Open in Last.fm", position = pos) {
-                            openUrl(context, buildLastFmUrl(target))
-                            onDismiss()
-                        }
+                MenuActionRow(Icons.Filled.Album, "View Album Page") {
+                    artistAlbumViewModel.openAlbum(target.name, target.artist)
+                    onDismiss()
+                }
+                if (target.artist.isNotBlank()) {
+                    MenuActionRow(Icons.Filled.Person, "View Artist (${target.artist})") {
+                        artistAlbumViewModel.openArtist(target.artist)
+                        onDismiss()
                     }
                 }
-                ExpressiveGroup(rowCount = rows.size) { index, position -> rows[index](position) }
+                MenuActionRow(Icons.Filled.Language, "Open in Last.fm") {
+                    openUrl(context, buildLastFmUrl(target))
+                    onDismiss()
+                }
             }
         }
     }
@@ -483,7 +466,7 @@ private fun StartMixCard(onClick: () -> Unit) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.97f else 1f,
+        targetValue = if (pressed) 0.98f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
         label = "startMixScale",
     )
@@ -495,11 +478,11 @@ private fun StartMixCard(onClick: () -> Unit) {
         // nonzero tonalElevation would blend a second tinted layer on top
         // of containerColor here.
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(20.dp),
         interactionSource = interactionSource,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
             .scale(scale),
     ) {
         Row(
@@ -528,49 +511,37 @@ private fun StartMixCard(onClick: () -> Unit) {
     }
 }
 
-/** A rounded, elevated-feeling row (real Card, not a flat clickable Row) —
- *  each menu action is one row in the shared ExpressiveGroup surface (see
- *  the call site), so the whole set of actions reads as one continuous
- *  premium container instead of separate floating rows — same language as
- *  Settings/Generator's grouped lists. */
+/** Full-width edge-to-edge action row with tinted icon badge and ripple indication. */
 @Composable
-private fun MenuActionRow(icon: ImageVector, label: String, danger: Boolean = false, position: GroupPosition = GroupPosition.SINGLE, onClick: () -> Unit) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val scale = rememberGroupPressScale(interactionSource)
+private fun MenuActionRow(icon: ImageVector, label: String, danger: Boolean = false, onClick: () -> Unit) {
     val contentColor = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
     val badgeColor = if (danger) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
     val badgeContentColor = if (danger) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
 
-    Card(
-        onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = groupShape(position),
-        interactionSource = interactionSource,
-        modifier = Modifier.fillMaxWidth().scale(scale),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(badgeColor),
+            contentAlignment = Alignment.Center,
         ) {
-            Box(
-                Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(badgeColor),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, contentDescription = null, tint = badgeContentColor, modifier = Modifier.size(20.dp))
-            }
-            Spacer(Modifier.width(16.dp))
-            Text(
-                label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = contentColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Icon(icon, contentDescription = null, tint = badgeContentColor, modifier = Modifier.size(20.dp))
         }
+        Spacer(Modifier.width(16.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = contentColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -579,36 +550,38 @@ private fun MenuInfoRow(
     icon: ImageVector,
     text: String,
     loading: Boolean,
-    position: GroupPosition = GroupPosition.SINGLE,
     onClick: (() -> Unit)? = null,
 ) {
-    Card(
-        onClick = onClick ?: {},
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        shape = groupShape(position),
-        // Not actually interactive when there's no genre to open yet
-        // (still resolving, or resolution came back empty) — no ripple,
-        // no press feedback pretending there's something to tap.
-        enabled = onClick != null,
-        modifier = Modifier.fillMaxWidth(),
+    val clickableModifier = if (onClick != null) {
+        Modifier.clickable(onClick = onClick)
+    } else Modifier
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(clickableModifier)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Box(
+            Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(13.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.width(16.dp))
-            Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            if (loading) {
-                ExpressiveInlineLoadingIndicator(
-                    modifier = Modifier.padding(start = 8.dp),
-                    size = 14.dp,
-                    strokeWidth = 2.dp,
-                )
-            } else if (onClick != null) {
-                Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
-            }
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(16.dp))
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        if (loading) {
+            ExpressiveInlineLoadingIndicator(
+                modifier = Modifier.padding(start = 8.dp),
+                size = 14.dp,
+                strokeWidth = 2.dp,
+            )
+        } else if (onClick != null) {
+            Icon(Icons.AutoMirrored.Filled.ArrowForwardIos, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
         }
     }
 }

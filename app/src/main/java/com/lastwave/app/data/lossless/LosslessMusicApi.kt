@@ -1,6 +1,7 @@
 package com.lastwave.app.data.lossless
 
 import android.util.Log
+import com.lastwave.app.data.artwork.awaitSuccessfulBodyOrNull
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
@@ -232,7 +233,7 @@ class LosslessMusicApi @Inject constructor(
         }
     }
 
-    private fun fetchTrackStreamUrl(
+    private suspend fun fetchTrackStreamUrl(
         candidate: LosslessTrackItem,
         quality: Int,
         fallback: Boolean,
@@ -246,38 +247,35 @@ class LosslessMusicApi @Inject constructor(
         if (BACKEND_API_KEY.isNotBlank()) requestBuilder.addHeader("X-API-Key", BACKEND_API_KEY)
 
         return try {
-            resolutionClient.newCall(requestBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Log.w(TAG, "Lossless stream request for track ${candidate.id} quality $quality failed with HTTP ${response.code}")
-                    return null
-                }
-                val body = response.body?.string() ?: return null
-                val parsed = json.decodeFromString<LosslessTrackUrlResponse>(body)
-                if (!parsed.success) {
-                    Log.w(TAG, "Lossless stream response for track ${candidate.id} quality $quality rejected: ${parsed.error.orEmpty()}")
-                    return null
-                }
-                val data = parsed.data ?: return null
-                val streamUrl = data.url?.takeIf { it.isNotBlank() } ?: return null
-
-                val bitrateKbps = when (data.formatId) {
-                    QUALITY_MAX_HI_RES -> ((data.bitDepth * data.samplingRate * 2 * 1000) / 1000).toInt()
-                    QUALITY_HI_RES_96 -> ((data.bitDepth * data.samplingRate * 2 * 1000) / 1000).toInt()
-                    QUALITY_CD_LOSSLESS -> 1411
-                    QUALITY_MP3_320 -> 320
-                    else -> null
-                }
-
-                LosslessAudioStream(
-                    url = streamUrl,
-                    mimeType = data.mimeType.ifBlank { "audio/flac" },
-                    bitDepth = data.bitDepth.takeIf { it > 0 } ?: 16,
-                    samplingRate = data.samplingRate.takeIf { it > 0 } ?: 44.1,
-                    formatId = data.formatId,
-                    bitrateKbps = bitrateKbps,
-                    trackId = candidate.id,
-                )
+            val body = resolutionClient.newCall(requestBuilder.build()).awaitSuccessfulBodyOrNull()
+                ?: return null
+            val parsed = json.decodeFromString<LosslessTrackUrlResponse>(body)
+            if (!parsed.success) {
+                Log.w(TAG, "Lossless stream response for track ${candidate.id} quality $quality rejected: ${parsed.error.orEmpty()}")
+                return null
             }
+            val data = parsed.data ?: return null
+            val streamUrl = data.url?.takeIf { it.isNotBlank() } ?: return null
+
+            val bitrateKbps = when (data.formatId) {
+                QUALITY_MAX_HI_RES -> ((data.bitDepth * data.samplingRate * 2 * 1000) / 1000).toInt()
+                QUALITY_HI_RES_96 -> ((data.bitDepth * data.samplingRate * 2 * 1000) / 1000).toInt()
+                QUALITY_CD_LOSSLESS -> 1411
+                QUALITY_MP3_320 -> 320
+                else -> null
+            }
+
+            LosslessAudioStream(
+                url = streamUrl,
+                mimeType = data.mimeType.ifBlank { "audio/flac" },
+                bitDepth = data.bitDepth.takeIf { it > 0 } ?: 16,
+                samplingRate = data.samplingRate.takeIf { it > 0 } ?: 44.1,
+                formatId = data.formatId,
+                bitrateKbps = bitrateKbps,
+                trackId = candidate.id,
+            )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.d(TAG, "Lossless stream fetch for quality $quality failed: ${e.message}")
             null
@@ -313,15 +311,13 @@ class LosslessMusicApi @Inject constructor(
             }
 
             val items = try {
-                resolutionClient.newCall(reqBuilder.build()).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        Log.w(TAG, "Lossless search failed with HTTP ${response.code}")
-                        return@use emptyList<LosslessTrackItem>()
-                    }
-                    val body = response.body?.string() ?: return@use emptyList<LosslessTrackItem>()
+                val body = resolutionClient.newCall(reqBuilder.build()).awaitSuccessfulBodyOrNull()
+                if (body == null) emptyList() else {
                     val searchRes = json.decodeFromString<LosslessSearchResponse>(body)
                     if (searchRes.success) searchRes.results?.tracks?.items.orEmpty() else emptyList()
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.d(TAG, "Lossless search failed gracefully: ${e.message}")
                 emptyList()

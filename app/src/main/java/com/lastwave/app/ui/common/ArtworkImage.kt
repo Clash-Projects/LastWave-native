@@ -69,7 +69,7 @@ fun ArtworkImage(
     // when its own URL resolves.
     val resolvedUrl by remember(key) {
         artworkViewModel.resolved.map { it[key] }.distinctUntilChanged()
-    }.collectAsStateWithLifecycle(initialValue = null)
+    }.collectAsStateWithLifecycle(initialValue = artworkViewModel.resolved.value[key])
 
     LaunchedEffect(key, resolvedUrl) {
         if (resolvedUrl == null) {

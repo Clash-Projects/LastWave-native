@@ -426,22 +426,27 @@ class YtMusicLibraryManager @Inject constructor(
         track: GeneratedTrack,
         allowDuplicate: Boolean = false,
     ): Boolean = withContext(Dispatchers.IO) {
-        val playlist = loadDetail(localId) ?: return@withContext false
+        val cachedPlaylist = details[localId] ?: readFromDiskCache(localId)
+        val remoteId = cachedPlaylist?.remotePlaylistId
+            ?: remoteIdsByLocalId[localId]
+            ?: _accountPlaylists.value.firstOrNull { stableRemoteId(it.id) == localId }?.id
+            ?: return@withContext false
         val exactVideoId = track.youtubeVideoIdOrNull()
         val match = if (exactVideoId == null) innerTube.findBestMatchOrNull(track.name, track.artist) else null
         val videoId = exactVideoId ?: match?.videoId ?: return@withContext false
-        if (!allowDuplicate) {
-            val expectedTrackCount = playlist.remoteTrackCount ?: return@withContext false
-            if (playlist.tracks.size < expectedTrackCount) return@withContext false
-            if (playlist.tracks.any { it.matches(track, match) }) return@withContext false
+        if (!allowDuplicate && cachedPlaylist != null) {
+            if (cachedPlaylist.tracks.any { it.matches(track, match) }) return@withContext false
         }
-        val remoteId = playlist.remotePlaylistId ?: return@withContext false
         val added = innerTube.addVideosToRemotePlaylist(remoteId, listOf(videoId))
         if (added) {
             ownedPlaylistCache.remove(localId)
             details.remove(localId)
             File(cacheDir, "$localId.json").delete()
-            updateRemoteTrackCount(remoteId, (playlist.remoteTrackCount ?: playlist.tracks.size) + 1)
+            val currentCount = cachedPlaylist?.remoteTrackCount
+                ?: cachedPlaylist?.tracks?.size
+                ?: _accountPlaylists.value.firstOrNull { it.id == remoteId }?.trackCountText?.substringBefore(' ')?.replace(",", "")?.toIntOrNull()
+                ?: 0
+            updateRemoteTrackCount(remoteId, currentCount + 1)
         }
         added
     }
@@ -450,14 +455,7 @@ class YtMusicLibraryManager @Inject constructor(
         localIds: Set<Long>,
         track: GeneratedTrack,
     ): Set<Long> = withContext(Dispatchers.IO) {
-        if (localIds.isEmpty()) return@withContext emptySet()
-        val directVideoId = track.youtubeVideoIdOrNull()
-        val match = if (directVideoId == null) innerTube.findBestMatchOrNull(track.name, track.artist) else null
-        if (directVideoId == null && match == null) return@withContext emptySet()
-        localIds.filterTo(mutableSetOf()) { localId ->
-            val playlist = refreshDetailFromNetwork(localId) ?: loadDetail(localId)
-            playlist?.tracks?.any { it.matches(track, match) } == true
-        }
+        findCachedDuplicatePlaylistIds(localIds, track)
     }
 
     suspend fun findCachedDuplicatePlaylistIds(
@@ -466,11 +464,14 @@ class YtMusicLibraryManager @Inject constructor(
     ): Set<Long> = withContext(Dispatchers.IO) {
         if (localIds.isEmpty()) return@withContext emptySet()
         val directVideoId = track.youtubeVideoIdOrNull()
-        val match = if (directVideoId == null) innerTube.findBestMatchOrNull(track.name, track.artist) else null
-        if (directVideoId == null && match == null) return@withContext emptySet()
         localIds.filterTo(mutableSetOf()) { localId ->
             val playlist = details[localId] ?: readFromDiskCache(localId)
-            playlist?.tracks?.any { it.matches(track, match) } == true
+            playlist?.tracks?.any { cachedTrack ->
+                val cachedVideoId = cachedTrack.youtubeVideoIdOrNull()
+                (directVideoId != null && cachedVideoId != null && cachedVideoId == directVideoId) ||
+                    cachedTrack.key == track.key ||
+                    (cachedTrack.name.equals(track.name, ignoreCase = true) && cachedTrack.artist.equals(track.artist, ignoreCase = true))
+            } == true
         }
     }
 
@@ -480,7 +481,8 @@ class YtMusicLibraryManager @Inject constructor(
         return (videoId != null && videoId == originalVideoId) ||
             videoId == match?.videoId ||
             key == original.key ||
-            (match != null && key == "${match.title}|${match.artist}".lowercase())
+            (match != null && key == "${match.title}|${match.artist}".lowercase()) ||
+            (name.equals(original.name, ignoreCase = true) && artist.equals(original.artist, ignoreCase = true))
     }
 
     suspend fun removeTrack(localId: Long, index: Int): SavedPlaylist? = withContext(Dispatchers.IO) {

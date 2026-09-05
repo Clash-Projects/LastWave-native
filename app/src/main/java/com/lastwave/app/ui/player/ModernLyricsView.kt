@@ -2,11 +2,14 @@ package com.lastwave.app.ui.player
 
 import android.os.SystemClock
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lyrics
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
@@ -49,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextMotion
@@ -79,6 +84,7 @@ fun ModernLyricsPanel(
     lyricsState: LyricsUiState,
     progressState: StateFlow<PlaybackProgressState>? = null,
     wavySeekbarEnabled: Boolean = true,
+    onOpenPlayer: (() -> Unit)? = null,
     onRetry: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -221,6 +227,7 @@ fun ModernLyricsPanel(
             totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
             player = player,
             wavySeekbarEnabled = wavySeekbarEnabled,
+            onOpenPlayer = onOpenPlayer,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
@@ -371,6 +378,7 @@ private fun ModernLyricsControls(
     totalDurationMs: Long,
     player: MusicPlayer,
     wavySeekbarEnabled: Boolean = true,
+    onOpenPlayer: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -379,6 +387,47 @@ private fun ModernLyricsControls(
             .padding(horizontal = 4.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        if (onOpenPlayer != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 2.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val playerInteraction = remember { MutableInteractionSource() }
+                val isPlayerPressed by playerInteraction.collectIsPressedAsState()
+                val playerScale by animateFloatAsState(
+                    targetValue = if (isPlayerPressed) 0.82f else 1.0f,
+                    animationSpec = ExpressiveMotion.spatialSpring(),
+                    label = "playerTabScale",
+                )
+                Surface(
+                    onClick = onOpenPlayer,
+                    interactionSource = playerInteraction,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .graphicsLayer {
+                            scaleX = playerScale
+                            scaleY = playerScale
+                        },
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.MusicNote,
+                            contentDescription = "Now playing",
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+            }
+        }
+
         var dragging by remember { mutableStateOf(false) }
         var dragValue by remember { mutableFloatStateOf(0f) }
         val end = totalDurationMs.coerceAtLeast(1).toFloat()

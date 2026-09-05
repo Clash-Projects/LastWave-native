@@ -147,23 +147,8 @@ class SearchViewModel @Inject constructor(
                     artworkUrl = item.artworkUrl,
                     videoId = item.videoId,
                 )
-                // Start immediately. Recommendations load in the background
-                // and are appended only if this is still the active track.
-                musicPlayer.play(selected, sourceLabel = "Search")
-                searchQueueJob = viewModelScope.launch {
-                    val related = repository.similarSongsFor(item)
-                    musicPlayer.appendSearchRecommendations(
-                        seed = selected,
-                        tracks = related.map { track ->
-                            PlayableTrack(
-                                title = track.name,
-                                artist = track.artist,
-                                album = track.album,
-                                artworkUrl = track.artworkUrl,
-                            )
-                        },
-                    )
-                }
+                // Start immediately. Similar song radio queue loads and extends infinitely.
+                musicPlayer.play(selected, sourceLabel = "Search", startRadio = true)
             }
             SearchTab.ARTISTS, SearchTab.ALBUMS -> viewModelScope.launch {
                 val tracks = runCatching { repository.songsFor(item) }.getOrDefault(emptyList())

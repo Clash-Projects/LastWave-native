@@ -8,6 +8,7 @@ import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.StoredTrack
 import com.lastwave.app.data.generate.toGenerated
 import com.lastwave.app.data.generate.toStored
+import com.lastwave.app.data.generate.youtubeVideoIdOrNull
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.util.FileExportHelper
 import kotlinx.coroutines.CancellationException
@@ -249,7 +250,7 @@ class PlaylistRepository @Inject constructor(
         val playlist = entity.toDomain()
         if (playlist.mode != "custom" && playlist.mode != LIKED_SONGS_MODE) return playlist
         if ((playlist.mode == LIKED_SONGS_MODE || !allowDuplicate) && playlist.tracks.any { it.key == track.key }) return playlist
-        if (!innerTube.isPlayable(track.name, track.artist)) return playlist
+        if (track.youtubeVideoIdOrNull() == null && !innerTube.isPlayable(track.name, track.artist)) return playlist
         val updatedTracksJson = json.encodeToString((playlist.tracks + track).map { it.toStored() })
         val updated = entity.copy(tracksJson = updatedTracksJson)
         dao.upsert(updated)

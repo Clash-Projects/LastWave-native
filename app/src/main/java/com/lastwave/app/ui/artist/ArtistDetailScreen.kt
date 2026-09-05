@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -35,6 +36,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
@@ -64,6 +67,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -117,6 +121,7 @@ fun ArtistDetailScreen(
     }
 
     var selectedTrackMenu by remember { mutableStateOf<PlayableTrack?>(null) }
+    var showAllSongs by rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     val showScrolledHeader by remember {
@@ -446,6 +451,13 @@ fun ArtistDetailScreen(
 
                     // 3. Top Songs Section Header
                     if (data.topSongs.isNotEmpty()) {
+                        val initialDisplayLimit = 10
+                        val visibleSongs = if (showAllSongs || data.topSongs.size <= initialDisplayLimit) {
+                            data.topSongs
+                        } else {
+                            data.topSongs.take(initialDisplayLimit)
+                        }
+
                         item(key = "top_songs_header") {
                             Row(
                                 modifier = Modifier
@@ -469,7 +481,7 @@ fun ArtistDetailScreen(
 
                         // Top Songs List
                         itemsIndexed(
-                            data.topSongs,
+                            visibleSongs,
                             key = { index, track -> "${track.videoId ?: track.title}_$index" },
                             contentType = { _, _ -> "artist_top_song" },
                         ) { index, track ->
@@ -485,7 +497,8 @@ fun ArtistDetailScreen(
                                     .fillMaxWidth()
                                     .clickable {
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        viewModel.playAll(startIndex = index)
+                                        val fullIndex = data.topSongs.indexOf(track).takeIf { it >= 0 } ?: index
+                                        viewModel.playAll(startIndex = fullIndex)
                                     },
                             ) {
                                 Row(
@@ -554,6 +567,46 @@ fun ArtistDetailScreen(
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(20.dp),
                                         )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (data.topSongs.size > initialDisplayLimit) {
+                            item(key = "top_songs_toggle_button") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                ) {
+                                    Surface(
+                                        onClick = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            showAllSongs = !showAllSongs
+                                        },
+                                        shape = RoundedCornerShape(24.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Text(
+                                                text = if (showAllSongs) "Show less" else "Show all ${data.topSongs.size} songs",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.primary,
+                                            )
+                                            Icon(
+                                                imageVector = if (showAllSongs) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp),
+                                            )
+                                        }
                                     }
                                 }
                             }

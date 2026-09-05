@@ -129,7 +129,7 @@ class LinkPlaybackResolver @Inject constructor(
             }
 
             withContext(Dispatchers.Main) {
-                musicPlayer.play(playable, sourceLabel = "YouTube Music")
+                musicPlayer.play(playable, sourceLabel = "YouTube Music", startRadio = true)
             }
         }
     }
@@ -210,7 +210,7 @@ class LinkPlaybackResolver @Inject constructor(
         }
 
         withContext(Dispatchers.Main) {
-            musicPlayer.play(playable, sourceLabel = "Spotify Link")
+            musicPlayer.play(playable, sourceLabel = "Spotify Link", startRadio = true)
         }
     }
 
@@ -218,7 +218,7 @@ class LinkPlaybackResolver @Inject constructor(
         val tracks = innerTube.searchSongs(query, limit = 1)
         val first = tracks.firstOrNull() ?: return
         withContext(Dispatchers.Main) {
-            musicPlayer.play(first.toPlayable(), sourceLabel = "Shared Song")
+            musicPlayer.play(first.toPlayable(), sourceLabel = "Shared Song", startRadio = true)
         }
     }
 

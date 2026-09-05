@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
@@ -35,7 +36,9 @@ fun PlaylistCover(
 ) {
     val context = LocalContext.current
     val shape = RoundedCornerShape(cornerRadius)
-    val directCover = playlist.customCoverUri ?: playlist.remoteArtworkUrl
+    val directCover = playlist.customCoverUri?.takeIf(String::isNotBlank)
+        ?: playlist.remoteArtworkUrl?.takeIf(String::isNotBlank)
+    var lastSuccessfulPainter by remember(playlist.id) { mutableStateOf<Painter?>(null) }
     var lastValidCover by remember(playlist.id) { mutableStateOf(directCover?.takeIf(String::isNotBlank)) }
     LaunchedEffect(directCover) {
         if (!directCover.isNullOrBlank()) {
@@ -56,18 +59,26 @@ fun PlaylistCover(
             .background(MaterialTheme.colorScheme.surfaceContainerHighest),
         contentAlignment = Alignment.Center,
     ) {
-        if (!effectiveCover.isNullOrBlank() && !customCoverFailed) {
+        Icon(
+            Icons.Filled.MusicNote,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (!effectiveCover.isNullOrBlank() && (!customCoverFailed || lastSuccessfulPainter != null)) {
             val imageRequest = remember(effectiveCover, context) {
                 ImageRequest.Builder(context)
                     .data(effectiveCover)
                     .size(512)
-                    .crossfade(true)
+                    .crossfade(false)
                     .build()
             }
             AsyncImage(
                 model = imageRequest,
                 contentDescription = "${playlist.title} cover",
                 contentScale = ContentScale.Crop,
+                placeholder = lastSuccessfulPainter,
+                error = lastSuccessfulPainter,
+                onSuccess = { lastSuccessfulPainter = it.painter },
                 onError = { customCoverFailed = true },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -78,12 +89,6 @@ fun PlaylistCover(
                 embeddedUrl = automaticTrack.artworkUrl,
                 fallbackIcon = Icons.Filled.MusicNote,
                 modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            Icon(
-                Icons.Filled.MusicNote,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

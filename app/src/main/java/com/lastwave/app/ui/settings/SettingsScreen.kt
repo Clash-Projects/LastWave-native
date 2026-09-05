@@ -687,7 +687,9 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                                 title = "Crossfade",
-                                subtitle = if (misc.crossfadeEnabled) {
+                                subtitle = if (misc.crossfadeEnabled && misc.isBitPerfectEnabled) {
+                                    "Paused while Bit-Perfect is enabled"
+                                } else if (misc.crossfadeEnabled) {
                                     "Smooth transition between tracks \u2022 ${misc.crossfadeSeconds} sec"
                                 } else {
                                     "Blend the end of a track into the next one"
@@ -1634,7 +1636,11 @@ private fun CrossfadeDurationRow(
     position: GroupPosition = GroupPosition.SINGLE,
 ) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
-    var sliderValue by remember(seconds) { mutableStateOf(seconds.coerceIn(1, 12).toFloat()) }
+    var sliderValue by remember { mutableStateOf(seconds.coerceIn(1, 12).toFloat()) }
+    var isDragging by remember { mutableStateOf(false) }
+    LaunchedEffect(seconds) {
+        if (!isDragging) sliderValue = seconds.coerceIn(1, 12).toFloat()
+    }
     val shape = groupShape(position)
     val liquidGlass = LocalLiquidGlass.current
 
@@ -1685,6 +1691,7 @@ private fun CrossfadeDurationRow(
             Slider(
                 value = sliderValue,
                 onValueChange = { value ->
+                    isDragging = true
                     val rounded = value.roundToInt().coerceIn(1, 12)
                     if (rounded.toFloat() != sliderValue) {
                         haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
@@ -1693,7 +1700,7 @@ private fun CrossfadeDurationRow(
                     }
                 },
                 onValueChangeFinished = {
-                    onSecondsChange(sliderValue.roundToInt().coerceIn(1, 12))
+                    isDragging = false
                 },
                 valueRange = 1f..12f,
                 steps = 10,

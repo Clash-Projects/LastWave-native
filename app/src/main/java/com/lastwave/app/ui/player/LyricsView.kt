@@ -14,6 +14,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +37,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lyrics
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MusicOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SkipNext
@@ -102,6 +104,7 @@ fun LyricsPanel(
     lyricsAnimation: LyricsAnimation = LyricsAnimation.APPLE_FLUID,
     wavySeekbarEnabled: Boolean = true,
     onRetry: () -> Unit,
+    onOpenPlayer: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val track = state.current ?: return
@@ -224,6 +227,7 @@ fun LyricsPanel(
             totalDurationMs = if (progress.durationMs > 0) progress.durationMs else state.durationMs,
             player = player,
             wavySeekbarEnabled = wavySeekbarEnabled,
+            onOpenPlayer = onOpenPlayer,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
@@ -794,6 +798,7 @@ private fun LyricsPlaybackControls(
     totalDurationMs: Long,
     player: MusicPlayer,
     wavySeekbarEnabled: Boolean = true,
+    onOpenPlayer: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // This Column performs layout only. It intentionally draws no container.
@@ -803,6 +808,47 @@ private fun LyricsPlaybackControls(
             .padding(horizontal = 4.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
+        if (onOpenPlayer != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 2.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val playerInteraction = remember { MutableInteractionSource() }
+                val isPlayerPressed by playerInteraction.collectIsPressedAsState()
+                val playerScale by animateFloatAsState(
+                    targetValue = if (isPlayerPressed) 0.82f else 1.0f,
+                    animationSpec = ExpressiveMotion.spatialSpring(),
+                    label = "playerTabScale",
+                )
+                Surface(
+                    onClick = onOpenPlayer,
+                    interactionSource = playerInteraction,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.40f),
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .graphicsLayer {
+                            scaleX = playerScale
+                            scaleY = playerScale
+                        },
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.MusicNote,
+                            contentDescription = "Now playing",
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+            }
+        }
+
         var dragging by remember { mutableStateOf(false) }
         var dragValue by remember { mutableFloatStateOf(0f) }
         val end = totalDurationMs.coerceAtLeast(1).toFloat()

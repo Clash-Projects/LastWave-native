@@ -71,18 +71,28 @@ class ArtistRepository @Inject constructor(
 
             var topSongs = ytData?.topSongs.orEmpty()
 
-            // Fallback: If InnerTube returned no songs, search songs by artist
-            if (topSongs.isEmpty() && finalName.isNotBlank()) {
-                val songs = runCatching { innerTube.searchSongs(finalName, limit = 25) }.getOrDefault(emptyList())
-                topSongs = songs.map { track ->
-                    PlayableTrack(
-                        title = track.title,
-                        artist = track.artist.takeUnless { it == "Unknown artist" } ?: finalName,
-                        album = track.album,
-                        artworkUrl = track.artworkUrl ?: artwork,
-                        videoId = track.videoId,
-                    )
-                }
+            // Fallback & Enrichment: If InnerTube returned <= 5 preview songs or was empty, supplement with search
+            if (topSongs.size <= 5 && finalName.isNotBlank()) {
+                val songs = runCatching { innerTube.searchSongs(finalName, limit = 30) }.getOrDefault(emptyList())
+                val existingIds = topSongs.mapNotNull { it.videoId }.toSet()
+                val existingTitles = topSongs.map { it.title.lowercase().trim() }.toSet()
+                val additionalTracks = songs
+                    .filterNot { it.videoId in existingIds || it.title.lowercase().trim() in existingTitles }
+                    .filter { track ->
+                        track.artist.contains(finalName, ignoreCase = true) ||
+                        finalName.contains(track.artist, ignoreCase = true) ||
+                        track.artist.equals("Unknown artist", ignoreCase = true)
+                    }
+                    .map { track ->
+                        PlayableTrack(
+                            title = track.title,
+                            artist = track.artist.takeUnless { it == "Unknown artist" } ?: finalName,
+                            album = track.album,
+                            artworkUrl = track.artworkUrl ?: artwork,
+                            videoId = track.videoId,
+                        )
+                    }
+                topSongs = (topSongs + additionalTracks).distinctBy { it.videoId ?: it.title }
             }
 
             ArtistPageData(

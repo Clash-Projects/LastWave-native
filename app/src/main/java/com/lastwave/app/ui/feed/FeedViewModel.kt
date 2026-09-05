@@ -109,7 +109,7 @@ class FeedViewModel @Inject constructor(
     fun dismissError() = _uiState.update { it.copy(error = null) }
 
     fun playTrack(track: YouTubeMusicTrack, sourceLabel: String = "Feed") {
-        musicPlayer.play(track.toPlayableTrack(), sourceLabel = sourceLabel)
+        musicPlayer.play(track.toPlayableTrack(), sourceLabel = sourceLabel, startRadio = true)
     }
 
     fun playTracksQueue(tracks: List<YouTubeMusicTrack>, startIndex: Int = 0, sourceLabel: String = "Feed") {
@@ -126,6 +126,7 @@ class FeedViewModel @Inject constructor(
                 artist = it.artist.displayName,
                 album = it.album.displayName,
                 artworkUrl = it.artworkUrl,
+                videoId = GeneratedTrack(it.name, it.artist.displayName, it.artworkUrl, it.url).youtubeVideoIdOrNull(),
             )
         }
         musicPlayer.playQueue(playable, startIndex = startIndex.coerceIn(0, playable.lastIndex.coerceAtLeast(0)), sourceLabel = "Jump Back In")
@@ -222,7 +223,7 @@ class FeedViewModel @Inject constructor(
                 title = tile.title,
                 artist = tile.subtitle ?: "",
                 artworkUrl = tile.artworkUrl,
-                videoId = videoId,
+                videoId = videoId.takeIf(String::isNotBlank),
             ),
             sourceLabel = "Quick Picks",
         )
@@ -233,6 +234,6 @@ class FeedViewModel @Inject constructor(
         artist = artist,
         album = album,
         artworkUrl = artworkUrl,
-        videoId = videoId,
+        videoId = videoId.takeIf(String::isNotBlank),
     )
 }

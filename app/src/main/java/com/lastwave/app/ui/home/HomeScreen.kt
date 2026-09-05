@@ -1,5 +1,11 @@
 package com.lastwave.app.ui.home
 
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -72,12 +78,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.People
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.tween
@@ -105,7 +106,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
@@ -801,18 +801,9 @@ private fun TrackRow(
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (isNowPlaying) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.45f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        com.lastwave.app.ui.player.PlayingWaveBars(
-                            modifier = Modifier.size(20.dp),
-                            waveColor = Color.White,
-                            containerColor = Color.Transparent,
-                        )
-                    }
+                    com.lastwave.app.ui.player.PlayingWaveBars(
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(2.dp).size(24.dp, 18.dp),
+                    )
                 }
             }
             Spacer(Modifier.width(14.dp))
@@ -835,43 +826,28 @@ private fun TrackRow(
             }
             Spacer(Modifier.width(8.dp))
             if (isNowPlaying) {
-                val infiniteTransition = rememberInfiniteTransition(label = "nowPlayingPulse")
-                val pulseScale by infiniteTransition.animateFloat(
-                    initialValue = 1.0f,
+                val transition = rememberInfiniteTransition(label = "nowPlayingPulse")
+                val pulseScale = transition.animateFloat(
+                    initialValue = 1f,
                     targetValue = 1.06f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(1200, easing = LinearEasing),
-                        repeatMode = RepeatMode.Reverse,
-                    ),
+                    animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Reverse),
                     label = "pulseScale",
                 )
                 Surface(
                     shape = BadgePillShape,
-                    color = MaterialTheme.colorScheme.primary,
-                    tonalElevation = 4.dp,
-                    shadowElevation = 2.dp,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                     modifier = Modifier.graphicsLayer {
-                        scaleX = pulseScale
-                        scaleY = pulseScale
+                        scaleX = pulseScale.value
+                        scaleY = pulseScale.value
                     },
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    ) {
-                        com.lastwave.app.ui.player.PlayingWaveBars(
-                            modifier = Modifier.size(14.dp),
-                            waveColor = MaterialTheme.colorScheme.onPrimary,
-                            containerColor = Color.Transparent,
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Text(
-                            "Now Playing",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-                    }
+                    Text(
+                        "Now Playing",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    )
                 }
             }
             if (badge != null) {

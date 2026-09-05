@@ -806,8 +806,8 @@ private fun MiniPlayerProgress(progressState: StateFlow<PlaybackProgressState>) 
 @Composable
 fun PlayingWaveBars(
     modifier: Modifier = Modifier,
-    waveColor: Color = MaterialTheme.colorScheme.primary,
-    containerColor: Color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+    waveColor: Color = MaterialTheme.colorScheme.onPrimaryContainer,
+    containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
 ) {
     val transition = rememberInfiniteTransition(label = "miniArtworkWave")
     val first = transition.animateFloat(
@@ -829,47 +829,26 @@ fun PlayingWaveBars(
         label = "miniWaveThird",
     )
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = CircleShape,
         color = containerColor,
-        contentColor = waveColor,
-        shadowElevation = 2.dp,
         modifier = modifier.size(width = 26.dp, height = 22.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 3.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.5.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Box(
-                Modifier
-                    .width(2.5.dp)
-                    .height(14.dp)
-                    .graphicsLayer {
-                        scaleY = (4f + first.value * 10f) / 14f
-                        transformOrigin = TransformOrigin(0.5f, 1f)
-                    }
-                    .background(waveColor, CircleShape),
-            )
-            Box(
-                Modifier
-                    .width(2.5.dp)
-                    .height(14.dp)
-                    .graphicsLayer {
-                        scaleY = (4f + second.value * 10f) / 14f
-                        transformOrigin = TransformOrigin(0.5f, 1f)
-                    }
-                    .background(waveColor, CircleShape),
-            )
-            Box(
-                Modifier
-                    .width(2.5.dp)
-                    .height(14.dp)
-                    .graphicsLayer {
-                        scaleY = (4f + third.value * 10f) / 14f
-                        transformOrigin = TransformOrigin(0.5f, 1f)
-                    }
-                    .background(waveColor, CircleShape),
-            )
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 4.dp)) {
+            val barWidth = size.width / 5f
+            repeat(3) { index ->
+                val fraction = when (index) {
+                    0 -> first.value
+                    1 -> second.value
+                    else -> third.value
+                }
+                val barHeight = size.height * fraction
+                drawRoundRect(
+                    color = waveColor,
+                    topLeft = androidx.compose.ui.geometry.Offset(index * barWidth * 2f, size.height - barHeight),
+                    size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f),
+                )
+            }
         }
     }
 }
@@ -909,13 +888,20 @@ private fun AddToPlaylistDialog(
                 .filterTo(mutableListOf()) { it.remotePlaylistId != null }
                 .mapTo(mutableSetOf(), SavedPlaylist::id)
             knownDuplicatePlaylistIds = knownDuplicatePlaylistIds + onFindCachedDuplicates(remoteIds)
-            delay(1_500L)
-            knownDuplicatePlaylistIds = knownDuplicatePlaylistIds + onFindCachedDuplicates(remoteIds)
         }
     }
 
     fun requestAdd(playlistIds: Set<Long>) {
         if (playlistIds.isEmpty() || isCheckingDuplicates) return
+        val immediateDuplicates = playlistIds.filter { id ->
+            id in knownDuplicatePlaylistIds ||
+                sanitizedPlaylists.firstOrNull { it.id == id }?.tracks?.any { it.key == trackKey } == true
+        }.toSet()
+        if (immediateDuplicates.isNotEmpty()) {
+            duplicatePlaylistIds = emptySet()
+            duplicateConfirmation = immediateDuplicates
+            return
+        }
         scope.launch {
             runCatching {
                 isCheckingDuplicates = true
@@ -1560,6 +1546,7 @@ private fun FullPlayer(
                                     progressState = progressState,
                                     wavySeekbarEnabled = wavySeekbarEnabled,
                                     onRetry = onRetryLyrics,
+                                    onOpenPlayer = { onTabChange(FullPlayerTab.NOW_PLAYING) },
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             } else {
@@ -1571,6 +1558,7 @@ private fun FullPlayer(
                                     lyricsAnimation = lyricsAnimation,
                                     wavySeekbarEnabled = wavySeekbarEnabled,
                                     onRetry = onRetryLyrics,
+                                    onOpenPlayer = { onTabChange(FullPlayerTab.NOW_PLAYING) },
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             }

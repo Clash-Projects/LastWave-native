@@ -2,6 +2,9 @@ package com.lastwave.app.data.feed
 
 import androidx.compose.runtime.Immutable
 import com.lastwave.app.data.generate.GeneratedTrack
+import com.lastwave.app.data.generate.youtubeVideoIdOrNull
+import com.lastwave.app.data.model.ArtistRef
+import com.lastwave.app.data.model.ImageDto
 import com.lastwave.app.data.generate.TasteProfileProvider
 import com.lastwave.app.data.model.FriendEntry
 import com.lastwave.app.data.model.RecentTrack
@@ -102,7 +105,7 @@ class FeedRepository @Inject constructor(
         val chartsDef = async(Dispatchers.IO) { runCatching { innerTube.fetchCharts() }.getOrDefault(emptyList()) }
         val homeMixesDef = async(Dispatchers.IO) { runCatching { innerTube.fetchHomeMixes() }.getOrDefault(emptyList()) }
         val homeSongsDef = async(Dispatchers.IO) {
-            if (isYtConnected) emptyList() else runCatching { innerTube.fetchHomeSongs() }.getOrDefault(emptyList())
+            runCatching { innerTube.fetchHomeSongs() }.getOrDefault(emptyList())
         }
 
         val ytTasteDef = async(Dispatchers.IO) {
@@ -157,10 +160,18 @@ class FeedRepository @Inject constructor(
         val ytRecentSongs = ytTaste?.recentTracks.orEmpty()
         val ytQuickPicks = ytTaste?.feedTracks.orEmpty().ifEmpty { homeSongs }
 
-        val quickPicks = ytQuickPicks
-            .ifEmpty { ytRecentSongs + ytLikedSongs }
+        val regularPicks = tasteProfile?.topTracksRaw.orEmpty().map {
+            YouTubeMusicTrack(it.youtubeVideoIdOrNull().orEmpty(), it.name, it.artist, it.album, it.artworkUrl)
+        }
+        val quickPicks = buildList {
+            repeat(15) { index ->
+                regularPicks.getOrNull(index)?.let { add(it) }
+                ytQuickPicks.getOrNull(index)?.let { add(it) }
+                ytLikedSongs.getOrNull(index)?.let { add(it) }
+            }
+        }
             .ifEmpty { charts }
-            .distinctBy(YouTubeMusicTrack::videoId)
+            .distinctBy { it.artist.trim().lowercase() to it.title.trim().lowercase() }
             .take(15)
 
         val artistSignalTracks = ytRecentSongs + ytLikedSongs + ytQuickPicks + homeSongs + charts
@@ -200,7 +211,30 @@ class FeedRepository @Inject constructor(
             }
         }.awaitAll()
 
-        val heavyRotation = tasteProfile?.topTracksRaw.orEmpty().take(15)
+        val heavyRotation = buildList {
+            repeat(15) { index ->
+                tasteProfile?.topTracksRaw?.getOrNull(index)?.let { add(it) }
+                ytLikedSongs.getOrNull(index)?.let {
+                    add(GeneratedTrack(it.title, it.artist, it.artworkUrl,
+                        url = "https://www.youtube.com/watch?v=${it.videoId}", album = it.album))
+                }
+            }
+        }.distinctBy(GeneratedTrack::key).take(15)
+
+        val jumpBackIn = buildList {
+            repeat(15) { index ->
+                ytRecentSongs.getOrNull(index)?.let {
+                    add(RecentTrack(
+                        name = it.title,
+                        artist = ArtistRef(name = it.artist),
+                        album = ArtistRef(name = it.album.orEmpty()),
+                        image = it.artworkUrl?.let { url -> listOf(ImageDto(url, "extralarge")) }.orEmpty(),
+                        url = "https://www.youtube.com/watch?v=${it.videoId}",
+                    ))
+                }
+                recentTracks.getOrNull(index)?.let { add(it) }
+            }
+        }.distinctBy { it.artist.displayName.trim().lowercase() to it.name.trim().lowercase() }.take(15)
 
         val recentAlbums = buildList {
             (ytRecentSongs + ytLikedSongs).forEach { track ->
@@ -290,9 +324,6 @@ class FeedRepository @Inject constructor(
             }
 
         val quickTiles = buildList {
-            if (isYtConnected) {
-                add(FeedQuickTile(title = "YouTube likes", subtitle = "YouTube Music", playlistId = "LM", isLiked = true))
-            }
             likedSongsId?.let {
                 add(
                     FeedQuickTile(
@@ -332,8 +363,8 @@ class FeedRepository @Inject constructor(
             quickPicks = quickPicks,
             newReleases = newReleases,
             charts = charts,
-            mixes = mixes,
-            jumpBackIn = recentTracks.take(15),
+            mixes = (mixes + ytSuggestedPlaylists).distinctBy(YouTubePlaylistSummary::id),
+            jumpBackIn = jumpBackIn,
             recentAlbums = recentAlbums,
             topArtists = topArtists,
             heavyRotation = heavyRotation,

@@ -924,7 +924,7 @@ class InnerTubeMusicApi @Inject constructor(
                 heading.contains("song", ignoreCase = true) || heading.contains("track", ignoreCase = true) -> {
                     if (topSongs.isEmpty()) {
                         val parsed = parseSongRenderers(shelf)
-                        topSongs = parsed.map { track ->
+                        val previewTracks = parsed.map { track ->
                             com.lastwave.app.playback.PlayableTrack(
                                 title = track.title,
                                 artist = track.artist.takeUnless { it == "Unknown artist" } ?: title,
@@ -932,6 +932,37 @@ class InnerTubeMusicApi @Inject constructor(
                                 artworkUrl = track.artworkUrl ?: artworkUrl,
                                 videoId = track.videoId,
                             )
+                        }
+
+                        // YouTube Music artist overview only embeds 5 preview tracks in the initial shelf.
+                        // Follow the shelf's "Show all" / "More" endpoint (e.g. VLOLAK... or FEmusic_artist_more_tracks) to get full top tracks.
+                        val moreEndpoint = shelf.obj("bottomEndpoint")?.obj("browseEndpoint")
+                            ?: shelf.obj("bottomText")?.array("runs")?.firstOrNull()?.asObject()?.obj("navigationEndpoint")?.obj("browseEndpoint")
+                            ?: shelf.obj("title")?.array("runs")?.firstOrNull()?.asObject()?.obj("navigationEndpoint")?.obj("browseEndpoint")
+                            ?: shelf.obj("header")?.obj("musicShelfHeaderRenderer")?.obj("title")?.array("runs")?.firstOrNull()?.asObject()?.obj("navigationEndpoint")?.obj("browseEndpoint")
+                            ?: shelf.obj("header")?.obj("musicCarouselShelfBasicHeaderRenderer")?.obj("moreContentButton")?.obj("buttonRenderer")?.obj("navigationEndpoint")?.obj("browseEndpoint")
+
+                        val moreBrowseId = moreEndpoint?.string("browseId")
+                        val moreParams = moreEndpoint?.string("params")
+
+                        val fullTracks = if (!moreBrowseId.isNullOrBlank()) {
+                            runCatching {
+                                browseSongs(moreBrowseId, params = moreParams, limit = null).map { track ->
+                                    com.lastwave.app.playback.PlayableTrack(
+                                        title = track.title,
+                                        artist = track.artist.takeUnless { it == "Unknown artist" } ?: title,
+                                        album = track.album,
+                                        artworkUrl = track.artworkUrl ?: artworkUrl,
+                                        videoId = track.videoId,
+                                    )
+                                }
+                            }.getOrNull()
+                        } else null
+
+                        topSongs = if (!fullTracks.isNullOrEmpty()) {
+                            fullTracks
+                        } else {
+                            previewTracks
                         }
                     }
                 }
@@ -1114,7 +1145,7 @@ class InnerTubeMusicApi @Inject constructor(
     }
 
     /** Loads playable songs for an artist or album without opening YouTube. */
-    suspend fun browseSongs(browseId: String, limit: Int = 50): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
+    suspend fun browseSongs(browseId: String, params: String? = null, limit: Int? = null): List<YouTubeMusicTrack> = withContext(Dispatchers.IO) {
         require(browseId.isNotBlank()) { "Missing YouTube Music browse id" }
         val config = getWebConfig()
         val root = post(
@@ -1122,6 +1153,9 @@ class InnerTubeMusicApi @Inject constructor(
             body = buildJsonObject {
                 put("context", context("WEB_REMIX", config.clientVersion, config.visitorData))
                 put("browseId", browseId)
+                if (!params.isNullOrBlank()) {
+                    put("params", params)
+                }
             },
             clientName = "WEB_REMIX",
             clientVersion = config.clientVersion,
@@ -1129,14 +1163,37 @@ class InnerTubeMusicApi @Inject constructor(
         )
         val shelves = mutableListOf<JsonObject>()
         collectObjects(root, "musicShelfRenderer", shelves)
+        collectObjects(root, "musicPlaylistShelfRenderer", shelves)
         val primaryShelf = shelves.firstOrNull { shelf ->
             val heading = shelf.obj("title")?.array("runs")
                 ?.joinToString("") { it.asObject()?.string("text").orEmpty() }
             heading.equals("Songs", ignoreCase = true) || heading.equals("Tracks", ignoreCase = true)
         } ?: shelves.firstOrNull()
-        val songs = parseSongRenderers(primaryShelf ?: root).take(limit)
-        songs.take(2).forEach { prefetchStream(it.videoId) }
-        songs
+
+        val songs = mutableListOf<YouTubeMusicTrack>()
+        songs.addAll(parseSongRenderers(primaryShelf ?: root))
+
+        // Follow continuations to collect every song by the artist
+        var token = playlistShelfContinuationToken(root)
+        var page = 0
+        while (!token.isNullOrBlank() && page < MAX_CONTINUATION_PAGES && (limit == null || songs.size < limit)) {
+            val currentToken = token ?: break
+            val nextPage = runCatching {
+                browseContinuation(browseId, currentToken, authenticated = false)
+            }.getOrNull() ?: break
+            val pageSongs = parseSongRenderers(nextPage)
+            if (pageSongs.isEmpty()) break
+            val knownVideoIds = songs.mapTo(mutableSetOf()) { it.videoId }
+            val newSongs = pageSongs.filterNot { it.videoId in knownVideoIds }
+            if (newSongs.isEmpty()) break
+            songs.addAll(newSongs)
+            token = playlistShelfContinuationToken(nextPage)
+            page++
+        }
+
+        val result = if (limit != null) songs.take(limit) else songs
+        result.take(2).forEach { prefetchStream(it.videoId) }
+        result
     }
 
     private suspend fun searchEntities(

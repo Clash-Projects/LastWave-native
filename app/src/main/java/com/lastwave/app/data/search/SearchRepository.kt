@@ -124,64 +124,81 @@ class SearchRepository @Inject constructor(
         withContext(Dispatchers.IO) {
             val seedTitle = item.name.trim()
             val seedArtist = item.artist.orEmpty().trim()
-            if (seedTitle.isBlank() || seedArtist.isBlank()) return@withContext emptyList()
+            val videoId = item.videoId
+            if (seedTitle.isBlank()) return@withContext emptyList()
 
-            val similar = try {
-                val apiKey = sessionPreferences.session.first().apiKey.ifBlank { LastFmAppCredentials.API_KEY }
-                val response = api.get(
-                    mapOf(
-                        "method" to "track.getsimilar",
-                        "track" to seedTitle,
-                        "artist" to seedArtist,
-                        "limit" to (limit * 3).coerceAtMost(100).toString(),
-                        "api_key" to apiKey,
-                        "format" to "json",
-                        "autocorrect" to "1",
-                    ),
-                )
-                val body = response.body()?.string()
-                if (!response.isSuccessful || body.isNullOrBlank()) {
+            val related = if (!videoId.isNullOrBlank()) {
+                try {
+                    innerTube.fetchRelatedSongs(videoId, limit = limit * 2, prefetchStreams = false)
+                } catch (_: Exception) {
                     emptyList()
-                } else {
-                    val root = json.parseToJsonElement(body).jsonObject
-                    GenerateJson.normalise(root["similartracks"]?.jsonObject?.get("track"))
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
+            } else {
                 emptyList()
             }
 
-            val candidates = if (similar.isNotEmpty()) {
-                similar
+            val candidates = if (related.isNotEmpty()) {
+                related.map { track ->
+                    GeneratedTrack(
+                        name = track.title,
+                        artist = track.artist,
+                        artworkUrl = track.artworkUrl,
+                        album = track.album,
+                    )
+                }
             } else {
-                try {
-                    innerTube.searchSongs("$seedArtist songs", limit = limit * 2).map { track ->
-                        GeneratedTrack(
-                            name = track.title,
-                            artist = track.artist,
-                            artworkUrl = track.artworkUrl,
-                            album = track.album,
-                        )
+                val similar = try {
+                    val apiKey = sessionPreferences.session.first().apiKey.ifBlank { LastFmAppCredentials.API_KEY }
+                    val response = api.get(
+                        mapOf(
+                            "method" to "track.getsimilar",
+                            "track" to seedTitle,
+                            "artist" to seedArtist,
+                            "limit" to (limit * 3).coerceAtMost(100).toString(),
+                            "api_key" to apiKey,
+                            "format" to "json",
+                            "autocorrect" to "1",
+                        ),
+                    )
+                    val body = response.body()?.string()
+                    if (!response.isSuccessful || body.isNullOrBlank()) {
+                        emptyList()
+                    } else {
+                        val root = json.parseToJsonElement(body).jsonObject
+                        GenerateJson.normalise(root["similartracks"]?.jsonObject?.get("track"))
                     }
                 } catch (error: CancellationException) {
                     throw error
                 } catch (_: Exception) {
                     emptyList()
                 }
+                similar
             }
 
             val seedTitleKey = queueTitleKey(seedTitle)
+            val seedTitleLower = seedTitle.lowercase()
             val seenTitles = mutableSetOf(seedTitleKey)
             val artistCounts = mutableMapOf<String, Int>()
+
             candidates.filter { candidate ->
-                val titleKey = queueTitleKey(candidate.name)
+                val title = candidate.name.trim()
+                val titleLower = title.lowercase()
+                val titleKey = queueTitleKey(title)
                 val artistKey = candidate.artist.trim().lowercase()
                 val artistCount = artistCounts[artistKey] ?: 0
-                val keep = titleKey.isNotBlank() &&
+
+                val isDisallowed = titleLower.contains("mashup") || titleLower.contains("jukebox") ||
+                    titleLower.contains("megamix") || titleLower.contains("all songs") ||
+                    titleLower.contains("nonstop") || titleLower.contains("slowed") ||
+                    titleLower.contains("compilation")
+                val isSameSong = titleKey == seedTitleKey || titleLower == seedTitleLower
+
+                val keep = !isDisallowed && !isSameSong &&
+                    titleKey.isNotBlank() &&
                     candidate.artist.isNotBlank() &&
                     artistCount < 3 &&
                     seenTitles.add(titleKey)
+
                 if (keep) artistCounts[artistKey] = artistCount + 1
                 keep
             }.take(limit)
