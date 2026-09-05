@@ -66,6 +66,10 @@ data class FeedSpotlight(
 @Immutable
 data class FeedData(
     val isYtConnected: Boolean = false,
+    val ytAccountName: String? = null,
+    val hasYtRecommendations: Boolean = false,
+    val hasYtMixes: Boolean = false,
+    val ytSuggestedPlaylists: List<YouTubePlaylistSummary> = emptyList(),
     val spotlight: FeedSpotlight? = null,
     val quickTiles: List<FeedQuickTile> = emptyList(),
     val quickPicks: List<YouTubeMusicTrack> = emptyList(),
@@ -91,13 +95,15 @@ class FeedRepository @Inject constructor(
     private val playlistRepository: PlaylistRepository,
 ) {
     suspend fun loadFeed(username: String?): FeedData = coroutineScope {
-        val isYtConnected = runCatching { ytAuth.awaitLoadedConnection().isConnected }
-            .getOrDefault(ytAuth.connection.value.isConnected)
+        val connection = ytAuth.awaitLoadedConnection()
+        val isYtConnected = connection.isConnected
 
         val newReleasesDef = async(Dispatchers.IO) { runCatching { innerTube.fetchNewReleases() }.getOrDefault(emptyList()) }
         val chartsDef = async(Dispatchers.IO) { runCatching { innerTube.fetchCharts() }.getOrDefault(emptyList()) }
         val homeMixesDef = async(Dispatchers.IO) { runCatching { innerTube.fetchHomeMixes() }.getOrDefault(emptyList()) }
-        val homeSongsDef = async(Dispatchers.IO) { runCatching { innerTube.fetchHomeSongs() }.getOrDefault(emptyList()) }
+        val homeSongsDef = async(Dispatchers.IO) {
+            if (isYtConnected) emptyList() else runCatching { innerTube.fetchHomeSongs() }.getOrDefault(emptyList())
+        }
 
         val ytTasteDef = async(Dispatchers.IO) {
             if (isYtConnected) {
@@ -124,7 +130,15 @@ class FeedRepository @Inject constructor(
 
         val newReleases = newReleasesDef.await()
         val charts = chartsDef.await()
-        var mixes = homeMixesDef.await().filter { it.isMixOrRadio() }
+        val homePlaylists = homeMixesDef.await().filter {
+            it.id.startsWith("PL") || it.id.startsWith("RD") || it.id.startsWith("OLAK") || it.id == "LM"
+        }
+        var mixes = homePlaylists.filter { it.isMixOrRadio() }
+        val hasYtMixes = isYtConnected && mixes.isNotEmpty()
+        val mixIds = mixes.mapTo(mutableSetOf(), YouTubePlaylistSummary::id)
+        val ytSuggestedPlaylists = if (isYtConnected) {
+            homePlaylists.filter { it.id !in mixIds && it.id != "LM" }.take(12)
+        } else emptyList()
         val homeSongs = homeSongsDef.await()
         val recentTracks = recentTracksDef.await()
         val friends = friendsDef.await()
@@ -143,11 +157,24 @@ class FeedRepository @Inject constructor(
         val ytRecentSongs = ytTaste?.recentTracks.orEmpty()
         val ytQuickPicks = ytTaste?.feedTracks.orEmpty().ifEmpty { homeSongs }
 
-        val quickPicks = (ytQuickPicks.ifEmpty { charts }).take(15)
+        val quickPicks = ytQuickPicks
+            .ifEmpty { ytRecentSongs + ytLikedSongs }
+            .ifEmpty { charts }
+            .distinctBy(YouTubeMusicTrack::videoId)
+            .take(15)
 
         val artistSignalTracks = ytRecentSongs + ytLikedSongs + ytQuickPicks + homeSongs + charts
+        val ytArtistNames = (ytRecentSongs + ytLikedSongs)
+            .filter { it.artist.isNotBlank() && !it.artist.equals("Unknown artist", ignoreCase = true) }
+            .groupBy { it.artist.trim().lowercase() }
+            .values.sortedByDescending { it.size }
+            .map { it.first().artist.trim() }
+        val listeningArtists = tasteProfile?.topArtistsRaw.orEmpty()
         val topArtistNames = buildList {
-            addAll(tasteProfile?.topArtistsRaw.orEmpty())
+            repeat(maxOf(ytArtistNames.size, listeningArtists.size).coerceAtMost(10)) { index ->
+                ytArtistNames.getOrNull(index)?.let { add(it) }
+                listeningArtists.getOrNull(index)?.let { add(it) }
+            }
             addAll(artistSignalTracks.map(YouTubeMusicTrack::artist))
             addAll(recentTracks.map { it.artist.displayName })
         }
@@ -176,6 +203,12 @@ class FeedRepository @Inject constructor(
         val heavyRotation = tasteProfile?.topTracksRaw.orEmpty().take(15)
 
         val recentAlbums = buildList {
+            (ytRecentSongs + ytLikedSongs).forEach { track ->
+                val album = track.album?.takeIf(String::isNotBlank) ?: return@forEach
+                if (track.artist.isNotBlank()) {
+                    add(FeedAlbum(title = album, artist = track.artist, artworkUrl = track.artworkUrl))
+                }
+            }
             recentTracks.forEach { track ->
                 if (track.album.displayName.isNotBlank() && track.artist.displayName.isNotBlank()) {
                     add(
@@ -216,18 +249,17 @@ class FeedRepository @Inject constructor(
         } else null
 
         val topArtist = topArtistNames.firstOrNull()
-        val directRadioSeed = (ytRecentSongs + ytLikedSongs + quickPicks + homeSongs + charts)
-            .distinctBy(YouTubeMusicTrack::videoId)
-            .firstOrNull()
-        val radioSeed = directRadioSeed ?: heavyRotation.firstOrNull()?.let { seed ->
-            try {
-                innerTube.findBestMatchOrNull(seed.name, seed.artist, prefetchStreams = false)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Exception) {
-                null
+        val personalRadioSeed = (ytRecentSongs + ytLikedSongs).firstOrNull()
+            ?: heavyRotation.firstOrNull()?.takeIf { tasteProfile?.hasPersonalSignals == true }?.let { seed ->
+                try {
+                    innerTube.findBestMatchOrNull(seed.name, seed.artist, prefetchStreams = false)
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Exception) {
+                    null
+                }
             }
-        }
+        val radioSeed = personalRadioSeed ?: (quickPicks + homeSongs + charts).firstOrNull()
         val radioTracks = radioSeed?.let { seed ->
             try {
                 innerTube.fetchRelatedSongs(seed.videoId, limit = 15, prefetchStreams = false)
@@ -237,9 +269,10 @@ class FeedRepository @Inject constructor(
                 emptyList()
             }
         }.orEmpty()
-        val radioFallback = if (radioTracks.isEmpty() && !topArtist.isNullOrBlank()) {
+        val radioArtist = radioSeed?.artist ?: topArtist
+        val radioFallback = if (radioTracks.isEmpty() && !radioArtist.isNullOrBlank()) {
             try {
-                innerTube.searchSongs("$topArtist radio", limit = 15, prefetchStreams = false)
+                innerTube.searchSongs("$radioArtist radio", limit = 15, prefetchStreams = false)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: Exception) {
@@ -250,17 +283,16 @@ class FeedRepository @Inject constructor(
             .takeIf { it.isNotEmpty() }
             ?.let { tracks ->
                 FeedSectionData(
-                    title = radioSeed?.let { "${it.title} → infinity" } ?: "Infinite discovery radio",
-                    subtitle = if (isYtConnected) {
-                        "YouTube radio reshaped around your listening"
-                    } else {
-                        "Accountless YouTube radio • no sign-in needed"
-                    },
+                    title = personalRadioSeed?.let { "Because you listen to ${it.artist}" } ?: "Discover something new",
+                    subtitle = radioSeed?.let { "A mix inspired by ${it.title}" } ?: "Fresh tracks for your next listen",
                     items = tracks,
                 )
             }
 
         val quickTiles = buildList {
+            if (isYtConnected) {
+                add(FeedQuickTile(title = "YouTube likes", subtitle = "YouTube Music", playlistId = "LM", isLiked = true))
+            }
             likedSongsId?.let {
                 add(
                     FeedQuickTile(
@@ -287,10 +319,14 @@ class FeedRepository @Inject constructor(
             charts.firstOrNull()?.let {
                 add(FeedQuickTile(title = it.title, subtitle = it.artist, artworkUrl = it.artworkUrl, actionVideoId = it.videoId))
             }
-        }.take(6)
+        }.distinctBy { it.localPlaylistId?.toString() ?: it.playlistId ?: it.actionVideoId }.take(6)
 
         FeedData(
             isYtConnected = isYtConnected,
+            ytAccountName = connection.accountName.takeIf { isYtConnected },
+            hasYtRecommendations = ytTaste?.feedTracks?.isNotEmpty() == true,
+            hasYtMixes = hasYtMixes,
+            ytSuggestedPlaylists = ytSuggestedPlaylists,
             spotlight = spotlight,
             quickTiles = quickTiles,
             quickPicks = quickPicks,
