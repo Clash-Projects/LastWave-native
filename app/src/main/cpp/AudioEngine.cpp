@@ -396,6 +396,11 @@ void AudioEngine::setStudioMasterClarity(bool enabled) noexcept {
     mediaDsp_.setStudioMasterClarity(enabled);
 }
 
+void AudioEngine::setBitPerfect(bool enabled) noexcept {
+    oboeDsp_.setBitPerfect(enabled);
+    mediaDsp_.setBitPerfect(enabled);
+}
+
 void AudioEngine::setEqualizer(
     bool enabled,
     const float* gainsDb,

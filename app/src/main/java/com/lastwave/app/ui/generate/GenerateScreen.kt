@@ -48,6 +48,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -59,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -89,7 +91,8 @@ private val IconBadgeShape = RoundedCornerShape(14.dp)
  */
 @Composable
 fun GenerateScreen(
-    onNavigateToPlaylist: () -> Unit = {},
+    onNavigateToPlaylist: (Long?) -> Unit = {},
+    onBack: (() -> Unit)? = null,
     viewModel: GenerateViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -97,7 +100,7 @@ fun GenerateScreen(
     LaunchedEffect(Unit) {
         viewModel.navEvents.collect { event ->
             when (event) {
-                GenerateNavEvent.NavigateToPlaylistLoading -> onNavigateToPlaylist()
+                is GenerateNavEvent.NavigateToPlaylistLoading -> onNavigateToPlaylist(event.playlistId)
             }
         }
     }
@@ -109,7 +112,8 @@ fun GenerateScreen(
     ) {
         ExpressiveHeader(
             title = "Generator",
-            subtitle = "Choose a mode to generate a playlist",
+            subtitle = "Shape a playlist with two discovery engines",
+            onBack = onBack,
         )
 
         com.lastwave.app.ui.common.WithoutPlatformOverscroll {
@@ -122,6 +126,10 @@ fun GenerateScreen(
                 item(key = "loadingOverlay") {
                     com.lastwave.app.ui.common.GenerationProgressCard(message = state.loadingMessage)
                 }
+            }
+
+            item(key = "sourceFusion") {
+                SourceFusionBanner()
             }
 
             item(key = "modeGroup") {
@@ -177,9 +185,9 @@ fun GenerateScreen(
                                     GenerateMode.SIMILAR_TRACKS -> SimilarTrackSeedOptions(state, viewModel)
                                     GenerateMode.SIMILAR_ARTISTS -> SimilarArtistSeedOptions(state, viewModel)
                                     GenerateMode.TAG -> TagOptions(state.tagInput, viewModel::setTagInput, viewModel::setGenreChip)
-                                    GenerateMode.MIX -> HintText("Mix includes: top tracks, recent plays & similar artists' tracks.")
+                                    GenerateMode.MIX -> HintText("Top tracks, recent plays, deep cuts and accountless YouTube radio.")
                                     GenerateMode.RECOMMENDATIONS -> HintText(
-                                        "$RECOMMENDATION_TRACK_COUNT tracks, respecting your exclusions",
+                                        "$RECOMMENDATION_TRACK_COUNT dual-engine tracks, respecting your exclusions",
                                     )
                                 }
 
@@ -209,7 +217,10 @@ fun GenerateScreen(
                                 ) {
                                     Icon(Icons.Filled.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Generate Playlist", fontWeight = FontWeight.Medium)
+                                    Text(
+                                        if (mode == GenerateMode.SIMILAR_TRACKS) "Build Song Radio" else "Generate Playlist",
+                                        fontWeight = FontWeight.Medium,
+                                    )
                                 }
                             }
                         }
@@ -240,6 +251,74 @@ fun GenerateScreen(
                 }
             }
         }
+        }
+    }
+}
+
+@Composable
+private fun SourceFusionBanner() {
+    val shape = RoundedCornerShape(24.dp)
+    Surface(
+        shape = shape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box(
+            modifier = Modifier
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
+                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.58f),
+                        ),
+                    ),
+                )
+                .padding(18.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.62f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "LAST.FM  ×  YOUTUBE MUSIC",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = "Taste graphs meet YouTube radio for wider, playable picks.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(7.dp))
+                    Surface(
+                        shape = ExpressivePillShape,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.56f),
+                    ) {
+                        Text(
+                            text = "YouTube account not required",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -307,6 +386,11 @@ private fun TagOptions(tag: String, onTagChange: (String) -> Unit, onChipPick: (
 @Composable
 private fun SimilarTrackSeedOptions(state: GenerateUiState, viewModel: GenerateViewModel) {
     Text("Seed Track", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+    Text(
+        "Pick any song; its accountless YouTube radio is blended with Last.fm similarity.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     Spacer(Modifier.height(8.dp))
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(

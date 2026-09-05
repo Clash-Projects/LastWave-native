@@ -59,10 +59,18 @@ android {
         }
         val maskLiteral = "new byte[] { " + secretMask.joinToString(", ") { "(byte) $it" } + " }"
 
-        val losslessBackendUrl = resolveSecret("LOSSLESS_BACKEND_URL", "LOSSLESS_BASE_URL", "BACKEND_BASE_URL", "BACKEND_URL")
+        val losslessBackendUrl = resolveSecret(
+            "LOSSLESS_BACKEND_URL",
+            "LOSSLESS_BASE_URL",
+            "BACKEND_BASE_URL"
+        )
         buildConfigField("byte[]", "LOSSLESS_BACKEND_URL_BYTES", obfuscateSecret(losslessBackendUrl))
 
-        val losslessApiKey = resolveSecret("LOSSLESS_API_KEY", "LOSSLESS_AUTH_KEY", "API_AUTH_KEY", "API_KEY")
+        val losslessApiKey = resolveSecret(
+            "LOSSLESS_API_KEY",
+            "LOSSLESS_AUTH_KEY",
+            "API_AUTH_KEY"
+        )
         buildConfigField("byte[]", "LOSSLESS_API_KEY_BYTES", obfuscateSecret(losslessApiKey))
 
         val lyricsApiKey = resolveSecret("LYRICS_API_KEY", "API_KEY", "LYRICS_AUTH_TOKEN")

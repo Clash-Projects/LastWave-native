@@ -261,9 +261,10 @@ class PlayerViewModel @Inject constructor(
         viewModelScope.launch {
             ytMusicLibraryManager.playlists.collect { remote ->
                 if (customPlaylistsLoaded) {
-                    _customPlaylists.value = playlistRepository.getAll()
+                    _customPlaylists.value = (playlistRepository.getAll()
                         .filter { it.mode == "custom" || it.mode == LIKED_SONGS_MODE }
-                        .sortedByDescending { it.mode == LIKED_SONGS_MODE } + remote
+                        .sortedByDescending { it.mode == LIKED_SONGS_MODE } + remote)
+                        .distinctBy { it.id }
                 }
             }
         }
@@ -284,9 +285,10 @@ class PlayerViewModel @Inject constructor(
     }
 
     private suspend fun refreshCustomPlaylists() {
-        _customPlaylists.value = playlistRepository.getAll()
+        _customPlaylists.value = (playlistRepository.getAll()
             .filter { it.mode == "custom" || it.mode == LIKED_SONGS_MODE }
-            .sortedByDescending { it.mode == LIKED_SONGS_MODE } + ytMusicLibraryManager.playlists.value
+            .sortedByDescending { it.mode == LIKED_SONGS_MODE } + ytMusicLibraryManager.playlists.value)
+            .distinctBy { it.id }
     }
 
     fun prepareCustomPlaylists() {
@@ -335,24 +337,26 @@ class PlayerViewModel @Inject constructor(
     ) {
         if (playlistIds.isEmpty()) return
         viewModelScope.launch {
-            val generatedTrack = track.toGeneratedTrack()
-            var remoteChanged = false
-            playlistIds.forEach { playlistId ->
-                val allowDuplicate = playlistId in duplicatePlaylistIds
-                if (playlistId < 0L) {
-                    val added = ytMusicLibraryManager.addTrack(playlistId, generatedTrack, allowDuplicate)
-                    remoteChanged = remoteChanged || added
-                } else {
-                    playlistRepository.addTrack(
-                        id = playlistId,
-                        track = generatedTrack,
-                        allowDuplicate = allowDuplicate,
-                    )
+            runCatching {
+                val generatedTrack = track.toGeneratedTrack()
+                var remoteChanged = false
+                playlistIds.forEach { playlistId ->
+                    val allowDuplicate = playlistId in duplicatePlaylistIds
+                    if (playlistId < 0L) {
+                        val added = ytMusicLibraryManager.addTrack(playlistId, generatedTrack, allowDuplicate)
+                        remoteChanged = remoteChanged || added
+                    } else {
+                        playlistRepository.addTrack(
+                            id = playlistId,
+                            track = generatedTrack,
+                            allowDuplicate = allowDuplicate,
+                        )
+                    }
                 }
-            }
-            if (remoteChanged) {
-                ytMusicLibraryManager.refresh()
-                refreshCustomPlaylists()
+                if (remoteChanged) {
+                    ytMusicLibraryManager.refresh()
+                    refreshCustomPlaylists()
+                }
             }
         }
     }
@@ -379,8 +383,10 @@ class PlayerViewModel @Inject constructor(
     fun createPlaylistAndAdd(title: String, track: PlayableTrack) {
         if (title.isBlank()) return
         viewModelScope.launch {
-            val playlist = playlistRepository.createCustom(title)
-            playlistRepository.addTrack(playlist.id, track.toGeneratedTrack())
+            runCatching {
+                val playlist = playlistRepository.createCustom(title)
+                playlistRepository.addTrack(playlist.id, track.toGeneratedTrack())
+            }
         }
     }
 
@@ -512,27 +518,27 @@ fun PlayerHost(
                     )
                 }
             }
-        }
-        playlistTrack?.let { track ->
-            AddToPlaylistDialogHost(
-                viewModel = viewModel,
-                track = track,
-                onDismiss = { playlistTrack = null },
-                onAdd = { playlistIds, duplicatePlaylistIds ->
-                    viewModel.addToPlaylists(playlistIds, duplicatePlaylistIds, track)
-                    playlistTrack = null
-                },
-                onFindDuplicates = { playlistIds ->
-                    viewModel.findDuplicatePlaylistIds(playlistIds, track)
-                },
-                onFindCachedDuplicates = { playlistIds ->
-                    viewModel.findCachedDuplicatePlaylistIds(playlistIds, track)
-                },
-                onCreate = { title ->
-                    viewModel.createPlaylistAndAdd(title, track)
-                    playlistTrack = null
-                },
-            )
+            playlistTrack?.let { track ->
+                AddToPlaylistDialogHost(
+                    viewModel = viewModel,
+                    track = track,
+                    onDismiss = { playlistTrack = null },
+                    onAdd = { playlistIds, duplicatePlaylistIds ->
+                        viewModel.addToPlaylists(playlistIds, duplicatePlaylistIds, track)
+                        playlistTrack = null
+                    },
+                    onFindDuplicates = { playlistIds ->
+                        viewModel.findDuplicatePlaylistIds(playlistIds, track)
+                    },
+                    onFindCachedDuplicates = { playlistIds ->
+                        viewModel.findCachedDuplicatePlaylistIds(playlistIds, track)
+                    },
+                    onCreate = { title ->
+                        viewModel.createPlaylistAndAdd(title, track)
+                        playlistTrack = null
+                    },
+                )
+            }
         }
     }
 }
@@ -879,6 +885,7 @@ private fun AddToPlaylistDialog(
     onFindCachedDuplicates: suspend (Set<Long>) -> Set<Long>,
     onCreate: (String) -> Unit,
 ) {
+    val sanitizedPlaylists = remember(playlists) { playlists.distinctBy { it.id } }
     var newPlaylistName by remember(track) { mutableStateOf("") }
     var selectedPlaylistIds by remember(track) { mutableStateOf(emptySet<Long>()) }
     var duplicateConfirmation by remember(track) { mutableStateOf<Set<Long>?>(null) }
@@ -888,41 +895,48 @@ private fun AddToPlaylistDialog(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val trackKey = remember(track.title, track.artist) { track.toGeneratedTrack().key }
-    val selectedPlaylists = playlists.filter { it.id in selectedPlaylistIds }
+    val selectedPlaylists = sanitizedPlaylists.filter { it.id in selectedPlaylistIds }
     val playlistListMaxHeight = (LocalConfiguration.current.screenHeightDp.dp - 360.dp)
         .coerceIn(180.dp, 410.dp)
 
-    LaunchedEffect(playlists.map(SavedPlaylist::id)) {
-        selectedPlaylistIds = selectedPlaylistIds.intersect(playlists.mapTo(mutableSetOf(), SavedPlaylist::id))
+    LaunchedEffect(sanitizedPlaylists.map(SavedPlaylist::id)) {
+        selectedPlaylistIds = selectedPlaylistIds.intersect(sanitizedPlaylists.mapTo(mutableSetOf(), SavedPlaylist::id))
     }
 
-    LaunchedEffect(trackKey, playlists.map(SavedPlaylist::id)) {
-        val remoteIds = playlists
-            .filterTo(mutableListOf()) { it.remotePlaylistId != null }
-            .mapTo(mutableSetOf(), SavedPlaylist::id)
-        knownDuplicatePlaylistIds = knownDuplicatePlaylistIds + onFindCachedDuplicates(remoteIds)
-        delay(1_500L)
-        knownDuplicatePlaylistIds = knownDuplicatePlaylistIds + onFindCachedDuplicates(remoteIds)
+    LaunchedEffect(trackKey, sanitizedPlaylists.map(SavedPlaylist::id)) {
+        runCatching {
+            val remoteIds = sanitizedPlaylists
+                .filterTo(mutableListOf()) { it.remotePlaylistId != null }
+                .mapTo(mutableSetOf(), SavedPlaylist::id)
+            knownDuplicatePlaylistIds = knownDuplicatePlaylistIds + onFindCachedDuplicates(remoteIds)
+            delay(1_500L)
+            knownDuplicatePlaylistIds = knownDuplicatePlaylistIds + onFindCachedDuplicates(remoteIds)
+        }
     }
 
     fun requestAdd(playlistIds: Set<Long>) {
         if (playlistIds.isEmpty() || isCheckingDuplicates) return
         scope.launch {
-            isCheckingDuplicates = true
-            val duplicates = onFindDuplicates(playlistIds)
-            isCheckingDuplicates = false
-            knownDuplicatePlaylistIds = (knownDuplicatePlaylistIds - playlistIds) + duplicates
-            if (duplicates.isEmpty()) {
+            runCatching {
+                isCheckingDuplicates = true
+                val duplicates = onFindDuplicates(playlistIds)
+                isCheckingDuplicates = false
+                knownDuplicatePlaylistIds = (knownDuplicatePlaylistIds - playlistIds) + duplicates
+                if (duplicates.isEmpty()) {
+                    onAdd(playlistIds, emptySet())
+                } else {
+                    duplicatePlaylistIds = emptySet()
+                    duplicateConfirmation = duplicates
+                }
+            }.onFailure {
+                isCheckingDuplicates = false
                 onAdd(playlistIds, emptySet())
-            } else {
-                duplicatePlaylistIds = emptySet()
-                duplicateConfirmation = duplicates
             }
         }
     }
 
     duplicateConfirmation?.let { duplicates ->
-        val duplicatePlaylists = playlists.filter { it.id in duplicates }
+        val duplicatePlaylists = sanitizedPlaylists.filter { it.id in duplicates }
         val missingCount = selectedPlaylistIds.size - duplicates.size
         AlertDialog(
             onDismissRequest = { duplicateConfirmation = null },
@@ -939,7 +953,10 @@ private fun AddToPlaylistDialog(
                         modifier = Modifier.fillMaxWidth().heightIn(max = 260.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        itemsIndexed(duplicatePlaylists, key = { _, playlist -> playlist.id }) { _, playlist ->
+                        itemsIndexed(
+                            duplicatePlaylists,
+                            key = { index, playlist -> "${playlist.id}_${playlist.remotePlaylistId ?: ""}_$index" },
+                        ) { _, playlist ->
                             val addAgain = playlist.id in duplicatePlaylistIds
                             val canAddAnother = playlist.mode != LIKED_SONGS_MODE
                             Surface(
@@ -1062,7 +1079,7 @@ private fun AddToPlaylistDialog(
                 }
             }
 
-            if (playlists.isEmpty()) {
+            if (sanitizedPlaylists.isEmpty()) {
                 Text(
                     "No playlists yet. Create your first playlist below.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -1073,7 +1090,10 @@ private fun AddToPlaylistDialog(
                     modifier = Modifier.fillMaxWidth().heightIn(max = playlistListMaxHeight),
                     verticalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
-                    itemsIndexed(playlists, key = { _, playlist -> playlist.id }) { _, playlist ->
+                    itemsIndexed(
+                        sanitizedPlaylists,
+                        key = { index, playlist -> "${playlist.id}_${playlist.remotePlaylistId ?: ""}_$index" },
+                    ) { _, playlist ->
                         val selected = playlist.id in selectedPlaylistIds
                         val alreadyAdded = playlist.id in knownDuplicatePlaylistIds ||
                             playlist.tracks.any { it.key == trackKey }
@@ -1155,7 +1175,7 @@ private fun AddToPlaylistDialog(
                         enabled = newPlaylistName.isNotBlank(),
                         onClick = {
                             val cleanName = newPlaylistName.trim()
-                            val existingPlaylist = playlists.firstOrNull {
+                            val existingPlaylist = sanitizedPlaylists.firstOrNull {
                                 it.mode == "custom" && it.title.equals(cleanName, ignoreCase = true)
                             }
                             if (existingPlaylist == null) {

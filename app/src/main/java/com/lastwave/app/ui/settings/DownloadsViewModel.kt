@@ -29,6 +29,14 @@ private fun <T> Flow<T>.withDownloadsFallback(fallback: T): Flow<T> =
         emit(fallback)
     }
 
+private fun DownloadedTrackEntity.toPlayableTrack(): PlayableTrack = PlayableTrack(
+    title = title,
+    artist = artist,
+    album = album.takeIf { it.isNotBlank() },
+    artworkUrl = artworkUrl,
+    playbackUrl = mediaStoreUri?.takeIf { it.isNotBlank() } ?: filePath,
+)
+
 @HiltViewModel
 class DownloadsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -125,11 +133,25 @@ class DownloadsViewModel @Inject constructor(
     }
 
     fun playTrack(track: DownloadedTrackEntity) {
-        val allTracks = downloadedTracks.value
-        val startIndex = allTracks.indexOfFirst { it.id == track.id }.let { if (it >= 0) it else 0 }
-        val queue = (allTracks.ifEmpty { listOf(track) }).map { it.toPlayableTrack() }
+        val currentTracks = downloadedTracks.value
+        val playables = currentTracks.map { it.toPlayableTrack() }
+        val startIndex = currentTracks.indexOfFirst { it.id == track.id }
+            .takeIf { it >= 0 }
+            ?: currentTracks.indexOfFirst {
+                it.title.equals(track.title, ignoreCase = true) &&
+                it.artist.equals(track.artist, ignoreCase = true)
+            }.coerceAtLeast(0)
+
         try {
-            musicPlayer.playQueue(queue, startIndex = startIndex, sourceLabel = "Downloads")
+            if (playables.isNotEmpty()) {
+                musicPlayer.playQueue(
+                    tracks = playables,
+                    startIndex = startIndex,
+                    sourceLabel = "Downloads",
+                )
+            } else {
+                musicPlayer.play(track.toPlayableTrack(), sourceLabel = "Downloads")
+            }
         } catch (error: Exception) {
             android.util.Log.e("DownloadsViewModel", "Could not play download", error)
         } catch (error: LinkageError) {
@@ -137,13 +159,24 @@ class DownloadsViewModel @Inject constructor(
         }
     }
 
-    private fun DownloadedTrackEntity.toPlayableTrack(): PlayableTrack = PlayableTrack(
-        title = title,
-        artist = artist,
-        album = album,
-        artworkUrl = artworkUrl,
-        playbackUrl = mediaStoreUri ?: filePath,
-    )
+    fun playAll(startShuffled: Boolean = false) {
+        val currentTracks = downloadedTracks.value
+        if (currentTracks.isEmpty()) return
+        val playables = currentTracks.map { it.toPlayableTrack() }
+        val startIndex = if (startShuffled) (playables.indices).random() else 0
+        try {
+            musicPlayer.playQueue(
+                tracks = playables,
+                startIndex = startIndex,
+                sourceLabel = "Downloads",
+                startShuffled = startShuffled,
+            )
+        } catch (error: Exception) {
+            android.util.Log.e("DownloadsViewModel", "Could not play downloads queue", error)
+        } catch (error: LinkageError) {
+            android.util.Log.e("DownloadsViewModel", "Playback unsupported on this device", error)
+        }
+    }
 
     fun openInFileManager() {
         try {

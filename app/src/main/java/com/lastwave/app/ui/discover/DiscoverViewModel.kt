@@ -7,6 +7,7 @@ import com.lastwave.app.data.discover.DiscoverRepository
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.naming.PlaylistNamer
 import com.lastwave.app.data.playlist.PlaylistRepository
+import com.lastwave.app.data.ytmusic.YtMusicAuthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,6 +26,7 @@ data class DiscoverUiState(
     val error: String? = null,
     val isRefreshing: Boolean = false,
     val saveResultMessage: String? = null,
+    val isYtConnected: Boolean = false,
 )
 
 /** Faithful port of discover.js (§7): infinite-scroll feed, pull-to-
@@ -36,12 +38,18 @@ class DiscoverViewModel @Inject constructor(
     private val repository: DiscoverRepository,
     private val playlistRepository: PlaylistRepository,
     private val artworkRepository: ArtworkRepository,
+    private val ytMusicAuth: YtMusicAuthManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DiscoverUiState())
     val uiState: StateFlow<DiscoverUiState> = _uiState.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            ytMusicAuth.connection.collect { conn ->
+                _uiState.update { it.copy(isYtConnected = conn.isConnected) }
+            }
+        }
         viewModelScope.launch {
             repository.feed.collect { feed ->
                 if (feed.isNotEmpty() || _uiState.value.tracks.isNotEmpty()) {

@@ -98,6 +98,11 @@ class NativeAudioEngine @Inject constructor(
         withHandle(Unit) { nativeSetStudioMasterClarity(it, enabled) }
     }
 
+    /** Thread-safe; completely bypasses all native DSP for bit-exact output. */
+    fun setBitPerfect(enabled: Boolean) {
+        withHandle(Unit) { nativeSetBitPerfect(it, enabled) }
+    }
+
     /** Updates the native 15-band EQ; its gains are smoothed in C++. */
     fun setEqualizer(enabled: Boolean, gainsDb: FloatArray) {
         require(gainsDb.size == EQUALIZER_BAND_COUNT) { "Expected 15 equalizer bands" }
@@ -304,6 +309,7 @@ class NativeAudioEngine @Inject constructor(
     private external fun nativeSetPlaying(handle: Long, playing: Boolean)
     private external fun nativeSetOutputVolume(handle: Long, volume: Float)
     private external fun nativeSetStudioMasterClarity(handle: Long, enabled: Boolean)
+    private external fun nativeSetBitPerfect(handle: Long, enabled: Boolean)
     private external fun nativeSetEqualizer(handle: Long, enabled: Boolean, gainsDb: FloatArray)
     private external fun nativeConfigureMediaProcessor(
         handle: Long,

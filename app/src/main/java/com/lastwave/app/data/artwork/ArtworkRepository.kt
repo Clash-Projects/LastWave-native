@@ -66,8 +66,6 @@ class ArtworkRepository @Inject constructor(
         scope.launch {
             try {
                 val now = System.currentTimeMillis()
-                cacheDao.deleteOlderThan(now - DISK_CACHE_TTL_MILLIS)
-                cacheDao.trimToNewest(MAX_ARTWORK_DB_ENTRIES)
                 // Only prewarm what the in-memory cache can retain. Reading
                 // all 1,000 rows just to discard 400 on the first new cover
                 // inflated startup DB work and the first map copy.
@@ -77,6 +75,8 @@ class ArtworkRepository @Inject constructor(
                     .associate { it.cacheKey to it.url }
                 _resolved.update { validMap + it }
                 Log.d(TAG, "Pre-warmed memory cache with ${validMap.size} artwork entries")
+                cacheDao.deleteOlderThan(now - DISK_CACHE_TTL_MILLIS)
+                cacheDao.trimToNewest(MAX_ARTWORK_DB_ENTRIES)
             } catch (e: Exception) {
                 Log.e(CRASH_TAG, "Error pre-warming artwork cache from DB", e)
             }
@@ -87,9 +87,9 @@ class ArtworkRepository @Inject constructor(
     private val inFlight = mutableSetOf<String>()
     private val inFlightMutex = Mutex()
     // One visible list can request dozens of missing covers at once. Each
-    // cover races three providers, so cap races globally to avoid socket,
-    // JSON and bitmap pressure overwhelming low-memory phones.
-    private val networkRaceSemaphore = Semaphore(4)
+    // cover races three providers, so stay within the shared client's
+    // 24-request ceiling while filling more than four visible rows at once.
+    private val networkRaceSemaphore = Semaphore(8)
 
     /** Public entry point. Deliberately catches Throwable, not just
      *  Exception — an artwork miss must never take the app down, full stop. */
@@ -131,22 +131,27 @@ class ArtworkRepository @Inject constructor(
 
             // 3. Multi-provider race, bounded across all visible rows.
             val winner = networkRaceSemaphore.withPermit {
-                val channel = kotlinx.coroutines.channels.Channel<Pair<String, String>>(3)
+                val channel = kotlinx.coroutines.channels.Channel<Pair<String, String?>>(3)
                 val jobs = mutableListOf<kotlinx.coroutines.Job>()
                 jobs += scope.launch(Dispatchers.IO) {
-                    val url = fetchDeezer(name, artist)
-                    if (!url.isNullOrBlank()) channel.trySend(Pair("deezer", url))
+                    channel.trySend("deezer" to fetchDeezer(name, artist))
                 }
                 jobs += scope.launch(Dispatchers.IO) {
-                    val url = safeFetch("iTunes", name, artist) { itunes.fetchArtworkUrl(name, artist) }
-                    if (!url.isNullOrBlank()) channel.trySend(Pair("itunes", url))
+                    channel.trySend("itunes" to safeFetch("iTunes", name, artist) {
+                        itunes.fetchArtworkUrl(name, artist)
+                    })
                 }
                 jobs += scope.launch(Dispatchers.IO) {
-                    val url = fetchYouTubeMusic(name, artist)
-                    if (!url.isNullOrBlank()) channel.trySend(Pair("youtube", url))
+                    channel.trySend("youtube" to fetchYouTubeMusic(name, artist))
                 }
                 try {
-                    kotlinx.coroutines.withTimeoutOrNull(3_000L) { channel.receive() }
+                    kotlinx.coroutines.withTimeoutOrNull(3_000L) {
+                        repeat(3) {
+                            val (provider, url) = channel.receive()
+                            if (!url.isNullOrBlank()) return@withTimeoutOrNull provider to url
+                        }
+                        null
+                    }
                 } finally {
                     channel.close()
                     jobs.forEach { it.cancel() }
@@ -168,18 +173,16 @@ class ArtworkRepository @Inject constructor(
         val url = "https://api.deezer.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=1"
         try {
             val req = okhttp3.Request.Builder().url(url).build()
-            http.newCall(req).execute().use { res ->
-                if (!res.isSuccessful) return@withContext null
-                val body = res.body?.string().orEmpty()
-                val jsonEl = json.parseToJsonElement(body) as? kotlinx.serialization.json.JsonObject
-                val data = jsonEl?.get("data") as? kotlinx.serialization.json.JsonArray
-                val first = data?.firstOrNull() as? kotlinx.serialization.json.JsonObject
-                val album = first?.get("album") as? kotlinx.serialization.json.JsonObject
-                val cover = (album?.get("cover_xl") as? kotlinx.serialization.json.JsonPrimitive)?.content
-                    ?: (album?.get("cover_big") as? kotlinx.serialization.json.JsonPrimitive)?.content
-                    ?: ((first?.get("artist") as? kotlinx.serialization.json.JsonObject)?.get("picture_xl") as? kotlinx.serialization.json.JsonPrimitive)?.content
-                cover
-            }
+            val body = http.newCall(req).awaitSuccessfulBodyOrNull() ?: return@withContext null
+            val jsonEl = json.parseToJsonElement(body) as? kotlinx.serialization.json.JsonObject
+            val data = jsonEl?.get("data") as? kotlinx.serialization.json.JsonArray
+            val first = data?.firstOrNull() as? kotlinx.serialization.json.JsonObject
+            val album = first?.get("album") as? kotlinx.serialization.json.JsonObject
+            (album?.get("cover_big") as? kotlinx.serialization.json.JsonPrimitive)?.content
+                ?: (album?.get("cover_xl") as? kotlinx.serialization.json.JsonPrimitive)?.content
+                ?: ((first?.get("artist") as? kotlinx.serialization.json.JsonObject)?.get("picture_xl") as? kotlinx.serialization.json.JsonPrimitive)?.content
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (_: Exception) {
             null
         }
@@ -188,8 +191,10 @@ class ArtworkRepository @Inject constructor(
     private suspend fun fetchYouTubeMusic(name: String, artist: String): String? = withContext(Dispatchers.IO) {
         try {
             val query = if (artist.isNotBlank()) "$name $artist" else name
-            val results = innerTube.searchSongs(query, limit = 2)
+            val results = innerTube.searchSongs(query, limit = 2, prefetchStreams = false)
             results.firstOrNull()?.artworkUrl
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (_: Exception) {
             null
         }
@@ -199,12 +204,15 @@ class ArtworkRepository @Inject constructor(
     private suspend fun safeFetch(providerName: String, name: String, artist: String, block: suspend () -> String?): String? =
         try {
             block()
+        } catch (cancellation: CancellationException) {
+            throw cancellation
         } catch (e: Exception) {
             Log.e(CRASH_TAG, "Provider threw and was suppressed | Provider: $providerName | Track: $name | Artist: $artist", e)
             null
         }
 
     private suspend fun save(key: String, provider: String, url: String) {
+        publish(key, url)
         try {
             cacheDao.upsert(ArtworkCacheEntity(key, url, provider, System.currentTimeMillis()))
             if (savesSinceTrim.incrementAndGet() >= ARTWORK_DB_CLEANUP_INTERVAL &&
@@ -216,7 +224,6 @@ class ArtworkRepository @Inject constructor(
         } catch (e: Exception) {
             Log.e(CRASH_TAG, "Room write failed | Cache key: $key | Provider: $provider", e)
         }
-        publish(key, url)
     }
 
     private fun publish(key: String, url: String) {

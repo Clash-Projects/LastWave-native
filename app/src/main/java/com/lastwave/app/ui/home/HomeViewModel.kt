@@ -16,13 +16,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.util.Calendar
 import javax.inject.Inject
 
@@ -162,25 +158,6 @@ private const val NOW_PLAYING_POLL_MS = 12_000L
 private const val RECENT_TRACKS_POLL_MS = 30_000L
 private const val LISTEN_TICK_MS = 1_000L
 
-/** Caps how many scrobbles the "Recent" tab keeps merging in across a
- *  session. Without this, allTracks grew forever the longer Home stayed
- *  open — every 30s poll prepended newly-scrobbled tracks and kept every
- *  older one too, so both memory and the cost of re-deriving the visible
- *  rows (filter/group/sort) crept up the longer you left the app open. */
-private const val HOME_TRACK_HISTORY_CAP = 500
-
-/** Bundles just the fields [HomeUiState.visibleRows] actually reads, so the
- *  background row-computation below only re-runs when one of them changes —
- *  not on every unrelated uiState update (e.g. the friends sheet opening). */
-private data class RowsKey(
-    val allTracks: List<HomeTrack>,
-    val sortMode: HomeSortMode,
-    val nowPlaying: HomeTrack?,
-    val topTracksOverall: List<HomeTrack>,
-    val topTracks7Days: List<HomeTrack>,
-    val topTracks30Days: List<HomeTrack>,
-)
-
 
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -199,19 +176,6 @@ class HomeViewModel @Inject constructor(
 
     private var cachedTopTracks: List<HomeTrack> = emptyList()
 
-    private val _rows = MutableStateFlow<List<HomeRow>>(emptyList())
-
-    /** The current tab's rows, pre-computed off the main thread.
-     *  [HomeUiState.visibleRows] filters/groups/sorts the full track
-     *  history — with thousands of scrobbles that's real CPU work, and
-     *  running it inline inside a Compose `remember` block (as this used
-     *  to) ran it on the UI thread every time a new track scrobbled in,
-     *  which is exactly when Last.fm polling ticks — causing a visible
-     *  stutter on Home right as a track changed. Recomputing it here on
-     *  Dispatchers.Default and just handing the UI a finished list keeps
-     *  that work off the frame budget entirely. */
-    val rows: StateFlow<List<HomeRow>> = _rows.asStateFlow()
-
     init {
         loadInitial()
         viewModelScope.launch {
@@ -225,33 +189,6 @@ class HomeViewModel @Inject constructor(
                 delay(1200L)
                 refreshSilently()
             }
-        }
-        viewModelScope.launch {
-            uiState
-                .map {
-                    RowsKey(
-                        allTracks = it.allTracks,
-                        sortMode = it.sortMode,
-                        nowPlaying = it.nowPlaying,
-                        topTracksOverall = it.topTracksOverall,
-                        topTracks7Days = it.topTracks7Days,
-                        topTracks30Days = it.topTracks30Days,
-                    )
-                }
-                .distinctUntilChanged()
-                .collectLatest { key ->
-                    val computed = withContext(Dispatchers.Default) {
-                        HomeUiState(
-                            allTracks = key.allTracks,
-                            sortMode = key.sortMode,
-                            nowPlaying = key.nowPlaying,
-                            topTracksOverall = key.topTracksOverall,
-                            topTracks7Days = key.topTracks7Days,
-                            topTracks30Days = key.topTracks30Days,
-                        ).visibleRows()
-                    }
-                    _rows.value = computed
-                }
         }
     }
 
@@ -584,9 +521,7 @@ class HomeViewModel @Inject constructor(
                             val recentOnly = merged.filter { it.timestampMillis != null }
                             val existingKeys = state.allTracks.map { it.key to it.timestampMillis }.toSet()
                             val newOnes = recentOnly.filter { (it.key to it.timestampMillis) !in existingKeys }
-                            val combined = (newOnes + state.allTracks)
-                                .distinctBy { it.key to it.timestampMillis }
-                                .take(HOME_TRACK_HISTORY_CAP)
+                            val combined = (newOnes + state.allTracks).distinctBy { it.key to it.timestampMillis }
                             state.copy(nowPlaying = nowPlaying, allTracks = combined, totalPages = page.totalPages)
                         }
                     }?.onFailure {

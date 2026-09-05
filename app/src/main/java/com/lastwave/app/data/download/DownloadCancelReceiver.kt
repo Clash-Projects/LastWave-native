@@ -13,10 +13,19 @@ class DownloadCancelReceiver : BroadcastReceiver() {
     lateinit var downloadManager: TrackDownloadManager
 
     override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent?.action == TrackDownloadManager.ACTION_CANCEL_DOWNLOAD) {
-            val key = intent.getStringExtra(TrackDownloadManager.EXTRA_DOWNLOAD_KEY)
-            if (!key.isNullOrBlank()) {
-                downloadManager.cancelDownload(key)
+        val downloadIntent = intent ?: return
+        val key = downloadIntent.getStringExtra(TrackDownloadManager.EXTRA_DOWNLOAD_KEY)
+            ?.takeIf(String::isNotBlank) ?: return
+        when (downloadIntent.action) {
+            TrackDownloadManager.ACTION_CANCEL_DOWNLOAD -> downloadManager.cancelDownload(key)
+            TrackDownloadManager.ACTION_RECONNECT_DOWNLOAD -> {
+                if (!downloadManager.reconnectDownload(key)) {
+                    val title = downloadIntent.getStringExtra(TrackDownloadManager.EXTRA_DOWNLOAD_TITLE)
+                    val artist = downloadIntent.getStringExtra(TrackDownloadManager.EXTRA_DOWNLOAD_ARTIST)
+                    if (!title.isNullOrBlank() && !artist.isNullOrBlank()) {
+                        downloadManager.downloadTrack(title = title, artist = artist)
+                    }
+                }
             }
         }
     }

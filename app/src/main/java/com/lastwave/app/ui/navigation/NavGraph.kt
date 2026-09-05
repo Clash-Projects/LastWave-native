@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.model.AuthState
@@ -60,16 +61,21 @@ fun LastWaveNavHost(
 ) {
     val appRouteBridge: AppRouteNavBridge = hiltViewModel()
     val pendingAppRoute by appRouteBridge.routeNavigator.pendingRoute.collectAsStateWithLifecycle()
-    LaunchedEffect(pendingAppRoute) {
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = currentBackStackEntry?.destination?.route
+    LaunchedEffect(pendingAppRoute, currentRoute) {
         val route = pendingAppRoute
-        if (route != null) {
-            appRouteBridge.routeNavigator.consumeRoute()
-            navController.navigate(route) {
-                launchSingleTop = true
+        if (route != null && currentRoute != null &&
+            currentRoute != Screen.Splash.route && currentRoute != Screen.Login.route
+        ) {
+            if (currentRoute != route) {
+                navController.navigate(route) {
+                    launchSingleTop = true
+                }
             }
+            appRouteBridge.routeNavigator.consumeRoute()
         }
     }
-
     // "Explore this genre" from any track's context menu, anywhere in the
     // app — Home, Discover, Playlist, Search — routes here since Genres
     // is a pushed destination on THIS nav controller and none of those
@@ -185,7 +191,27 @@ fun LastWaveNavHost(
                 onOpenPlaylist = { playlistId ->
                     navController.navigate(Screen.PlaylistDetail.createRoute(playlistId))
                 },
+                onOpenFeedPlaylist = { playlistId ->
+                    navController.navigate(Screen.FeedPlaylistDetail.createRoute(playlistId))
+                },
+                onOpenGenerator = {
+                    navController.navigate(Screen.Create.route) { launchSingleTop = true }
+                },
             )
+        }
+
+        composable(Screen.Create.route) {
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.generate.GenerateScreen(
+                    onNavigateToPlaylist = { playlistId ->
+                        navController.popBackStack()
+                        if (playlistId != null) {
+                            navController.navigate(Screen.PlaylistDetail.createRoute(playlistId))
+                        }
+                    },
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
 
         // Friends is a real pushed screen (not a Dialog/ModalBottomSheet) —
@@ -314,6 +340,23 @@ fun LastWaveNavHost(
         composable(Screen.Discover.route) {
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 DiscoverScreen(onBack = { navController.popBackStack() })
+            }
+        }
+
+        composable(
+            route = Screen.FeedPlaylistDetail.route,
+            arguments = listOf(
+                androidx.navigation.navArgument("playlistId") {
+                    type = androidx.navigation.NavType.StringType
+                },
+            ),
+        ) { backStackEntry ->
+            val playlistId = backStackEntry.arguments?.getString("playlistId").orEmpty()
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.feed.FeedPlaylistDetailScreen(
+                    playlistId = playlistId,
+                    onBack = { navController.popBackStack() },
+                )
             }
         }
 

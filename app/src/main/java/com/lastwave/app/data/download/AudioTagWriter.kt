@@ -981,12 +981,6 @@ class AudioTagWriter @Inject constructor(
     }
 
     /** Appends native Matroska tags and an attached cover inside the WebM Segment. */
-    private data class WebmChildRef(
-        val id: Long,
-        val elementStart: Long,
-        val elementLength: Long,
-    )
-
     private fun embedIntoWebm(
         audioFile: File,
         title: String,
@@ -1000,9 +994,7 @@ class AudioTagWriter @Inject constructor(
         if (metadata.isEmpty()) return false
 
         val fileSize = audioFile.length()
-        val segment: EbmlElementHeader
-        val children: List<WebmChildRef>?
-        java.io.RandomAccessFile(audioFile, "r").use { raf ->
+        val segment = java.io.RandomAccessFile(audioFile, "r").use { raf ->
             val ebml = readEbmlElementHeader(raf, 0L, fileSize) ?: return false
             if (ebml.id != 0x1A45DFA3L || ebml.dataSize == null) return false
 
@@ -1017,133 +1009,10 @@ class AudioTagWriter @Inject constructor(
                     offset = element.dataStart + size
                 }
             }
-            segment = found ?: return false
-            children = collectSegmentChildren(raf, segment, fileSize)
+            found ?: return false
         }
 
-        // Preferred path: splice Tags/Attachments in right before the first
-        // Cluster, matching where real muxers place them. Many players and
-        // file managers only scan the header region of a WebM/Matroska file
-        // (stopping once they hit audio data) rather than the whole file, so
-        // metadata tacked onto the very end after all Clusters is often
-        // invisible to them even though it's structurally valid EBML.
-        // Skipped when a Cues index is present, since its byte offsets would
-        // need rewriting too and we can't safely do that here — in that case
-        // we fall back to the old end-of-file append.
-        val hasCues = children?.any { it.id == 0x1C53BB6BL } == true
-        if (children != null && !hasCues) {
-            if (spliceWebmMetadataBeforeFirstCluster(audioFile, segment, children, metadata)) {
-                return true
-            }
-            // Fall through to the legacy append if splicing failed for any reason.
-        }
-
-        return appendWebmMetadataAtEnd(audioFile, fileSize, segment, metadata)
-    }
-
-    /** Walks a Segment's direct children, recording each one's byte range. */
-    private fun collectSegmentChildren(
-        raf: java.io.RandomAccessFile,
-        segment: EbmlElementHeader,
-        fileSize: Long,
-    ): List<WebmChildRef>? {
-        val segmentEnd = segment.dataSize?.let { segment.dataStart + it } ?: fileSize
-        val children = mutableListOf<WebmChildRef>()
-        var offset = segment.dataStart
-        while (offset < segmentEnd) {
-            val element = readEbmlElementHeader(raf, offset, fileSize) ?: return null
-            // A child with unknown size (e.g. a still-being-written live Cluster)
-            // can't be safely relocated — bail out and let the caller fall back
-            // to the plain end-of-file append instead.
-            val size = element.dataSize ?: return null
-            val elementLength = (element.dataStart - offset) + size
-            children += WebmChildRef(element.id, offset, elementLength)
-            offset += elementLength
-        }
-        return children
-    }
-
-    /**
-     * Rebuilds the file with a fresh Tags/Attachments block inserted right
-     * before the first Cluster, dropping any existing SeekHead (its seek
-     * offsets would be stale after the shift — a stale index is worse than
-     * none, since compliant readers fall back to a normal sequential scan
-     * when SeekHead is simply absent) and any existing Tags/Attachments so
-     * we don't leave duplicates behind.
-     */
-    private fun spliceWebmMetadataBeforeFirstCluster(
-        audioFile: File,
-        segment: EbmlElementHeader,
-        children: List<WebmChildRef>,
-        metadata: ByteArray,
-    ): Boolean {
-        val dropIds = setOf(0x114D9B74L, 0x1254C367L, 0x1941A469L) // SeekHead, Tags, Attachments
-        val insertBefore = children.firstOrNull { it.id == 0x1F43B675L }?.elementStart
-
-        var removedBytes = 0L
-        val tempFile = File.createTempFile("tagged_", ".webm", audioFile.parentFile)
-        return try {
-            java.io.RandomAccessFile(audioFile, "r").use { source ->
-                FileOutputStream(tempFile).buffered().use { output ->
-                    // EBML header through the Segment's own id/size bytes.
-                    copyFromRandomAccess(source, output, 0L, segment.dataStart)
-
-                    var metadataWritten = false
-                    for (child in children) {
-                        if (insertBefore != null && child.elementStart == insertBefore) {
-                            output.write(metadata)
-                            metadataWritten = true
-                        }
-                        if (child.id in dropIds) {
-                            removedBytes += child.elementLength
-                            continue
-                        }
-                        copyFromRandomAccess(source, output, child.elementStart, child.elementLength)
-                    }
-                    // No Cluster at all (shouldn't happen for real audio, but
-                    // be safe) — just place the metadata at the end.
-                    if (!metadataWritten) output.write(metadata)
-                    output.flush()
-                }
-            }
-
-            if (segment.dataSize != null) {
-                val newDataSize = segment.dataSize - removedBytes + metadata.size
-                val newSizeBytes = encodeEbmlSize(newDataSize, segment.sizeLength) ?: run {
-                    tempFile.delete()
-                    return false
-                }
-                java.io.RandomAccessFile(tempFile, "rw").use { raf ->
-                    raf.seek(segment.sizeStart)
-                    raf.write(newSizeBytes)
-                }
-            }
-
-            val validHeader = tempFile.length() > 16L && FileInputStream(tempFile).use { input ->
-                val head = ByteArray(4)
-                input.read(head) == 4 &&
-                    head[0] == 0x1A.toByte() && head[1] == 0x45.toByte() &&
-                    head[2] == 0xDF.toByte() && head[3] == 0xA3.toByte()
-            }
-            if (!validHeader) {
-                tempFile.delete()
-                false
-            } else {
-                replaceOriginal(audioFile, tempFile, minimumValidLength = 16)
-            }
-        } catch (_: Exception) {
-            tempFile.delete()
-            false
-        }
-    }
-
-    /** Legacy path: appends the Tags/Attachments block after all existing Segment data. */
-    private fun appendWebmMetadataAtEnd(
-        audioFile: File,
-        fileSize: Long,
-        segment: EbmlElementHeader,
-        metadata: ByteArray,
-    ): Boolean {
+        // Appending is safe only when the Segment already reaches end-of-file.
         if (segment.dataSize != null && segment.dataStart + segment.dataSize != fileSize) return false
         val replacementSize = segment.dataSize?.let { oldSize ->
             encodeEbmlSize(oldSize + metadata.size, segment.sizeLength) ?: return false

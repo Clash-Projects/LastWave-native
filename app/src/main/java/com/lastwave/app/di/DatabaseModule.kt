@@ -117,29 +117,126 @@ object DatabaseModule {
         }
     }
 
-    /** Adds a normalized trackKey, collapses any pre-existing duplicate
-     * download rows down to the most recent copy of each track, then
-     * enforces uniqueness so downloading an already-downloaded track
-     * replaces its row instead of inserting a second one. */
+    private fun migrateDownloadedTracksToLosslessAndUniqueKey(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+        val cursor = database.query("PRAGMA table_info(downloaded_tracks)")
+        val existingColumns = mutableSetOf<String>()
+        cursor.use { c ->
+            val nameIndex = c.getColumnIndex("name")
+            while (c.moveToNext()) {
+                existingColumns.add(c.getString(nameIndex))
+            }
+        }
+        if (existingColumns.isEmpty()) return
+
+        database.execSQL(
+            """CREATE TABLE IF NOT EXISTS downloaded_tracks_v12 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                trackKey TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL,
+                artist TEXT NOT NULL,
+                album TEXT NOT NULL DEFAULT '',
+                artworkUrl TEXT,
+                filePath TEXT NOT NULL,
+                mediaStoreUri TEXT,
+                fileSizeBytes INTEGER NOT NULL DEFAULT 0,
+                formatBadge TEXT NOT NULL DEFAULT 'AUDIO',
+                durationMs INTEGER NOT NULL DEFAULT 0,
+                bitrateKbps INTEGER,
+                isLossless INTEGER NOT NULL DEFAULT 0,
+                hasLyrics INTEGER NOT NULL DEFAULT 0,
+                syncedLyrics TEXT,
+                plainLyrics TEXT,
+                lrcFilePath TEXT,
+                downloadedAtMillis INTEGER NOT NULL DEFAULT 0
+            )""".trimIndent(),
+        )
+
+        val hasLossless = existingColumns.contains("isLossless")
+        val hasQobuz = existingColumns.contains("isQobuz")
+        val hasTrackKey = existingColumns.contains("trackKey")
+
+        val losslessExpr = when {
+            hasLossless -> "isLossless"
+            hasQobuz -> "isQobuz"
+            else -> "0"
+        }
+        val trackKeyExpr = when {
+            hasTrackKey -> "COALESCE(NULLIF(trackKey, ''), LOWER(TRIM(artist)) || '_' || LOWER(TRIM(title)))"
+            else -> "LOWER(TRIM(artist)) || '_' || LOWER(TRIM(title))"
+        }
+
+        database.execSQL(
+            """INSERT OR REPLACE INTO downloaded_tracks_v12 (
+                id, trackKey, title, artist, album, artworkUrl, filePath, mediaStoreUri,
+                fileSizeBytes, formatBadge, durationMs, bitrateKbps, isLossless,
+                hasLyrics, syncedLyrics, plainLyrics, lrcFilePath, downloadedAtMillis
+            ) SELECT
+                id, $trackKeyExpr, title, artist, album, artworkUrl, filePath, mediaStoreUri,
+                fileSizeBytes, formatBadge, durationMs, bitrateKbps, $losslessExpr,
+                hasLyrics, syncedLyrics, plainLyrics, lrcFilePath, downloadedAtMillis
+            FROM downloaded_tracks""".trimIndent(),
+        )
+
+        database.execSQL(
+            """DELETE FROM downloaded_tracks_v12
+                WHERE id NOT IN (
+                    SELECT MAX(id) FROM downloaded_tracks_v12 GROUP BY trackKey
+                )""".trimIndent(),
+        )
+
+        database.execSQL("DROP TABLE downloaded_tracks")
+        database.execSQL("ALTER TABLE downloaded_tracks_v12 RENAME TO downloaded_tracks")
+        database.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_downloaded_tracks_trackKey ON downloaded_tracks(trackKey)")
+    }
+
+    private fun verifyAndRepairSavedPlaylists(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+        val cursor = database.query("PRAGMA table_info(saved_playlists)")
+        val columns = mutableSetOf<String>()
+        cursor.use { c ->
+            val nameIndex = c.getColumnIndex("name")
+            while (c.moveToNext()) {
+                columns.add(c.getString(nameIndex))
+            }
+        }
+        if (columns.isEmpty()) {
+            database.execSQL(
+                """CREATE TABLE IF NOT EXISTS saved_playlists (
+                    id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    subtitle TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    tracksJson TEXT NOT NULL,
+                    createdAtMillis INTEGER NOT NULL,
+                    discoverSignature TEXT,
+                    customCoverUri TEXT,
+                    isPinned INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(id)
+                )""".trimIndent(),
+            )
+            return
+        }
+        if (!columns.contains("customCoverUri")) {
+            database.execSQL("ALTER TABLE saved_playlists ADD COLUMN customCoverUri TEXT")
+        }
+        if (!columns.contains("isPinned")) {
+            database.execSQL("ALTER TABLE saved_playlists ADD COLUMN isPinned INTEGER NOT NULL DEFAULT 0")
+        }
+        if (!columns.contains("discoverSignature")) {
+            database.execSQL("ALTER TABLE saved_playlists ADD COLUMN discoverSignature TEXT")
+        }
+    }
+
     private val migration10To11 = object : Migration(10, 11) {
         override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
-            database.execSQL(
-                "ALTER TABLE downloaded_tracks ADD COLUMN trackKey TEXT NOT NULL DEFAULT ''",
-            )
-            database.execSQL(
-                """UPDATE downloaded_tracks
-                    SET trackKey = LOWER(TRIM(artist)) || '_' || LOWER(TRIM(title))""",
-            )
-            // Keep only the most recently downloaded row per trackKey.
-            database.execSQL(
-                """DELETE FROM downloaded_tracks
-                    WHERE id NOT IN (
-                        SELECT MAX(id) FROM downloaded_tracks GROUP BY trackKey
-                    )""",
-            )
-            database.execSQL(
-                "CREATE UNIQUE INDEX IF NOT EXISTS index_downloaded_tracks_trackKey ON downloaded_tracks(trackKey)",
-            )
+            migrateDownloadedTracksToLosslessAndUniqueKey(database)
+            verifyAndRepairSavedPlaylists(database)
+        }
+    }
+
+    private val migration11To12 = object : Migration(11, 12) {
+        override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+            migrateDownloadedTracksToLosslessAndUniqueKey(database)
+            verifyAndRepairSavedPlaylists(database)
         }
     }
 
@@ -151,6 +248,7 @@ object DatabaseModule {
             // future schema changes can rebuild Room, then restores that
             // mirror if the database opens empty. Artwork is cache.
             .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigrationOnDowngrade()
             .addMigrations(
                 migration4To5,
                 migration5To6,
@@ -159,6 +257,7 @@ object DatabaseModule {
                 migration8To9,
                 migration9To10,
                 migration10To11,
+                migration11To12,
             )
             .build()
 

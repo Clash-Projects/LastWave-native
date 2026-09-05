@@ -4,6 +4,7 @@ import android.util.Log
 import com.lastwave.app.data.local.SessionPreferences
 import com.lastwave.app.data.local.db.RecommendationExclusionDao
 import com.lastwave.app.data.local.db.RecommendationExclusionEntity
+import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.network.LastFmApiService
 import com.lastwave.app.data.playlist.PlaylistRepository
 import kotlinx.coroutines.CancellationException
@@ -21,6 +22,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -30,6 +32,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "GenerateRepository"
+private const val GENERATE_REQUEST_TIMEOUT_MS = 20_000L
+private val YOUTUBE_VIDEO_ID_REGEX = Regex("[A-Za-z0-9_-]{11}")
 const val RECOMMENDATION_TRACK_COUNT = 35
 
 /** Floor for regenerated "inspired" mixes — the generator relaxes artist
@@ -85,7 +89,9 @@ class GenerateRepository @Inject constructor(
         }
         val deferred = inFlightRequests.computeIfAbsent(requestKey) {
             requestScope.async {
-                val response = lastFmRequestGate.withPermit { api.get(requestParams) }
+                val response = withTimeout(GENERATE_REQUEST_TIMEOUT_MS) {
+                    lastFmRequestGate.withPermit { api.get(requestParams) }
+                }
                 val body = response.body()?.string()
                 if (!response.isSuccessful || body.isNullOrBlank()) {
                     throw IllegalStateException("Last.fm request failed (${response.code()})")
@@ -139,6 +145,60 @@ class GenerateRepository @Inject constructor(
     /** Instant non-blocking pass-through matching web app.js generation speed.
      *  Audio resolution is performed on-demand when playing tracks. */
     suspend fun filterPlayable(tracks: List<GeneratedTrack>): List<GeneratedTrack> = tracks
+
+    private fun YouTubeMusicTrack.toGeneratedTrack() = GeneratedTrack(
+        name = title,
+        artist = artist,
+        artworkUrl = artworkUrl,
+        url = "https://music.youtube.com/watch?v=$videoId",
+        album = album,
+    )
+
+    private fun blendSources(
+        youtube: List<GeneratedTrack>,
+        lastFm: List<GeneratedTrack>,
+    ): List<GeneratedTrack> {
+        val blended = ArrayList<GeneratedTrack>(youtube.size + lastFm.size)
+        repeat(maxOf(youtube.size, lastFm.size)) { index ->
+            youtube.getOrNull(index)?.let(blended::add)
+            lastFm.getOrNull(index)?.let(blended::add)
+        }
+        return deduplicate(blended)
+    }
+
+    private suspend fun fetchYouTubeRadio(
+        track: String,
+        artist: String,
+        seedVideoId: String? = null,
+        limit: Int,
+    ): List<GeneratedTrack> {
+        val seed = seedVideoId
+            ?.takeIf(YOUTUBE_VIDEO_ID_REGEX::matches)
+            ?: innerTube.findBestMatchOrNull(track, artist, prefetchStreams = false)?.videoId
+            ?: return emptyList()
+        return innerTube.fetchRelatedSongs(seed, limit, prefetchStreams = false)
+            .map { it.toGeneratedTrack() }
+    }
+
+    private suspend fun fetchYouTubeDiscovery(
+        seeds: List<GeneratedTrack>,
+        limit: Int,
+    ): List<GeneratedTrack> {
+        val seed = seeds.filter { it.name.isNotBlank() && it.artist.isNotBlank() }.shuffled().firstOrNull()
+        if (seed != null) {
+            val radio = try {
+                fetchYouTubeRadio(seed.name, seed.artist, seed.youtubeVideoIdOrNull(), limit)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                emptyList()
+            }
+            if (radio.isNotEmpty()) return radio
+        }
+        val home = innerTube.fetchHomeSongs()
+        val fallback = if (home.isNotEmpty()) home else innerTube.fetchCharts()
+        return fallback.take(limit).map { it.toGeneratedTrack() }
+    }
 
 
     // Explicit-only recommendation exclusions. Nothing is added automatically.
@@ -267,13 +327,19 @@ class GenerateRepository @Inject constructor(
 
     suspend fun fetchChartTracks(limit: Int = 30): List<GeneratedTrack> {
         val page = (1..3).random()
-        return try {
+        val lastFm = try {
             val result = call(mapOf("method" to "chart.gettoptracks", "limit" to (limit * 2).coerceAtLeast(limit).toString(), "page" to page.toString()))
             val tracks = GenerateJson.normalise(result["tracks"]?.jsonObject?.get("track"))
             filterPlayable(shuffle(filterRecommendationExclusions(tracks))).take(limit)
-        } catch (e: Exception) {
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
             emptyList()
         }
+        if (lastFm.isNotEmpty()) return lastFm
+        val charts = innerTube.fetchCharts()
+        val fallback = if (charts.isNotEmpty()) charts else innerTube.fetchHomeSongs()
+        return filterRecommendationExclusions(fallback.map { it.toGeneratedTrack() }).take(limit)
     }
 
     suspend fun fetchTopTracks(limit: Int, period: String = "overall"): List<GeneratedTrack> {
@@ -313,42 +379,120 @@ class GenerateRepository @Inject constructor(
         }
     }
 
-    suspend fun fetchSimilarTracks(track: String, artist: String, limit: Int): List<GeneratedTrack> {
-        val result = call(
-            mapOf("method" to "track.getsimilar", "track" to track, "artist" to artist, "limit" to minOf(limit * 4, 200).toString()),
-        )
-        val all = GenerateJson.normalise(result["similartracks"]?.jsonObject?.get("track"))
-        val allowed = filterRecommendationExclusions(all)
-        return filterPlayable(shuffle(allowed)).take(limit)
-    }
-
-    suspend fun fetchSimilarArtistTracks(artist: String, limit: Int): List<GeneratedTrack> {
-        val result = call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "20"))
-        val artistNames = GenerateJson.namesOf(result["similarartists"]?.jsonObject?.get("artist")).shuffled().take(8)
-        val allTracks = coroutineScope {
-            artistNames.map { a ->
-                async {
-                    try {
-                        val page = (1..4).random()
-                        val r = call(mapOf("method" to "artist.gettoptracks", "artist" to a, "limit" to kotlin.math.ceil(limit / 5.0).toInt().toString(), "page" to page.toString()))
-                        GenerateJson.normalise(r["toptracks"]?.jsonObject?.get("track"))
-                    } catch (e: Exception) {
-                        Log.e(TAG, "artist.gettoptracks failed for $a, continuing with other artists", e)
-                        emptyList()
-                    }
-                }
-            }.awaitAll().flatten()
+    suspend fun fetchSimilarTracks(
+        track: String,
+        artist: String,
+        limit: Int,
+        seedVideoId: String? = null,
+    ): List<GeneratedTrack> = kotlinx.coroutines.supervisorScope {
+        val lastFm = async(Dispatchers.IO) {
+            try {
+                val result = call(
+                    mapOf("method" to "track.getsimilar", "track" to track, "artist" to artist, "limit" to minOf(limit * 4, 200).toString()),
+                )
+                GenerateJson.normalise(result["similartracks"]?.jsonObject?.get("track")).shuffled()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                Log.d(TAG, "Last.fm similar-track source unavailable", error)
+                emptyList()
+            }
         }
-        val allowed = filterRecommendationExclusions(allTracks)
-        return filterPlayable(shuffle(allowed)).take(limit)
+        val youtube = async(Dispatchers.IO) {
+            try {
+                fetchYouTubeRadio(track, artist, seedVideoId, minOf(limit * 2, 75)).shuffled()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                Log.d(TAG, "YouTube radio source unavailable", error)
+                emptyList()
+            }
+        }
+        val seedKey = GeneratedTrack(track, artist, null).key
+        val blended = blendSources(youtube.await(), lastFm.await())
+            .filterNot { it.key == seedKey }
+        filterPlayable(filterRecommendationExclusions(blended)).take(limit)
     }
 
-    suspend fun fetchTagTracks(tag: String, limit: Int): List<GeneratedTrack> {
-        val page = (1..8).random()
-        val result = call(mapOf("method" to "tag.gettoptracks", "tag" to tag, "limit" to minOf(limit * 3, 100).toString(), "page" to page.toString()))
-        val all = GenerateJson.normalise(result["tracks"]?.jsonObject?.get("track"))
-        val allowed = filterRecommendationExclusions(all)
-        return filterPlayable(shuffle(allowed)).take(limit)
+    suspend fun fetchSimilarArtistTracks(artist: String, limit: Int): List<GeneratedTrack> = kotlinx.coroutines.supervisorScope {
+        val lastFm = async(Dispatchers.IO) {
+            try {
+                val result = call(mapOf("method" to "artist.getsimilar", "artist" to artist, "limit" to "20"))
+                val artistNames = GenerateJson.namesOf(result["similarartists"]?.jsonObject?.get("artist")).shuffled().take(8)
+                kotlinx.coroutines.supervisorScope {
+                    artistNames.map { similarArtist ->
+                        async(Dispatchers.IO) {
+                            try {
+                                val page = (1..4).random()
+                                val response = call(
+                                    mapOf(
+                                        "method" to "artist.gettoptracks",
+                                        "artist" to similarArtist,
+                                        "limit" to kotlin.math.ceil(limit / 5.0).toInt().toString(),
+                                        "page" to page.toString(),
+                                    ),
+                                )
+                                GenerateJson.normalise(response["toptracks"]?.jsonObject?.get("track"))
+                            } catch (cancellation: CancellationException) {
+                                throw cancellation
+                            } catch (error: Exception) {
+                                Log.d(TAG, "artist.gettoptracks failed for $similarArtist", error)
+                                emptyList()
+                            }
+                        }
+                    }.awaitAll().flatten()
+                }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                Log.d(TAG, "Last.fm similar-artist source unavailable", error)
+                emptyList()
+            }
+        }
+        val youtube = async(Dispatchers.IO) {
+            try {
+                val seed = innerTube.searchSongs("$artist songs", limit = 3, prefetchStreams = false).firstOrNull()
+                    ?: return@async emptyList()
+                val related = innerTube.fetchRelatedSongs(seed.videoId, minOf(limit * 2, 75), prefetchStreams = false)
+                related.map { it.toGeneratedTrack() }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                Log.d(TAG, "YouTube artist radio source unavailable", error)
+                emptyList()
+            }
+        }
+        val blended = blendSources(youtube.await().shuffled(), lastFm.await().shuffled())
+        filterPlayable(filterRecommendationExclusions(blended)).take(limit)
+    }
+
+    suspend fun fetchTagTracks(tag: String, limit: Int): List<GeneratedTrack> = kotlinx.coroutines.supervisorScope {
+        val lastFm = async(Dispatchers.IO) {
+            try {
+                val page = (1..8).random()
+                val result = call(mapOf("method" to "tag.gettoptracks", "tag" to tag, "limit" to minOf(limit * 3, 100).toString(), "page" to page.toString()))
+                GenerateJson.normalise(result["tracks"]?.jsonObject?.get("track")).shuffled()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                Log.d(TAG, "Last.fm tag source unavailable", error)
+                emptyList()
+            }
+        }
+        val youtube = async(Dispatchers.IO) {
+            try {
+                innerTube.searchSongs("$tag music", minOf(limit * 2, 60), prefetchStreams = false)
+                    .map { it.toGeneratedTrack() }
+                    .shuffled()
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                Log.d(TAG, "YouTube tag source unavailable", error)
+                emptyList()
+            }
+        }
+        val blended = blendSources(youtube.await(), lastFm.await())
+        filterPlayable(filterRecommendationExclusions(blended)).take(limit)
     }
 
     // ── My Mix — exact port of fetchMix(): 3-tier weighted blend ──
@@ -360,8 +504,22 @@ class GenerateRepository @Inject constructor(
         val tasteProfile = runCatching { tasteProfileProvider.get() }.getOrNull()
         var topArtists: List<String> = tasteProfile?.topArtistsRaw.orEmpty()
 
-        // Actual playable picks from the connected account's Home feed.
-        tasteProfile?.ytMusicFeedRaw.orEmpty()
+        val youtubeDiscovery = try {
+            fetchYouTubeDiscovery(
+                seeds = tasteProfile?.recentTracksRaw.orEmpty() + tasteProfile?.topTracksRaw.orEmpty(),
+                limit = maxOf(12, total / 2).coerceAtMost(30),
+            )
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            Log.d(TAG, "YouTube mix source unavailable", error)
+            emptyList()
+        }
+
+        // Connected taste signals and anonymous radio candidates are both
+        // playable, while Last.fm history still drives the strongest seeds.
+        (tasteProfile?.ytMusicFeedRaw.orEmpty() + youtubeDiscovery)
+            .distinctBy(GeneratedTrack::key)
             .shuffled()
             .take(maxOf(8, total / 3).coerceAtMost(16))
             .forEach { weighted += Weighted(it, 3) }
@@ -537,7 +695,7 @@ class GenerateRepository @Inject constructor(
      * Builds a brand-new "inspired" mix from a source playlist's taste.
      * The source playlist itself is never modified and none of its tracks
      * are ever repeated — every returned song is fresh, discovered through
-     * Last.fm similarity graphs plus YouTube Music search, so the regenerated
+     * Last.fm similarity graphs plus accountless YouTube Music radio, so the regenerated
      * playlist feels like a genuinely new selection with the same taste.
      *
      * Targets [count] (30–35) but always tries to land at least
@@ -607,24 +765,19 @@ class GenerateRepository @Inject constructor(
             }
         }
 
-        // 4. YouTube Music search — queries built from seed tracks/artists
-        //    widen the candidate pool beyond Last.fm's graph.
-        val ytQueries = buildList {
-            seedTracks.take(2).forEach { add("${it.artist} ${it.name}") }
-            seedArtists.take(2).forEach { add("$it songs") }
-        }.shuffled().take(3)
-        val ytJobs = ytQueries.map { query ->
+        // 4. Anonymous YouTube Music radios from source tracks
+        //    resolve each seed into its real related-song radio queue.
+        val ytJobs = seedTracks.take(3).map { seed ->
             async(Dispatchers.IO) {
                 try {
-                    innerTube.searchSongs(query, 10).map { t ->
-                        GeneratedTrack(
-                            name = t.title,
-                            artist = t.artist,
-                            artworkUrl = t.artworkUrl,
-                            url = "https://music.youtube.com/watch?v=${t.videoId}",
-                            album = t.album,
-                        )
-                    }
+                    fetchYouTubeRadio(
+                        track = seed.name,
+                        artist = seed.artist,
+                        seedVideoId = seed.youtubeVideoIdOrNull(),
+                        limit = 14,
+                    )
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
                 } catch (_: Exception) {
                     emptyList()
                 }
@@ -775,9 +928,22 @@ class GenerateRepository @Inject constructor(
     // ── My Recommendations — delegates the heavy scoring/pipeline logic to
     //    RecommendationEngine, kept as a separate file given its size. ──
 
-    suspend fun fetchRecommendations(total: Int, onProgress: (String) -> Unit = {}): List<GeneratedTrack> {
+    suspend fun fetchRecommendations(
+        total: Int,
+        onProgress: (String) -> Unit = {},
+    ): List<GeneratedTrack> = kotlinx.coroutines.supervisorScope {
         onProgress("Building your taste profile\u2026")
         val profile = tasteProfileProvider.get()
+        val youtubeDeferred = async(Dispatchers.IO) {
+            try {
+                fetchYouTubeDiscovery(profile.recentTracksRaw + profile.topTracksRaw, total)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                Log.d(TAG, "YouTube recommendation source unavailable", error)
+                emptyList()
+            }
+        }
 
         val blacklist = (profile.recentTrackKeys + profile.topTrackKeys).toMutableSet()
         blacklist.addAll(recommendationExclusionKeys())
@@ -792,8 +958,21 @@ class GenerateRepository @Inject constructor(
             isFresh = { tracks -> filterRecommendationExclusions(tracks) },
             onProgress = onProgress,
         )
-        val recommended = engine.run(total, profile, blacklist, savedPlaylistKeys)
-        return filterPlayable(filterRecommendationExclusions(recommended)).take(total)
+        val recommended = try {
+            engine.run(total, profile, blacklist, savedPlaylistKeys)
+        } catch (cancellation: CancellationException) {
+            throw cancellation
+        } catch (error: Exception) {
+            Log.d(TAG, "Last.fm recommendation engine unavailable", error)
+            emptyList()
+        }
+        onProgress("Blending accountless YouTube radio\u2026")
+        val youtube = youtubeDeferred.await()
+        val blended = blendSources(
+            youtube = youtube.filterNot { it.key in blacklist },
+            lastFm = recommended,
+        )
+        filterPlayable(filterRecommendationExclusions(blended)).take(total)
     }
 
     // ── Start Mix From Track — exact port of startMixFromTrack()'s 3-source blend ──
@@ -883,17 +1062,54 @@ class GenerateRepository @Inject constructor(
         return GenerateJson.namesOf(result["topartists"]?.jsonObject?.get("artist"))
     }
 
-    suspend fun searchTracks(track: String, artist: String?): List<GeneratedTrack> {
-        val params = mutableMapOf("method" to "track.search", "track" to track, "limit" to "15")
-        if (!artist.isNullOrBlank()) params["artist"] = artist
-        val result = call(params)
-        val raw = result["results"]?.jsonObject?.get("trackmatches")?.jsonObject?.get("track")
-        return GenerateJson.normalise(raw)
+    suspend fun searchTracks(track: String, artist: String?): List<GeneratedTrack> = kotlinx.coroutines.supervisorScope {
+        val lastFm = async(Dispatchers.IO) {
+            try {
+                val params = mutableMapOf("method" to "track.search", "track" to track, "limit" to "15")
+                if (!artist.isNullOrBlank()) params["artist"] = artist
+                val result = call(params)
+                val raw = result["results"]?.jsonObject?.get("trackmatches")?.jsonObject?.get("track")
+                GenerateJson.normalise(raw)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+        val youtube = async(Dispatchers.IO) {
+            try {
+                innerTube.searchSongs(listOfNotNull(artist, track).joinToString(" "), 15, prefetchStreams = false)
+                    .map { it.toGeneratedTrack() }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+        blendSources(youtube.await(), lastFm.await()).take(15)
     }
 
-    suspend fun searchArtists(artist: String): List<String> {
-        val result = call(mapOf("method" to "artist.search", "artist" to artist, "limit" to "15"))
-        val raw = result["results"]?.jsonObject?.get("artistmatches")?.jsonObject?.get("artist")
-        return GenerateJson.namesOf(raw)
+    suspend fun searchArtists(artist: String): List<String> = kotlinx.coroutines.supervisorScope {
+        val lastFm = async(Dispatchers.IO) {
+            try {
+                val result = call(mapOf("method" to "artist.search", "artist" to artist, "limit" to "15"))
+                val raw = result["results"]?.jsonObject?.get("artistmatches")?.jsonObject?.get("artist")
+                GenerateJson.namesOf(raw)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+        val youtube = async(Dispatchers.IO) {
+            try {
+                innerTube.searchArtists(artist, 15).map { it.name }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                emptyList()
+            }
+        }
+        (youtube.await() + lastFm.await()).distinctBy { it.trim().lowercase() }.take(15)
     }
 }

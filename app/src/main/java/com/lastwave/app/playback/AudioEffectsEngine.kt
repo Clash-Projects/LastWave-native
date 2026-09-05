@@ -44,6 +44,7 @@ class AudioEffectsEngine @Inject constructor(
     @Volatile private var fallbackRequired = false
     @Volatile private var equalizerSettings = EqualizerSettings()
     @Volatile private var studioClarityEnabled = false
+    @Volatile private var bitPerfectActive = false
 
     private var attachedSessionId = C.AUDIO_SESSION_ID_UNSET
     private var toneEffect: ToneEffect? = null
@@ -82,6 +83,13 @@ class AudioEffectsEngine @Inject constructor(
         requestApply()
     }
 
+    /** Dynamically suppresses AudioFX when Bit-Perfect mode is active on a FLAC/Lossless track. */
+    fun setBitPerfectActive(active: Boolean) {
+        if (bitPerfectActive == active) return
+        bitPerfectActive = active
+        requestApply()
+    }
+
     fun detach() {
         requestedSessionId = C.AUDIO_SESSION_ID_UNSET
         fallbackRequired = false
@@ -98,7 +106,7 @@ class AudioEffectsEngine @Inject constructor(
             releaseAllInternal()
             attachedSessionId = targetSessionId
         }
-        if (!fallbackRequired || attachedSessionId == C.AUDIO_SESSION_ID_UNSET) {
+        if (bitPerfectActive || !fallbackRequired || attachedSessionId == C.AUDIO_SESSION_ID_UNSET) {
             releaseAllInternal()
             return
         }

@@ -8,6 +8,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -46,6 +47,11 @@ class YtMusicAuthManager @Inject constructor(
         val cookies = connection.value.cookies
         if (cookies.isEmpty()) return null
         return cookies.entries.joinToString("; ") { "${it.key}=${it.value}" }
+    }
+
+    suspend fun awaitLoadedConnection(): YtConnection {
+        val persisted = preferences.connection.first()
+        return connection.first { it == persisted }
     }
 
     /**

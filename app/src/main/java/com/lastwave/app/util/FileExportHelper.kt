@@ -33,6 +33,8 @@ class FileExportHelper @Inject constructor(
 ) {
     companion object {
         private const val PUBLIC_EXPORT_SUBDIR = "LastWave"
+        private const val PUBLIC_BACKUP_SUBDIR = "LastWave/Backups"
+        private const val PUBLIC_PLAYLIST_SUBDIR = "LastWave/Playlists"
         private const val PLAYLIST_MIRROR_FILENAME = "lastwave-playlists.json"
         private const val PLAYLIST_RECOVERY_FILENAME = "lastwave-playlists-recovery.json"
         private const val MIRROR_PREFS = "playlist_file_mirror"
@@ -116,7 +118,8 @@ class FileExportHelper @Inject constructor(
 
         // Automatic secondary local safety mirror
         runCatching {
-            val autoBackup = File(documentsDir(), "latest-lastwave-backup.json")
+            val backupDir = File(documentsDir(), "Backups").apply { if (!exists()) mkdirs() }
+            val autoBackup = File(backupDir, "latest-lastwave-backup.json")
             autoBackup.writeText(content, Charsets.UTF_8)
         }
 
@@ -265,27 +268,31 @@ class FileExportHelper @Inject constructor(
 
     private fun publicDownloadUri(filename: String): Uri? {
         val resolver = context.contentResolver
-        return resolver.query(
-            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.Downloads._ID),
-            "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
-            arrayOf(filename, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_EXPORT_SUBDIR/"),
-            "${MediaStore.Downloads.DATE_MODIFIED} DESC",
-        )?.use { cursor ->
-            if (!cursor.moveToFirst()) null
-            else Uri.withAppendedPath(
+        val candidatePaths = listOf(
+            "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_BACKUP_SUBDIR/",
+            "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_EXPORT_SUBDIR/",
+        )
+        for (relativePath in candidatePaths) {
+            val uri = resolver.query(
                 MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)).toString(),
-            )
+                arrayOf(MediaStore.Downloads._ID),
+                "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=?",
+                arrayOf(filename, relativePath),
+                "${MediaStore.Downloads.DATE_MODIFIED} DESC",
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) null
+                else Uri.withAppendedPath(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)).toString(),
+                )
+            }
+            if (uri != null) return uri
         }
+        return null
     }
 
     private fun writeMirrorViaMediaStore(filename: String, content: String) {
         val resolver = context.contentResolver
-        // A mirror left by an older install can still be visible through
-        // MediaStore but no longer writable by this install. Try updating
-        // it first; if Android rejects that URI, create a fresh app-owned
-        // row instead of failing every later playlist edit.
         val existing = runCatching { publicDownloadUri(filename) }.getOrNull()
         if (existing != null) {
             val updated = runCatching {
@@ -301,7 +308,7 @@ class FileExportHelper @Inject constructor(
             ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, filename)
                 put(MediaStore.Downloads.MIME_TYPE, "application/json")
-                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_EXPORT_SUBDIR")
+                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_BACKUP_SUBDIR")
             },
         ) ?: throw IOException("MediaStore refused to create $filename")
         resolver.openOutputStream(uri, "wt")?.use { it.write(content.toByteArray()) }
@@ -316,7 +323,7 @@ class FileExportHelper @Inject constructor(
     private fun writeMirrorViaLegacyFile(filename: String, content: String) {
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         if (!granted) throw SecurityException("Storage permission is required")
-        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), PUBLIC_EXPORT_SUBDIR)
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), PUBLIC_BACKUP_SUBDIR)
         if (!dir.exists() && !dir.mkdirs()) throw IOException("Couldn't create ${dir.path}")
         File(dir, filename).writeText(content)
     }
@@ -324,18 +331,22 @@ class FileExportHelper @Inject constructor(
     private fun readMirrorViaLegacyFile(filename: String): String? {
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         if (!granted) throw SecurityException("Storage permission is required")
-        val file = File(
+        val candidateDirs = listOf(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), PUBLIC_BACKUP_SUBDIR),
             File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), PUBLIC_EXPORT_SUBDIR),
-            filename,
         )
-        return file.takeIf(File::exists)?.readText()
+        for (dir in candidateDirs) {
+            val file = File(dir, filename)
+            if (file.exists()) return file.readText()
+        }
+        return null
     }
 
     /** API 29+: MediaStore Downloads; no permission is needed for files
      * created by the current app installation. */
     private fun saveViaMediaStore(filename: String, content: String) {
         val resolver = context.contentResolver
-        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_EXPORT_SUBDIR"
+        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_PLAYLIST_SUBDIR"
 
         val alreadyExists = resolver.query(
             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
@@ -367,7 +378,7 @@ class FileExportHelper @Inject constructor(
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         if (!granted) return
 
-        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), PUBLIC_EXPORT_SUBDIR)
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), PUBLIC_PLAYLIST_SUBDIR)
         if (!dir.exists() && !dir.mkdirs()) throw IOException("Couldn't create ${dir.path}")
         val file = File(dir, filename)
         if (file.exists()) return

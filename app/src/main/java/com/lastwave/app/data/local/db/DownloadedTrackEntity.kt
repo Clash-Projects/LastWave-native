@@ -1,6 +1,5 @@
 package com.lastwave.app.data.local.db
 
-import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -15,7 +14,7 @@ data class DownloadedTrackEntity(
     // Normalized "${artist}_${title}" (see TrackDownloadManager.makeDownloadKey).
     // Enforced unique so a duplicate download REPLACEs the existing row
     // instead of creating a second one.
-    val trackKey: String,
+    val trackKey: String = "",
     val title: String,
     val artist: String,
     val album: String = "",
@@ -33,3 +32,4 @@ data class DownloadedTrackEntity(
     val lrcFilePath: String? = null,
     val downloadedAtMillis: Long = System.currentTimeMillis(),
 )
+

@@ -18,17 +18,16 @@ constexpr std::array<double, DspProcessor::kEqualizerBandCount> kEqFrequenciesHz
 // sample limiter covers the short transition between analyses.
 constexpr std::int32_t kEqCoefficientIntervalFrames = 128;
 constexpr std::int32_t kEqHeadroomIntervalFrames = 1024;
-constexpr double kEqQ = 2.0;
-// A -1 dBFS ceiling keeps useful true-peak/OEM headroom. Volume boost uses a
-// stereo-linked saturating gain curve below, so this ceiling no longer cancels
-// the user-facing 100-200% gain control on already-mastered music.
-constexpr float kOutputCeiling = 0.891250938F;
-// Keep a small amount of controlled EQ lift before the linked limiter. Fully
-// subtracting the measured curve maximum made adjacent positive bands behave
-// like a global volume cut and made manual EQ adjustments feel inconsistent.
+// Optimal Q = sqrt(2) eliminates resonant ripple between 2/3-octave ISO bands for studio-grade smoothness.
+constexpr double kEqQ = 1.4142135623730951;
+// -0.5 dBFS ceiling protects against true-peak clipping while maintaining high dynamic impact.
+constexpr float kOutputCeiling = 0.944060876F;
+// -1.5 dBFS soft-knee threshold: perfectly linear below this.
+constexpr float kSoftKneeThreshold = 0.841395141F;
 constexpr float kEqualizerPreLimiterBoostDb = 1.0F;
-constexpr float kClarityMakeupGain = 1.071519305F;  // +0.6 dB
-constexpr float kClarityStereoWidth = 1.16F;
+constexpr float kClarityMakeupGain = 1.04F;
+constexpr float kClarityStereoWidth = 1.22F;
+constexpr float kAirExciterAmount = 0.18F;
 
 double safeFrequency(double sampleRate, double frequency) noexcept {
     return std::clamp(frequency, 1.0, sampleRate * 0.45);
@@ -42,14 +41,23 @@ DspProcessor::DspProcessor() noexcept {
 
 void DspProcessor::configure(double sampleRate) noexcept {
     sampleRate_ = std::max(sampleRate, 8000.0);
-    // Studio Master Clarity: tight subsonic control, punchy bass body,
-    // clear low-mid separation, vivid vocal presence, and sparkling air shelf.
-    subBassHighPass_ = Biquad::highPass(sampleRate_, 20.0, 0.7071067811865476);
-    bassFoundation_ = Biquad::peaking(sampleRate_, 80.0, 0.75, 2.8);
-    lowMidSeparation_ = Biquad::peaking(sampleRate_, 260.0, 0.85, -2.6);
-    boxinessControl_ = Biquad::peaking(sampleRate_, 650.0, 0.80, -1.2);
-    presenceDetail_ = Biquad::peaking(sampleRate_, 3200.0, 0.80, 3.6);
-    airDetail_ = Biquad::highShelf(sampleRate_, 9500.0, 0.80, 4.5);
+    // Studio Master Clarity Acoustic Contouring:
+    // 1. Subsonic highpass: tight 24 Hz cutoff removes rumble and saves amp headroom
+    subBassHighPass_ = Biquad::highPass(sampleRate_, 24.0, 0.7071067811865476);
+    // 2. Bass foundation: punchy 72 Hz body with controlled bandwidth
+    bassFoundation_ = Biquad::peaking(sampleRate_, 72.0, 0.80, 3.2);
+    // 3. Low-mid anti-mud: surgical 280 Hz dip removes boxiness and unmasks vocals
+    lowMidSeparation_ = Biquad::peaking(sampleRate_, 280.0, 0.90, -3.0);
+    // 4. Boxiness & resonance control: smooth 750 Hz control
+    boxinessControl_ = Biquad::peaking(sampleRate_, 750.0, 0.85, -1.4);
+    // 5. Vocal presence & instrument detail: articulate 3400 Hz lift
+    presenceDetail_ = Biquad::peaking(sampleRate_, 3400.0, 0.85, 3.8);
+    // 6. Silky air shelf: pristine 10.5 kHz high-frequency extension
+    airDetail_ = Biquad::highShelf(sampleRate_, 10500.0, 0.85, 4.8);
+    // 7. Mono-Bass filter: 130 Hz highpass for Side channel (locks low-end to center, zero blur)
+    monoBassFilter_ = Biquad::highPass(sampleRate_, 130.0, 0.7071067811865476);
+    // 8. Harmonic air exciter: 6000 Hz highpass to isolate highs for tape-style harmonic sheen
+    airExciterFilter_ = Biquad::highPass(sampleRate_, 6000.0, 0.7071067811865476);
     crossfeed_.configure(sampleRate_, 700.0, 4.5);
     rampPerFrame_ = static_cast<float>(1.0 / (sampleRate_ * 0.050));
     equalizerGainSmoothing_ = static_cast<float>(1.0 - std::exp(
@@ -114,6 +122,8 @@ void DspProcessor::reset() noexcept {
     boxinessControl_.clear();
     presenceDetail_.clear();
     airDetail_.clear();
+    monoBassFilter_.clear();
+    airExciterFilter_.clear();
     crossfeed_.clear();
     for (auto& band : equalizerBands_) band.clear();
     limiterGain_ = 1.0F;
@@ -124,6 +134,10 @@ void DspProcessor::reset() noexcept {
 
 void DspProcessor::setStudioMasterClarity(bool enabled) noexcept {
     targetEnabled_.store(enabled, std::memory_order_release);
+}
+
+void DspProcessor::setBitPerfect(bool enabled) noexcept {
+    bitPerfectEnabled_.store(enabled, std::memory_order_release);
 }
 
 void DspProcessor::setPeakProtectionEnabled(bool enabled) noexcept {
@@ -151,6 +165,7 @@ void DspProcessor::process(
     std::int32_t frameCount,
     std::int32_t channelCount) noexcept {
     if (samples == nullptr || frameCount <= 0 || (channelCount != 1 && channelCount != 2)) return;
+    if (bitPerfectEnabled_.load(std::memory_order_acquire)) return;
     const float target = targetEnabled_.load(std::memory_order_acquire) ? 1.0F : 0.0F;
     const bool peakProtectionEnabled = peakProtectionEnabled_.load(std::memory_order_acquire);
     const auto equalizerRevision = targetEqualizerRevision_.load(std::memory_order_acquire);
@@ -340,11 +355,25 @@ void DspProcessor::process(
             wetRight = channelCount == 2
                 ? airDetail_.tick(wetRight, 1)
                 : wetLeft;
+
+            // Harmonic Air Exciter: extracts highs above 6 kHz and generates silky tape-style sheen
+            const float exciterInLeft = airExciterFilter_.tick(dryLeft, 0);
+            const float exciterInRight = channelCount == 2
+                ? airExciterFilter_.tick(dryRight, 1)
+                : exciterInLeft;
+            const float excitedLeft = exciterInLeft - (exciterInLeft * exciterInLeft * exciterInLeft * 0.25F);
+            const float excitedRight = exciterInRight - (exciterInRight * exciterInRight * exciterInRight * 0.25F);
+            wetLeft += excitedLeft * kAirExciterAmount;
+            wetRight += excitedRight * kAirExciterAmount;
+
             if (channelCount == 2) {
                 const float mid = (wetLeft + wetRight) * 0.5F;
-                const float side = (wetLeft - wetRight) * 0.5F * kClarityStereoWidth;
-                wetLeft = mid + side;
-                wetRight = mid - side;
+                const float rawSide = (wetLeft - wetRight) * 0.5F;
+                // Mono-Bass (Anti-Blur): pass side through 130 Hz highpass so bass stays centered mono
+                const float sideHigh = monoBassFilter_.tick(rawSide, 0);
+                const float wideSide = sideHigh * kClarityStereoWidth;
+                wetLeft = mid + wideSide;
+                wetRight = mid - wideSide;
             }
             wetLeft *= kClarityMakeupGain;
             wetRight *= kClarityMakeupGain;
@@ -355,13 +384,24 @@ void DspProcessor::process(
             outputRight += (wetRight - dryRight) * currentWet_;
         }
 
+        // Analog soft-knee saturation: provides clean headroom without squashing the track
+        auto softSaturate = [](float x) noexcept -> float {
+            const float absX = std::abs(x);
+            if (absX <= kSoftKneeThreshold) return x;
+            constexpr float range = kOutputCeiling - kSoftKneeThreshold;
+            const float excess = absX - kSoftKneeThreshold;
+            const float ratio = std::tanh(excess / range);
+            const float saturated = kSoftKneeThreshold + range * ratio;
+            return x >= 0.0F ? saturated : -saturated;
+        };
+
         const float peak = std::max(std::abs(outputLeft), std::abs(outputRight));
-        const float requiredLimiterGain = protectionRequired && peak > kOutputCeiling
-            ? kOutputCeiling / peak
+        // Envelope limiter for extreme overloads (> 1.25 peak), preserving dynamic punch
+        constexpr float kLimiterEngageThreshold = 1.25F;
+        const float requiredLimiterGain = protectionRequired && peak > kLimiterEngageThreshold
+            ? kLimiterEngageThreshold / peak
             : 1.0F;
         if (requiredLimiterGain < limiterGain_) {
-            // This is a zero-lookahead real-time path, so peak attenuation must
-            // engage immediately. Release remains smooth and stereo-linked below.
             limiterGain_ = requiredLimiterGain;
         } else {
             limiterGain_ += (1.0F - limiterGain_) * limiterRelease_;
@@ -376,6 +416,10 @@ void DspProcessor::process(
         }
         outputLeft *= finalGain;
         outputRight *= finalGain;
+        if (protectionRequired) {
+            outputLeft = softSaturate(outputLeft);
+            outputRight = softSaturate(outputRight);
+        }
         outputLeft = std::isfinite(outputLeft)
             ? std::clamp(outputLeft, -kOutputCeiling, kOutputCeiling)
             : 0.0F;

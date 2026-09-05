@@ -4,6 +4,9 @@ import android.util.Log
 import com.lastwave.app.data.generate.GenerateRepository
 import com.lastwave.app.data.generate.GeneratedTrack
 import com.lastwave.app.data.generate.TasteProfileProvider
+import com.lastwave.app.data.music.InnerTubeMusicApi
+import com.lastwave.app.data.music.YouTubeMusicTrack
+import com.lastwave.app.data.ytmusic.YtMusicAuthManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -43,7 +46,17 @@ private data class RankedCandidate(
 class DiscoverRepository @Inject constructor(
     private val generateRepository: GenerateRepository,
     private val tasteProfileProvider: TasteProfileProvider,
+    private val innerTube: InnerTubeMusicApi,
+    private val ytAuth: YtMusicAuthManager,
 ) {
+    private fun YouTubeMusicTrack.toGeneratedTrack() = GeneratedTrack(
+        name = title,
+        artist = artist,
+        artworkUrl = artworkUrl,
+        url = "https://music.youtube.com/watch?v=$videoId",
+        album = album,
+    )
+
     private val mutex = Mutex()
     private var queue: MutableList<GeneratedTrack> = mutableListOf()
     private val shownKeys = mutableSetOf<String>()
@@ -153,6 +166,23 @@ class DiscoverRepository @Inject constructor(
             }
         }
 
+        val isYtConnected = ytAuth.connection.value.isConnected
+        if (isYtConnected) {
+            jobs += async(Dispatchers.IO) {
+                try {
+                    val tracks = innerTube.fetchHomeSongs().ifEmpty { innerTube.fetchCharts() }
+                    SourceBatch(
+                        tracks = tracks.map { it.toGeneratedTrack() },
+                        weight = 94,
+                        source = "yt-new",
+                    )
+                } catch (e: Exception) {
+                    Log.d(TAG, "refillQueue yt-new tracks fetch failed", e)
+                    SourceBatch(emptyList(), 94, "yt-new")
+                }
+            }
+        }
+
         val queuedKeys = queue.mapTo(mutableSetOf()) { it.key }
         val candidates = LinkedHashMap<String, RankedCandidate>()
         val sourceBatches = jobs.awaitAll().toMutableList()
@@ -184,20 +214,27 @@ class DiscoverRepository @Inject constructor(
             candidates.values.map(RankedCandidate::track),
         ).mapTo(mutableSetOf(), GeneratedTrack::key)
         val savedPlaylistKeys = generateRepository.savedPlaylistTrackKeys()
-        fun score(candidate: RankedCandidate): Double {
-            val affinity = profile?.artistAffinity?.get(candidate.track.artist.trim().lowercase()) ?: 0.0
-            val consensus = minOf(24, (candidate.sources.size - 1).coerceAtLeast(0) * 8)
-            val similarity = (candidate.track.match ?: 0.0).coerceIn(0.0, 1.0) * 24.0
-            val savedPenalty = if (candidate.track.key in savedPlaylistKeys) SAVED_TRACK_SCORE_PENALTY else 0.0
-            return candidate.strongestWeight + consensus + similarity +
-                affinity * 26.0 - savedPenalty + Random.nextDouble() * 3.0
-        }
+
+        class ScoredCandidate(val candidate: RankedCandidate, val score: Double)
+
         val ranked = candidates.values
             .filterNot { it.track.key in shownKeys }
-            .sortedByDescending(::score)
+            .map { candidate ->
+                val affinity = profile?.artistAffinity?.get(candidate.track.artist.trim().lowercase()) ?: 0.0
+                val consensus = minOf(24, (candidate.sources.size - 1).coerceAtLeast(0) * 8)
+                val similarity = (candidate.track.match ?: 0.0).coerceIn(0.0, 1.0) * 24.0
+                val savedPenalty = if (candidate.track.key in savedPlaylistKeys) SAVED_TRACK_SCORE_PENALTY else 0.0
+                val jitter = Random.nextDouble() * 3.0
+                val finalScore = candidate.strongestWeight + consensus + similarity +
+                    affinity * 26.0 - savedPenalty + jitter
+                ScoredCandidate(candidate, finalScore)
+            }
+            .sortedByDescending { it.score }
+            .map { it.candidate }
+
         val preferred = ranked.filter { it.track.key in allowedKeys }
-        val ytFeedCandidates = preferred.filter { "yt-feed" in it.sources }
-        val otherCandidates = preferred.filterNot { "yt-feed" in it.sources }
+        val ytFeedCandidates = preferred.filter { "yt-feed" in it.sources || "yt-new" in it.sources }
+        val otherCandidates = preferred.filterNot { "yt-feed" in it.sources || "yt-new" in it.sources }
         val balanced = buildList {
             var otherIndex = 0
             var ytIndex = 0

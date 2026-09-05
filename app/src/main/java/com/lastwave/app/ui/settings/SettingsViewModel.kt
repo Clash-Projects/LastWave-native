@@ -8,7 +8,6 @@ import com.lastwave.app.data.backup.RestoreResult
 import com.lastwave.app.data.generate.GenerateRepository
 import com.lastwave.app.data.local.AccentMode
 import com.lastwave.app.data.local.EqualizerSettings
-import com.lastwave.app.data.local.LyricsAnimation
 import com.lastwave.app.data.local.LyricsUiVersion
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.ScrobblerPreferences
@@ -91,10 +90,15 @@ class SettingsViewModel @Inject constructor(
     private val downloadedTrackDao: com.lastwave.app.data.local.db.DownloadedTrackDao,
     val playlistImportManager: com.lastwave.app.data.playlist.PlaylistImportManager,
     val innerTube: com.lastwave.app.data.music.InnerTubeMusicApi,
+    val appUpdateManager: com.lastwave.app.data.update.AppUpdateManager,
     @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
 ) : ViewModel() {
 
     val authState: StateFlow<com.lastwave.app.data.model.AuthState> = authRepository.authState
+    val updateInfo = appUpdateManager.updateInfo
+
+    fun checkForUpdates() = appUpdateManager.checkForUpdate(isSilent = false)
+    fun openUpdate(context: android.content.Context) = appUpdateManager.openUpdate(context)
 
     /** YouTube Music account connection + playlist-sync state (§ YouTube Music). */
     val ytConnection: StateFlow<com.lastwave.app.data.ytmusic.YtConnection> = ytAuthManager.connection
@@ -241,16 +245,35 @@ class SettingsViewModel @Inject constructor(
     fun setUseCustomFont(enabled: Boolean) = launchSettingsAction("update the app font") { settingsPreferences.setUseCustomFont(enabled) }
     fun setPreferLosslessStreaming(enabled: Boolean) = launchSettingsAction("update streaming preference") { settingsPreferences.setPreferLosslessStreaming(enabled) }
     fun setLosslessQuality(quality: Int) = launchSettingsAction("update streaming quality") { settingsPreferences.setLosslessQuality(quality) }
+    fun setDownloadQuality(quality: Int) = launchSettingsAction("update download quality") { settingsPreferences.setDownloadQuality(quality) }
     fun setStudioMasterClarity(enabled: Boolean) {
         // Apply immediately; DataStore persists the same state for future engine instances.
         runCatching { audioEngine.get().setStudioMasterClarity(enabled) }
-        launchSettingsAction("update Studio Master Clarity") { settingsPreferences.setStudioMasterClarity(enabled) }
+        launchSettingsAction("update Studio Master Clarity") {
+            settingsPreferences.setStudioMasterClarity(enabled)
+            if (enabled) {
+                // Enabling DSP clarity disables Bit-Perfect mode
+                settingsPreferences.setBitPerfectEnabled(false)
+                runCatching { audioEngine.get().setBitPerfect(false) }
+            }
+        }
+    }
+    fun setBitPerfectEnabled(enabled: Boolean) {
+        runCatching { audioEngine.get().setBitPerfect(enabled) }
+        launchSettingsAction("update Bit-Perfect mode") {
+            settingsPreferences.setBitPerfectEnabled(enabled)
+            if (enabled) {
+                // When Bit-Perfect is turned on, automatically turn off Studio Master Clarity
+                settingsPreferences.setStudioMasterClarity(false)
+                runCatching { audioEngine.get().setStudioMasterClarity(false) }
+            }
+        }
     }
     fun setLyricsUiVersion(version: LyricsUiVersion) = launchSettingsAction("update lyrics UI version") { settingsPreferences.setLyricsUiVersion(version) }
-    fun setLyricsAnimation(animation: LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
+    fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }
     fun setCrossfadeEnabled(enabled: Boolean) = launchSettingsAction("update crossfade") { settingsPreferences.setCrossfadeEnabled(enabled) }
     fun setCrossfadeSeconds(seconds: Int) = launchSettingsAction("update crossfade duration") {
-        settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 10))
+        settingsPreferences.setCrossfadeSeconds(seconds.coerceIn(1, 12))
     }
     fun setWavySeekbarEnabled(enabled: Boolean) = launchSettingsAction("update seekbar style") {
         settingsPreferences.setWavySeekbarEnabled(enabled)

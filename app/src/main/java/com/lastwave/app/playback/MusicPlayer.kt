@@ -221,6 +221,7 @@ class MusicPlayer @Inject constructor(
     private var bufferingRecoveryCount = 0
     private var bufferingRecoveryJob: Job? = null
     private val losslessBypassMediaIds = ConcurrentHashMap.newKeySet<String>()
+    private var bitPerfectEnabled = false
     private val resolvingMediaIds = ConcurrentHashMap<String, Long>()
     private val preparedStreams = ConcurrentHashMap<String, ResolvedStream>()
 
@@ -296,6 +297,19 @@ class MusicPlayer @Inject constructor(
                     ?.customCacheKey
                     ?.let(preparedStreams::get)
                     ?.let(::publishResolvedQuality)
+                val isNaturalTransition = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
+                if (crossfadeEnabled && crossfadeDurationMs > 0L && isNaturalTransition) {
+                    incomingCrossfadeMediaId = mediaItem.mediaId
+                    incomingCrossfadeStartVolume = player.volume
+                        .coerceIn(0f, 1f)
+                        .takeIf { it < 0.99f }
+                        ?: 0f
+                    player.volume = incomingCrossfadeStartVolume
+                } else {
+                    incomingCrossfadeMediaId = null
+                    player.volume = 1f
+                }
                 // Queue placeholders are intentionally non-playable until
                 // their signed stream has been resolved. Resolve an item
                 // before Media3 can attempt to open its lastwave:// URI.
@@ -311,24 +325,12 @@ class MusicPlayer @Inject constructor(
                     }
                     return
                 }
-                val isNaturalTransition = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
-                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
-                if (crossfadeEnabled && crossfadeDurationMs > 0L && isNaturalTransition) {
-                    incomingCrossfadeMediaId = mediaItem.mediaId
-                    incomingCrossfadeStartVolume = player.volume
-                        .coerceIn(0f, 1f)
-                        .takeIf { it < 0.99f }
-                        ?: 0f
-                    player.volume = incomingCrossfadeStartVolume
-                } else {
-                    incomingCrossfadeMediaId = null
-                    player.volume = 1f
-                }
                 if (currentTrack.playbackUrl != null) {
                     applicationScope.launch(Dispatchers.IO) {
                         publishLocalTrackQuality(currentTrack)
                     }
                 }
+                updateBitPerfectState()
                 enrichUpcomingQueue(currentIndex)
                 extendDiscoverQueueIfNeeded(currentIndex)
                 val nextIndex = if (player.shuffleModeEnabled) {
@@ -347,6 +349,9 @@ class MusicPlayer @Inject constructor(
             val trackVideoId = currentTrack?.videoId
             val failedIndex = player.currentMediaItemIndex
             val failedMediaId = player.currentMediaItem?.mediaId
+            if (failedMediaId != null && resolvingMediaIds.containsKey(failedMediaId)) {
+                return
+            }
             val rejectedStream = player.currentMediaItem
                 ?.localConfiguration
                 ?.customCacheKey
@@ -659,6 +664,8 @@ class MusicPlayer @Inject constructor(
             settingsPreferences.settings.collect { settings ->
                 crossfadeEnabled = settings.crossfadeEnabled
                 crossfadeDurationMs = settings.crossfadeSeconds.coerceIn(1, 10) * 1000L
+                bitPerfectEnabled = settings.isBitPerfectEnabled
+                updateBitPerfectState()
                 if (playerDelegate.isInitialized()) {
                     onMain {
                         if (settings.crossfadeEnabled) {
@@ -985,12 +992,12 @@ class MusicPlayer @Inject constructor(
         val target = positionMs.coerceAtLeast(0)
         player.seekTo(target)
         val dur = player.duration.takeIf { it > 0 } ?: _state.value.durationMs
-        player.volume = calculateCrossfadeVolume(target, dur)
+        player.volume = if (bitPerfectEnabled) 1.0f else calculateCrossfadeVolume(target, dur)
         _state.update { it.copy(positionMs = target) }
     }
 
     private fun calculateCrossfadeVolume(positionMs: Long, durationMs: Long): Float {
-        if (!crossfadeEnabled || crossfadeDurationMs <= 0L) return 1.0f
+        if (bitPerfectEnabled || !crossfadeEnabled || crossfadeDurationMs <= 0L) return 1.0f
         val isIncomingCrossfade = incomingCrossfadeMediaId == player.currentMediaItem?.mediaId
         if (isIncomingCrossfade) {
             val incomingFadeDuration = if (durationMs > 0L) {
@@ -1017,6 +1024,15 @@ class MusicPlayer @Inject constructor(
         val progress = (remainingMs.toFloat() / effectiveCrossfade.toFloat()).coerceIn(0f, 1f)
         return kotlin.math.sin(progress * (Math.PI.toFloat() / 2f))
     }
+
+    private fun updateBitPerfectState() {
+        // Bit-Perfect applies to every stream (Lossless, YouTube Music, local downloads)
+        // Completely bypassing native DSP and Android AudioFX processing.
+        val effectiveBitPerfect = bitPerfectEnabled
+        runCatching { nativeAudioEngine.get().setBitPerfect(effectiveBitPerfect) }
+        audioEffectsEngine.setBitPerfectActive(effectiveBitPerfect)
+    }
+
     fun seekToQueueItem(index: Int) = onMain {
         if (index in 0 until player.mediaItemCount) {
             resolveAndPlayQueueItem(index)
@@ -1302,8 +1318,17 @@ class MusicPlayer @Inject constructor(
                 val index = item.index
                 withContext(Dispatchers.Main.immediate) {
                     // NEVER replace the currently playing item, as replaceMediaItem resets the player buffer and interrupts playback midway
-                    if (index != player.currentMediaItemIndex && index in 0 until player.mediaItemCount && player.getMediaItemAt(index).mediaId == expectedMediaId) {
-                        player.replaceMediaItem(index, enriched.toMediaItem())
+                    val queuedItem = if (index in 0 until player.mediaItemCount) player.getMediaItemAt(index) else null
+                    if (index != player.currentMediaItemIndex && queuedItem?.mediaId == expectedMediaId) {
+                        val prepared = queuedItem.localConfiguration
+                            ?.customCacheKey
+                            ?.let(preparedStreams::get)
+                            ?.takeUnless { it.isExpired() }
+                            ?.takeIf { stream ->
+                                val streamVideoId = stream.youtubeCandidate?.videoId
+                                streamVideoId == null || enriched.videoId == null || streamVideoId == enriched.videoId
+                            }
+                        player.replaceMediaItem(index, enriched.toMediaItem(prepared))
                     }
                 }
             }
@@ -1327,7 +1352,7 @@ class MusicPlayer @Inject constructor(
 
     private fun preloadNextTrack(nextIndex: Int, nextTrack: PlayableTrack?) {
         if (nextTrack == null) return
-        val expectedMediaId = nextTrack.mediaIdKey()
+        val expectedQueueKey = nextTrack.queueKey()
         preloadJob?.cancel()
         preloadJob = applicationScope.launch(Dispatchers.IO) {
             delay(NEXT_TRACK_PREFETCH_DELAY_MS)
@@ -1338,14 +1363,20 @@ class MusicPlayer @Inject constructor(
                 .getOrNull() ?: return@launch
 
             val installed = withContext(Dispatchers.Main.immediate) {
-                if (nextIndex !in 0 until player.mediaItemCount ||
-                    player.getMediaItemAt(nextIndex).mediaId != expectedMediaId ||
-                    nextIndex == player.currentMediaItemIndex
+                val queuedTrack = (if (nextIndex in 0 until player.mediaItemCount) {
+                    player.getMediaItemAt(nextIndex).toPlayableTrack()
+                } else null) ?: return@withContext false
+                if (queuedTrack.queueKey() != expectedQueueKey || nextIndex == player.currentMediaItemIndex) {
+                    return@withContext false
+                }
+                val resolvedVideoId = resolved.youtubeCandidate?.videoId
+                if (resolvedVideoId != null && queuedTrack.videoId != null &&
+                    resolvedVideoId != queuedTrack.videoId
                 ) {
                     return@withContext false
                 }
                 registerPreparedStream(resolved)
-                player.replaceMediaItem(nextIndex, nextTrack.toMediaItem(resolved))
+                player.replaceMediaItem(nextIndex, queuedTrack.toMediaItem(resolved))
                 logStreamEvent("next-prepared", resolved, retry = 0)
                 true
             }
@@ -1795,6 +1826,7 @@ class MusicPlayer @Inject constructor(
                 samplingRateKHz = resolved.samplingRateKHz,
             )
         }
+        updateBitPerfectState()
     }
 
     private suspend fun resolveTrackAudioStreamWithRetry(
@@ -1924,6 +1956,7 @@ class MusicPlayer @Inject constructor(
                 isLossless = false,
             )
         }
+        updateBitPerfectState()
     }
 
     private fun publishLocalTrackQuality(track: PlayableTrack) {
@@ -1970,6 +2003,7 @@ class MusicPlayer @Inject constructor(
                     isLossless = isFlac && (bitDepth ?: 0) > 16,
                 )
             }
+            updateBitPerfectState()
         } catch (_: Exception) {
             val isFlac = url.endsWith(".flac", ignoreCase = true)
             _state.update {
@@ -1977,8 +2011,10 @@ class MusicPlayer @Inject constructor(
                     audioCodec = if (isFlac) "FLAC" else "AUDIO",
                     bitDepth = if (isFlac) 16 else null,
                     samplingRateKHz = if (isFlac) 44.1 else null,
+                    isLossless = isFlac,
                 )
             }
+            updateBitPerfectState()
         } finally {
             runCatching { retriever.release() }
         }
