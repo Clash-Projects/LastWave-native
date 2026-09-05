@@ -152,13 +152,12 @@ class PlaylistViewModel @Inject constructor(
                 playlistRepository.getAll()
             } catch (cancellation: CancellationException) {
                 throw cancellation
-            } catch (_: Exception) {
-                _uiState.update {
-                    it.copy(isLoading = false, toastMessage = "Couldn't load playlists")
-                }
-                return@launch
+            } catch (e: Exception) {
+                android.util.Log.e("PlaylistViewModel", "Error reading local playlists", e)
+                emptyList()
             }
-            val all = sortPlaylists(local + ytMusicLibraryManager.playlists.value, _uiState.value.sortMode)
+            val remote = runCatching { ytMusicLibraryManager.playlists.value }.getOrDefault(emptyList())
+            val all = sortPlaylists(local + remote, _uiState.value.sortMode)
             val newest = justGeneratedId ?: all.maxByOrNull { it.createdAtMillis }?.id
             _uiState.update { current ->
                 val currentDetailId = current.detailPlaylist?.id

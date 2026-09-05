@@ -992,12 +992,12 @@ class MusicPlayer @Inject constructor(
         val target = positionMs.coerceAtLeast(0)
         player.seekTo(target)
         val dur = player.duration.takeIf { it > 0 } ?: _state.value.durationMs
-        player.volume = calculateCrossfadeVolume(target, dur)
+        player.volume = if (bitPerfectEnabled) 1.0f else calculateCrossfadeVolume(target, dur)
         _state.update { it.copy(positionMs = target) }
     }
 
     private fun calculateCrossfadeVolume(positionMs: Long, durationMs: Long): Float {
-        if (!crossfadeEnabled || crossfadeDurationMs <= 0L) return 1.0f
+        if (bitPerfectEnabled || !crossfadeEnabled || crossfadeDurationMs <= 0L) return 1.0f
         val isIncomingCrossfade = incomingCrossfadeMediaId == player.currentMediaItem?.mediaId
         if (isIncomingCrossfade) {
             val incomingFadeDuration = if (durationMs > 0L) {
@@ -1026,8 +1026,9 @@ class MusicPlayer @Inject constructor(
     }
 
     private fun updateBitPerfectState() {
-        val currentIsLossless = _state.value.isLossless
-        val effectiveBitPerfect = bitPerfectEnabled && currentIsLossless
+        // Bit-Perfect applies to every stream (Lossless, YouTube Music, local downloads)
+        // Completely bypassing native DSP and Android AudioFX processing.
+        val effectiveBitPerfect = bitPerfectEnabled
         runCatching { nativeAudioEngine.get().setBitPerfect(effectiveBitPerfect) }
         audioEffectsEngine.setBitPerfectActive(effectiveBitPerfect)
     }

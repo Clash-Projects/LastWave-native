@@ -55,14 +55,17 @@ interface SavedPlaylistDao {
     @Query("SELECT COUNT(*) FROM saved_playlists")
     suspend fun count(): Int
 
+    @Query("SELECT id FROM saved_playlists WHERE mode NOT IN ('custom', 'liked') AND isPinned = 0 ORDER BY createdAtMillis DESC")
+    suspend fun getUnpinnedGeneratedIds(): List<Long>
+
     /** Keeps pinned/generated playlists plus the newest [max] unpinned ones. */
-    @Query(
-        """DELETE FROM saved_playlists
-           WHERE mode NOT IN ('custom', 'liked') AND isPinned = 0 AND id NOT IN
-           (SELECT id FROM saved_playlists WHERE mode NOT IN ('custom', 'liked') AND isPinned = 0
-            ORDER BY createdAtMillis DESC LIMIT :max)""",
-    )
-    suspend fun trimGeneratedToNewest(max: Int)
+    @Transaction
+    suspend fun trimGeneratedToNewest(max: Int) {
+        val ids = getUnpinnedGeneratedIds()
+        if (ids.size > max) {
+            ids.drop(max).forEach { deleteById(it) }
+        }
+    }
 
     @Query("DELETE FROM saved_playlists")
     suspend fun clear()

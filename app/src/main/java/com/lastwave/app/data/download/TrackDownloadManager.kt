@@ -20,6 +20,7 @@ import com.lastwave.app.data.local.db.DownloadedTrackDao
 import com.lastwave.app.data.local.db.DownloadedTrackEntity
 import com.lastwave.app.data.lyrics.LrclibLyricsApi
 import com.lastwave.app.data.music.InnerTubeMusicApi
+import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.lossless.LosslessMusicApi
 import com.lastwave.app.data.local.MiscSettings
 import com.lastwave.app.data.local.SettingsPreferences
@@ -148,10 +149,10 @@ class TrackDownloadManager @Inject constructor(
     // Dedicated HTTP client with extended timeouts and high-throughput connection pooling
     private val downloadClient = okHttpClient.newBuilder()
         .dispatcher(Dispatcher().apply {
-            maxRequests = 32
-            maxRequestsPerHost = 16
+            maxRequests = 64
+            maxRequestsPerHost = 24
         })
-        .connectionPool(ConnectionPool(10, 5, TimeUnit.MINUTES))
+        .connectionPool(ConnectionPool(32, 5, TimeUnit.MINUTES))
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(2, TimeUnit.MINUTES)
         .callTimeout(10, TimeUnit.MINUTES)
@@ -330,16 +331,17 @@ class TrackDownloadManager @Inject constructor(
                 // Resolve missing metadata & cover art proactively
                 var resolvedArtworkUrl = artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                 var resolvedAlbum = album?.takeIf { it.isNotBlank() }
+                var preloadedBestMatch: YouTubeMusicTrack? = null
 
                 if (resolvedArtworkUrl == null || resolvedAlbum == null) {
-                    val best = runCatching {
+                    preloadedBestMatch = runCatching {
                         innerTube.findBestMatch(title, artist, prefetchStreams = false)
                     }.getOrNull()
                     if (resolvedArtworkUrl == null) {
-                        resolvedArtworkUrl = best?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
+                        resolvedArtworkUrl = preloadedBestMatch?.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
                     }
                     if (resolvedAlbum == null) {
-                        resolvedAlbum = best?.album?.takeIf { it.isNotBlank() }
+                        resolvedAlbum = preloadedBestMatch?.album?.takeIf { it.isNotBlank() }
                     }
                 }
 
@@ -400,7 +402,8 @@ class TrackDownloadManager @Inject constructor(
 
                 if (resolvedUrl == null) {
                     // Fallback to YouTube Music (prefer M4A/AAC for universal media player compatibility)
-                    val bestMatch = innerTube.findBestMatch(title, artist, prefetchStreams = false)
+                    val bestMatch = preloadedBestMatch
+                        ?: innerTube.findBestMatch(title, artist, prefetchStreams = false)
                     val videoId = bestMatch.videoId ?: error("No audio source found for $title")
                     if (resolvedArtworkUrl == null) {
                         resolvedArtworkUrl = bestMatch.artworkUrl?.takeIf { ArtworkNormalizer.isRealImage(it) }
@@ -437,11 +440,32 @@ class TrackDownloadManager @Inject constructor(
                     isLossless = false
                 }
 
-                // 2. Download raw stream to local temp cache file
+                // 2. Proactively start lyrics lookup concurrently with the download
+                val shouldDownloadLyrics = runCatching {
+                    settingsPreferences.settings.first().downloadLyrics
+                }.getOrDefault(true)
+
+                val lyricsDeferred = if (shouldDownloadLyrics) {
+                    async(Dispatchers.IO) {
+                        runCatching {
+                            lrclibLyricsApi.fetchLyrics(
+                                title = title,
+                                artist = artist,
+                                album = resolvedAlbum,
+                                durationSeconds = null,
+                            )
+                        }.getOrNull()
+                    }
+                } else {
+                    null
+                }
+
+                // 3. Download raw stream to local temp cache file
                 val rawFile = File.createTempFile("dl_raw_", ".$extension", context.cacheDir)
                 tempDownloadFile = rawFile
 
                     var lastProgress = 0
+                    var lastNotifTime = 0L
                     var lastUnknownProgressBytes = 0L
                     val progressLock = Any()
                     val transfer = downloadToTempFile(
@@ -469,6 +493,7 @@ class TrackDownloadManager @Inject constructor(
                         },
                     ) { downloadedBytes, totalBytes ->
                         synchronized(progressLock) {
+                            val now = android.os.SystemClock.uptimeMillis()
                             if (totalBytes > 0) {
                                 val progress = ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
                                 if (progress > lastProgress) {
@@ -482,7 +507,11 @@ class TrackDownloadManager @Inject constructor(
                                             formatBadge = formatBadge,
                                         ),
                                     )
-                                    showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
+                                    // Throttle notification IPC to avoid Binder lock contention during rapid downloading
+                                    if (progress == 100 || now - lastNotifTime >= 250L) {
+                                        lastNotifTime = now
+                                        showDownloadNotification(notifId, key, title, artist, progress, false, formatBadge)
+                                    }
                                 }
                             } else if (downloadedBytes - lastUnknownProgressBytes >= 1024 * 1024) {
                                 lastUnknownProgressBytes = downloadedBytes
@@ -496,7 +525,10 @@ class TrackDownloadManager @Inject constructor(
                                         formatBadge = "$formatBadge • $mbDown",
                                     ),
                                 )
-                                showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
+                                if (now - lastNotifTime >= 500L) {
+                                    lastNotifTime = now
+                                    showDownloadNotification(notifId, key, title, artist, 0, true, formatBadge)
+                                }
                             }
                         }
                     }
@@ -523,17 +555,23 @@ class TrackDownloadManager @Inject constructor(
                         throw IOException("Downloaded payload is not a valid ${extension.uppercase()} audio file")
                     }
 
+                    // Losslessly remux WebM Opus into standard Ogg Opus for universal player & tag compatibility
+                    if (extension == "webm") {
+                        val opusFile = File.createTempFile("dl_remux_", ".opus", context.cacheDir)
+                        if (WebmOpusRemuxer.remux(rawFile, opusFile)) {
+                            rawFile.delete()
+                            tempDownloadFile = opusFile
+                            extension = "opus"
+                            mimeType = "audio/ogg"
+                            formatBadge = "OPUS"
+                        } else {
+                            opusFile.delete()
+                        }
+                    }
+
                     val safeFilename = sanitizeFilename("$artist - $title") + ".$extension"
 
-                    // 3. Fetch lyrics BEFORE tagging so they can be embedded
-                    // INTO the audio file (a sidecar alone lands in a folder
-                    // most players never associate with the track).
-                    var hasLyrics = false
-                    var syncedLyrics: String? = null
-                    var plainLyrics: String? = null
-                    var lrcPath: String? = null
-
-                    // 3. Extract exact audio duration from downloaded file
+                    // 4. Resolve exact audio duration from downloaded file
                     val durationRetriever = android.media.MediaMetadataRetriever()
                     try {
                         durationRetriever.setDataSource(tempDownloadFile.absolutePath)
@@ -544,19 +582,24 @@ class TrackDownloadManager @Inject constructor(
                         runCatching { durationRetriever.release() }
                     }
 
-                    val shouldDownloadLyrics = runCatching {
-                        settingsPreferences.settings.first().downloadLyrics
-                    }.getOrDefault(true)
+                    // 5. Complete lyrics resolution (using concurrent result or duration-assisted fallback)
+                    var hasLyrics = false
+                    var syncedLyrics: String? = null
+                    var plainLyrics: String? = null
+                    var lrcPath: String? = null
 
                     if (shouldDownloadLyrics) {
-                        val lyricsRecord = runCatching {
-                            lrclibLyricsApi.fetchLyrics(
-                                title = title,
-                                artist = artist,
-                                album = resolvedAlbum,
-                                durationSeconds = if (durationMs > 0) (durationMs / 1000).toInt() else null,
-                            )
-                        }.getOrNull()
+                        var lyricsRecord = lyricsDeferred?.await()
+                        if (lyricsRecord == null && durationMs > 0) {
+                            lyricsRecord = runCatching {
+                                lrclibLyricsApi.fetchLyrics(
+                                    title = title,
+                                    artist = artist,
+                                    album = resolvedAlbum,
+                                    durationSeconds = (durationMs / 1000).toInt(),
+                                )
+                            }.getOrNull()
+                        }
 
                         if (lyricsRecord != null) {
                             syncedLyrics = lyricsRecord.syncedLyrics
@@ -1212,7 +1255,7 @@ class TrackDownloadManager @Inject constructor(
             val downloadContentValues = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, filename)
                 put(MediaStore.Downloads.MIME_TYPE, if (mimeType.isNotBlank()) mimeType else "application/octet-stream")
-                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_DIR_NAME")
+                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_DIR_NAME/Music")
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
 
@@ -1403,7 +1446,7 @@ class TrackDownloadManager @Inject constructor(
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, filename)
                     put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_DIR_NAME")
+                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$PUBLIC_DIR_NAME/Music")
                     put(MediaStore.Downloads.IS_PENDING, 0)
                 }
                 val uri = runCatching { resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues) }.getOrNull()

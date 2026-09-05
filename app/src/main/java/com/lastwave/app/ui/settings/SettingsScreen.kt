@@ -586,7 +586,7 @@ fun SettingsScreen(
                                 iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 title = "Equalizer",
                                 subtitle = if (misc.isBitPerfectEnabled && eq.enabled) {
-                                    "On \u2022 ${eq.presetName} (Active on YT \u2022 Bypassed on FLAC)"
+                                    "On \u2022 ${eq.presetName} (Bypassed by Bit-Perfect Mode)"
                                 } else if (eq.enabled) {
                                     "On \u2022 ${eq.presetName} \u2022 15-band"
                                 } else {
@@ -614,9 +614,7 @@ fun SettingsScreen(
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 title = "Studio Master Clarity",
-                                subtitle = if (misc.isBitPerfectEnabled && misc.isStudioMasterClarityEnabled) {
-                                    "Active on YT \u2022 Bypassed on Lossless/FLAC"
-                                } else if (misc.isStudioMasterClarityEnabled) {
+                                subtitle = if (misc.isStudioMasterClarityEnabled) {
                                     "Crystal-clear open sound \u2022 airy detail \u2022 deep clean separation"
                                 } else {
                                     "Original unshaped output"
@@ -674,11 +672,11 @@ fun SettingsScreen(
                                 icon = Icons.Filled.Tune,
                                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = "Bit-Perfect Mode (FLAC Direct)",
+                                title = "Bit-Perfect Mode (Direct Passthrough)",
                                 subtitle = if (misc.isBitPerfectEnabled) {
-                                    "Bit-exact DAC passthrough for Lossless/FLAC \u2022 DSP active on YT"
+                                    "Bit-exact passthrough on all tracks (Lossless & YouTube) \u2022 All DSP bypassed"
                                 } else {
-                                    "Bypass DSP & EQ on FLAC tracks for bit-exact reproduction"
+                                    "Bypass all DSP, EQ & audio processing for bit-exact reproduction"
                                 },
                                 checked = misc.isBitPerfectEnabled,
                                 onCheckedChange = viewModel::setBitPerfectEnabled,

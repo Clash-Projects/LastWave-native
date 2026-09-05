@@ -10,6 +10,7 @@ import com.lastwave.app.data.generate.toGenerated
 import com.lastwave.app.data.generate.toStored
 import com.lastwave.app.data.music.InnerTubeMusicApi
 import com.lastwave.app.util.FileExportHelper
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -108,11 +109,31 @@ class PlaylistRepository @Inject constructor(
     /** Newest first — matches _plRenderSaved()'s display order (the
      *  original reverses its append-ordered array before rendering). */
     suspend fun getAll(): List<SavedPlaylist> {
-        return dao.getAll().map { it.toDomain() }.sortedByDescending { it.createdAtMillis }
+        return try {
+            dao.getAll().map { it.toDomain() }.sortedByDescending { it.createdAtMillis }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to read playlists from Room DAO", e)
+            val restored = runCatching { publicMirror.restoreIfDatabaseEmpty() }.getOrDefault(0)
+            if (restored > 0) {
+                runCatching { dao.getAll().map { it.toDomain() }.sortedByDescending { it.createdAtMillis } }
+                    .getOrDefault(emptyList())
+            } else {
+                loadPlaylistsFromPublicMirror()
+            }
+        }
     }
 
     suspend fun getById(id: Long): SavedPlaylist? {
-        return dao.getById(id)?.toDomain()
+        return try {
+            dao.getById(id)?.toDomain() ?: getAll().firstOrNull { it.id == id }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get playlist $id from Room DAO", e)
+            getAll().firstOrNull { it.id == id }
+        }
     }
 
     /**
@@ -122,7 +143,7 @@ class PlaylistRepository @Inject constructor(
      * Returns the saved playlist, or the pre-existing duplicate if skipped.
      */
     suspend fun save(title: String, subtitle: String, mode: String, tracks: List<GeneratedTrack>, discoverSignature: String? = null): SavedPlaylist {
-        val existing = getAll()
+        val existing = runCatching { getAll() }.getOrDefault(emptyList())
         val playableTracks = if (mode == "custom" && tracks.isEmpty()) emptyList() else filterPlayable(tracks)
         val firstKey = playableTracks.firstOrNull()?.key
         existing.firstOrNull {
@@ -141,8 +162,12 @@ class PlaylistRepository @Inject constructor(
             createdAtMillis = System.currentTimeMillis(),
             discoverSignature = discoverSignature,
         )
-        dao.upsert(entity)
-        dao.trimGeneratedToNewest(MAX_SAVED_PLAYLISTS)
+        try {
+            dao.upsert(entity)
+            dao.trimGeneratedToNewest(MAX_SAVED_PLAYLISTS)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to upsert playlist entity in Room", e)
+        }
         val saved = entity.toDomain()
         syncPublicMirrorInBackground()
         _changes.tryEmit(Unit)
@@ -165,7 +190,7 @@ class PlaylistRepository @Inject constructor(
     suspend fun createCustom(title: String): SavedPlaylist {
         val cleanTitle = title.trim()
         if (cleanTitle.equals(LIKED_SONGS_TITLE, ignoreCase = true)) return ensureLikedSongs()
-        getAll().firstOrNull {
+        runCatching { getAll() }.getOrDefault(emptyList()).firstOrNull {
             it.mode == "custom" && it.title.equals(cleanTitle, ignoreCase = true)
         }
             ?.let { return it }
@@ -346,5 +371,32 @@ class PlaylistRepository @Inject constructor(
             customCoverUri = customCoverUri,
             isPinned = isPinned,
         )
+    }
+
+    private suspend fun loadPlaylistsFromPublicMirror(): List<SavedPlaylist> {
+        return try {
+            val content = fileExportHelper.readPublicPlaylistMirror().getOrNull()
+                ?: fileExportHelper.readPublicPlaylistRecovery().getOrNull()
+                ?: return emptyList()
+            val mirror = json.decodeFromString<PlaylistMirrorFile>(content)
+            mirror.playlists.map { entry ->
+                SavedPlaylist(
+                    id = entry.id,
+                    title = entry.title,
+                    subtitle = entry.subtitle,
+                    mode = entry.mode,
+                    tracks = entry.tracks.map { it.toGenerated() },
+                    createdAtMillis = entry.createdAtMillis,
+                    discoverSignature = entry.discoverSignature,
+                    customCoverUri = entry.customCoverUri,
+                    isPinned = entry.isPinned,
+                )
+            }.sortedByDescending { it.createdAtMillis }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (e: Exception) {
+            Log.e(TAG, "Fallback to public mirror failed", e)
+            emptyList()
+        }
     }
 }

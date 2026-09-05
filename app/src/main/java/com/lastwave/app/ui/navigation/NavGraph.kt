@@ -203,8 +203,11 @@ fun LastWaveNavHost(
         composable(Screen.Create.route) {
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 com.lastwave.app.ui.generate.GenerateScreen(
-                    onNavigateToPlaylist = {
+                    onNavigateToPlaylist = { playlistId ->
                         navController.popBackStack()
+                        if (playlistId != null) {
+                            navController.navigate(Screen.PlaylistDetail.createRoute(playlistId))
+                        }
                     },
                     onBack = { navController.popBackStack() },
                 )

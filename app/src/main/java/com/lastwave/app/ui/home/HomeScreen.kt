@@ -1,9 +1,12 @@
 package com.lastwave.app.ui.home
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,9 +34,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
@@ -105,12 +112,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import coil.compose.SubcomposeAsyncImage
 import com.lastwave.app.data.repository.HomeSortMode
@@ -187,136 +196,170 @@ fun HomeScreen(
             return@Scaffold
         }
 
-        Column(Modifier.fillMaxSize().padding(scaffoldPadding).safeHorizontalContentPadding()) {
-            HeaderRow(
-                displayUsername = if (uiState.isViewingFriend) uiState.viewingUsername else uiState.username,
-                isViewingFriend = uiState.isViewingFriend,
-                onClick = onOpenFriends,
-                viewModel = viewModel,
-            )
-            Spacer(Modifier.height(2.dp))
-
-            uiState.stats?.let { stats ->
-                StatsCard(
-                    scrobbles = stats.scrobbles,
-                    trackCount = stats.trackCount,
-                    artistCount = stats.artistCount,
-                    albumCount = stats.albumCount,
-                    onOpenGenres = onOpenGenres,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 0.dp),
-                )
-                Spacer(Modifier.height(12.dp))
+        PullToRefreshBox(
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = viewModel::refresh,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(scaffoldPadding)
+                .safeHorizontalContentPadding(),
+        ) {
+            val listState = rememberLazyListState()
+            LaunchedEffect(listState, uiState.allTracks.size) {
+                snapshotFlowNearEnd(listState) { viewModel.loadNextPage() }
             }
 
-            PullToRefreshBox(
-                isRefreshing = uiState.isRefreshing,
-                onRefresh = viewModel::refresh,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
+            val rows = remember(uiState.allTracks, uiState.sortMode, uiState.nowPlaying, uiState.topTracksOverall, uiState.topTracks7Days, uiState.topTracks30Days) {
+                uiState.visibleRows()
+            }
+            val playbackQueue = remember(rows) {
+                rows.mapNotNull { row ->
+                    (row as? HomeRow.Track)?.track?.let { track ->
+                        com.lastwave.app.playback.PlayableTrack(
+                            title = track.name,
+                            artist = track.artist,
+                            artworkUrl = track.artworkUrl,
+                        )
+                    }
+                }
+            }
+            val playbackIndexByRow = remember(rows) {
+                var nextPlaybackIndex = 0
+                IntArray(rows.size) { rowIndex ->
+                    if (rows[rowIndex] is HomeRow.Track) nextPlaybackIndex++ else -1
+                }
+            }
+            val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
+            val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
+
+            LazyColumn(
+                state = listState,
+                contentPadding = PaddingValues(
+                    top = 4.dp,
+                    bottom = FloatingNavDefaults.contentBottomPadding(),
+                ),
+                modifier = Modifier.fillMaxSize(),
             ) {
-                val listState = rememberLazyListState()
-                LaunchedEffect(listState, uiState.allTracks.size) {
-                    snapshotFlowNearEnd(listState) { viewModel.loadNextPage() }
+                item(key = "header_row", contentType = "header") {
+                    HeaderRow(
+                        displayUsername = if (uiState.isViewingFriend) uiState.viewingUsername else uiState.username,
+                        isViewingFriend = uiState.isViewingFriend,
+                        onClick = onOpenFriends,
+                        onReturnToSelf = viewModel::returnToOwnProfile,
+                        viewModel = viewModel,
+                    )
                 }
 
-                val rows = remember(uiState.allTracks, uiState.sortMode, uiState.nowPlaying, uiState.topTracksOverall, uiState.topTracks7Days, uiState.topTracks30Days) {
-                    uiState.visibleRows()
-                }
-                val playbackQueue = remember(rows) {
-                    rows.mapNotNull { row ->
-                        (row as? HomeRow.Track)?.track?.let { track ->
-                            com.lastwave.app.playback.PlayableTrack(
-                                title = track.name,
-                                artist = track.artist,
-                                artworkUrl = track.artworkUrl,
-                            )
-                        }
+                uiState.stats?.let { stats ->
+                    item(key = "stats_card", contentType = "stats") {
+                        StatsCard(
+                            scrobbles = stats.scrobbles,
+                            trackCount = stats.trackCount,
+                            artistCount = stats.artistCount,
+                            albumCount = stats.albumCount,
+                            onOpenGenres = onOpenGenres,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                        )
                     }
                 }
-                val playbackIndexByRow = remember(rows) {
-                    var nextPlaybackIndex = 0
-                    IntArray(rows.size) { rowIndex ->
-                        if (rows[rowIndex] is HomeRow.Track) nextPlaybackIndex++ else -1
-                    }
-                }
-                val musicPlayer = com.lastwave.app.ui.player.LocalMusicPlayer.current
-                val addToPlaylist = com.lastwave.app.ui.player.LocalAddToPlaylist.current
 
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp)
-                        .clip(ListContainerShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainer),
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
-                        MixHeader(sortMode = uiState.sortMode, onSortModeChange = viewModel::setSortMode)
-                    }
+                item(key = "mix_header", contentType = "mix_header") {
+                    MixHeader(
+                        sortMode = uiState.sortMode,
+                        onSortModeChange = viewModel::setSortMode,
+                        trackCount = rows.count { it is HomeRow.Track },
+                    )
+                }
 
-                    LazyColumn(
-                        state = listState,
-                        contentPadding = PaddingValues(
-                            start = 8.dp,
-                            end = 8.dp,
-                            top = 0.dp,
-                            bottom = FloatingNavDefaults.contentBottomPadding(),
-                        ),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        itemsIndexed(
-                            rows,
-                            key = { _, row ->
-                                when (row) {
-                                    is HomeRow.DateHeader -> "date_${row.label}"
-                                    is HomeRow.Track -> if (row.track.isNowPlaying) {
-                                        "nowplaying_${row.track.key}"
-                                    } else {
-                                        "track_${row.track.key}_${row.track.timestampMillis}"
-                                    }
-                                }
-                            },
-                            contentType = { _, row ->
-                                when (row) {
-                                    is HomeRow.DateHeader -> "date"
-                                    is HomeRow.Track -> "track"
-                                }
-                            },
-                        ) { rowIndex, row ->
-                            Box {
-                                when (row) {
-                                    is HomeRow.DateHeader -> DateHeaderRow(row.label)
-                                    is HomeRow.Track -> TrackRow(
-                                        track = row.track,
-                                        badge = row.badge,
-                                        onClick = {
-                                            musicPlayer.playQueue(
-                                                tracks = playbackQueue,
-                                                startIndex = playbackIndexByRow[rowIndex],
-                                                sourceLabel = "Home",
-                                            )
-                                        },
-                                        onLongClick = {
-                                            addToPlaylist(
-                                                com.lastwave.app.playback.PlayableTrack(
-                                                    title = row.track.name,
-                                                    artist = row.track.artist,
-                                                    artworkUrl = row.track.artworkUrl,
-                                                ),
-                                            )
-                                        },
-                                        onMenuClick = { menuTrack = row.track },
-                                    )
-                                }
+                itemsIndexed(
+                    rows,
+                    key = { _, row ->
+                        when (row) {
+                            is HomeRow.DateHeader -> "date_${row.label}"
+                            is HomeRow.Track -> if (row.track.isNowPlaying) {
+                                "nowplaying_${row.track.key}"
+                            } else {
+                                "track_${row.track.key}_${row.track.timestampMillis}"
                             }
                         }
+                    },
+                    contentType = { _, row ->
+                        when (row) {
+                            is HomeRow.DateHeader -> "date"
+                            is HomeRow.Track -> "track"
+                        }
+                    },
+                ) { rowIndex, row ->
+                    when (row) {
+                        is HomeRow.DateHeader -> DateHeaderRow(row.label)
+                        is HomeRow.Track -> TrackRow(
+                            track = row.track,
+                            badge = row.badge,
+                            onClick = {
+                                musicPlayer.playQueue(
+                                    tracks = playbackQueue,
+                                    startIndex = playbackIndexByRow[rowIndex],
+                                    sourceLabel = "Home",
+                                )
+                            },
+                            onLongClick = {
+                                addToPlaylist(
+                                    com.lastwave.app.playback.PlayableTrack(
+                                        title = row.track.name,
+                                        artist = row.track.artist,
+                                        artworkUrl = row.track.artworkUrl,
+                                    ),
+                                )
+                            },
+                            onMenuClick = { menuTrack = row.track },
+                        )
+                    }
+                }
 
-                        if (rows.isEmpty()) {
-                            item(key = "empty", contentType = "empty") {
-                                Box(
-                                    Modifier.fillMaxWidth().padding(vertical = 48.dp),
-                                    contentAlignment = Alignment.Center,
+                if (rows.isEmpty()) {
+                    item(key = "empty", contentType = "empty") {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 28.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 36.dp, horizontal = 24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    modifier = Modifier.size(52.dp),
                                 ) {
-                                    Text("No tracks yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Filled.MusicNote,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(26.dp),
+                                        )
+                                    }
                                 }
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "No Tracks Found",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Text(
+                                    "Play music on your preferred app to see scrobbles appear in real-time.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                )
                             }
                         }
                     }
@@ -350,36 +393,66 @@ private fun HeaderRow(
     displayUsername: String,
     isViewingFriend: Boolean,
     onClick: () -> Unit,
+    onReturnToSelf: () -> Unit,
     viewModel: HomeViewModel,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 2.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Surface(
-            onClick = onClick,
-            shape = BadgePillShape,
-            color = if (isViewingFriend) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Surface(
+                onClick = onClick,
+                shape = BadgePillShape,
+                color = if (isViewingFriend) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(
+                    1.dp,
+                    if (isViewingFriend) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                    else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                ),
             ) {
-                Text(
-                    displayUsername.ifBlank { "—" },
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (isViewingFriend) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                )
-                if (isViewingFriend) {
-                    Spacer(Modifier.width(6.dp))
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Icon(
-                        Icons.Filled.People,
-                        contentDescription = "Switch profile",
-                        modifier = Modifier.size(15.dp),
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        imageVector = if (isViewingFriend) Icons.Filled.People else Icons.Filled.AccountCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary,
                     )
+                    Text(
+                        displayUsername.ifBlank { "Guest" },
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isViewingFriend) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+
+            if (isViewingFriend) {
+                Surface(
+                    onClick = onReturnToSelf,
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+                    modifier = Modifier.size(34.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Return to own profile",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -397,39 +470,103 @@ private fun LiveListenTimer(viewModel: HomeViewModel) {
 
     Surface(
         shape = BadgePillShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        color = if (isPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+        else MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(
+            1.dp,
+            if (isPlaying) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+        ),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
-            Icon(
-                Icons.Filled.Headset,
-                contentDescription = "Estimated lifetime listening time",
-                modifier = Modifier.size(18.dp),
-                tint = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(6.dp))
+            if (isPlaying) {
+                EqualizerWaveBars(tint = MaterialTheme.colorScheme.primary)
+            } else {
+                Icon(
+                    Icons.Filled.Headset,
+                    contentDescription = "Estimated lifetime listening time",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
                 formatTimer(totalSeconds),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
                 color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             )
         }
     }
 }
 
+@Composable
+private fun EqualizerWaveBars(
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "equalizerTransition")
+    val bar1 by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(450, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "bar1",
+    )
+    val bar2 by transition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 0.25f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(550, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "bar2",
+    )
+    val bar3 by transition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(380, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "bar3",
+    )
+
+    Row(
+        modifier = modifier.size(width = 13.dp, height = 13.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Box(
+            Modifier
+                .width(2.5.dp)
+                .fillMaxHeight(bar1)
+                .clip(RoundedCornerShape(1.dp))
+                .background(tint),
+        )
+        Box(
+            Modifier
+                .width(2.5.dp)
+                .fillMaxHeight(bar2)
+                .clip(RoundedCornerShape(1.dp))
+                .background(tint),
+        )
+        Box(
+            Modifier
+                .width(2.5.dp)
+                .fillMaxHeight(bar3)
+                .clip(RoundedCornerShape(1.dp))
+                .background(tint),
+        )
+    }
+}
+
 private fun formatTimer(totalSeconds: Long): String {
-    // This is an ESTIMATED LIFETIME total (scrobble count × an average
-    // track length — see HomeRepository.HomeStats.timerBaseSeconds), not a
-    // session/session-elapsed timer, so it legitimately runs into weeks or
-    // months for anyone with a large scrobble history — 18,838 scrobbles
-    // at ~3.5 min average really is ~46 days of total listening. The raw
-    // "DD:HH:MM:SS" digits made that read as a broken/runaway counter
-    // instead of what it actually is; spelling out the units (matching how
-    // the rest of the app writes durations elsewhere) makes the same
-    // number immediately legible as "45 days" instead of a wall of colons.
     if (totalSeconds <= 0) return "--"
     val d = totalSeconds / 86400
     val h = (totalSeconds % 86400) / 3600
@@ -447,11 +584,7 @@ private fun ProfileAvatar(avatarUrl: String?, modifier: Modifier = Modifier) {
     Surface(
         shape = CircleShape,
         color = MaterialTheme.colorScheme.primaryContainer,
-        // A thin ring in the current accent color — matches the app theme
-        // (moves with Dynamic Color / manual accent / dynamic-now-playing
-        // the same way everything else does) instead of a plain flat
-        // avatar with no border at all.
-        border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
         modifier = modifier,
     ) {
         if (!avatarUrl.isNullOrBlank()) {
@@ -496,44 +629,86 @@ private fun StatsCard(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 2.dp,
             shadowElevation = 4.dp,
+            border = BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+            ),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(Modifier.padding(horizontal = 20.dp, vertical = 18.dp)) {
+            Column(Modifier.padding(16.dp)) {
                 Surface(
                     shape = HeroInnerShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.fillMaxWidth(),
+                    color = Color.Transparent,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.88f),
+                                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.60f),
+                                ),
+                            ),
+                            shape = HeroInnerShape,
+                        ),
                 ) {
-                    Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp)) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.align(Alignment.Center),
-                        ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(6.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary),
+                                )
+                                Text(
+                                    "SCROBBLES",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.2.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
                             Text(
                                 formatCount(rememberAnimatedCount(scrobbles)),
-                                style = MaterialTheme.typography.displaySmall,
-                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.displayMedium,
+                                fontWeight = FontWeight.Black,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
-                            Text(
-                                "Scrobbles",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
-                            )
                         }
+
                         Surface(
-                            shape = ExpressivePillShape,
+                            onClick = onOpenGenres,
+                            shape = RoundedCornerShape(16.dp),
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(46.dp).align(Alignment.CenterEnd),
+                            shadowElevation = 3.dp,
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                IconButton(onClick = onOpenGenres) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.ArrowForward,
-                                        contentDescription = "View genres",
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                    )
-                                }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            ) {
+                                Text(
+                                    "Genres",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimary,
+                                )
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "View genres",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(16.dp),
+                                )
                             }
                         }
                     }
@@ -541,10 +716,13 @@ private fun StatsCard(
 
                 Spacer(Modifier.height(12.dp))
 
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatPill("Tracks", trackCount, Modifier.weight(1f))
-                    StatPill("Artists", artistCount, Modifier.weight(1f))
-                    StatPill("Albums", albumCount, Modifier.weight(1f))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    StatPill(icon = Icons.Filled.MusicNote, label = "Tracks", value = trackCount, modifier = Modifier.weight(1f))
+                    StatPill(icon = Icons.Filled.Person, label = "Artists", value = artistCount, modifier = Modifier.weight(1f))
+                    StatPill(icon = Icons.Filled.Album, label = "Albums", value = albumCount, modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -567,23 +745,49 @@ private fun rememberAnimatedCount(target: Long): Long {
 }
 
 @Composable
-private fun StatPill(label: String, value: Long, modifier: Modifier = Modifier) {
+private fun StatPill(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    value: Long,
+    modifier: Modifier = Modifier,
+) {
     Surface(
         modifier = modifier,
         shape = StatPillShape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.55f),
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f),
+        ),
     ) {
-        Column(Modifier.padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(13.dp),
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                )
+                Text(
+                    label.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.8.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
             Text(
                 formatCount(rememberAnimatedCount(value)),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
     }
@@ -593,108 +797,221 @@ private fun formatCount(value: Long): String = if (value <= 0) "—" else "%,d".
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MixHeader(sortMode: HomeSortMode, onSortModeChange: (HomeSortMode) -> Unit) {
+private fun MixHeader(
+    sortMode: HomeSortMode,
+    onSortModeChange: (HomeSortMode) -> Unit,
+    trackCount: Int = 0,
+) {
     var menuOpen by remember { mutableStateOf(false) }
     val haptics = LocalHapticFeedback.current
-    // Real, felt tactile feedback: haptic now fires the instant the pill is
-    // pressed (finger down), not only after the click completes — firing it
-    // solely inside onClick meant it landed at the same moment the dropdown
-    // menu opened and covered the pill, which could read as "nothing
-    // happened" since the press-scale's own short spring had barely started
-    // by then. A dedicated LaunchedEffect on the raw pressed state decouples
-    // the haptic from whatever the click itself goes on to do.
     val pillInteractionSource = remember { MutableInteractionSource() }
     val pillPressed by pillInteractionSource.collectIsPressedAsState()
     LaunchedEffect(pillPressed) {
         if (pillPressed) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
     }
-    // A more pronounced dip than the shared rememberGroupPressScale (tuned
-    // for full-width group rows) — a small pill needs a bigger relative
-    // shrink to actually read as a press at this size.
     val pillScale by animateFloatAsState(
-        targetValue = if (pillPressed) 0.90f else 1f,
+        targetValue = if (pillPressed) 0.92f else 1f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
         label = "sortPillPressScale",
     )
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+
+    val title = when (sortMode) {
+        HomeSortMode.RECENT -> "Recent History"
+        HomeSortMode.MOST_PLAYED -> "Most Played"
+        HomeSortMode.LAST_7_DAYS -> "Last 7 Days"
+        HomeSortMode.LAST_30_DAYS -> "Last 30 Days"
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp, bottom = 8.dp),
     ) {
-        Text(
-            "List",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.CenterVertically),
-        )
-        Box {
-            Surface(
-                onClick = { menuOpen = true },
-                shape = BadgePillShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                tonalElevation = 1.dp,
-                interactionSource = pillInteractionSource,
-                modifier = Modifier.heightIn(min = 34.dp).scale(pillScale),
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        iconForSortMode(sortMode),
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(6.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (trackCount > 0) {
                     Text(
-                        sortModeLabel(sortMode),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Icon(
-                        Icons.Filled.ExpandMore,
-                        contentDescription = null,
-                        modifier = Modifier.size(15.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = "$trackCount tracks recorded",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            DropdownMenu(
-                expanded = menuOpen,
-                onDismissRequest = { menuOpen = false },
-                shape = RoundedCornerShape(24.dp),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                // Lowered from 10dp: a heavy shadowElevation on a popup
-                // paints a mostly-rectangular drop shadow around the
-                // rounded card (the shadow's own corner falloff is much
-                // subtler than the card's actual corner radius), which is
-                // exactly what read as "squarish" — a light shadow plus a
-                // bit more tonalElevation for legibility fixes that
-                // without losing depth entirely.
-                tonalElevation = 3.dp,
-                shadowElevation = 3.dp,
-                modifier = Modifier.padding(vertical = 4.dp),
-            ) {
-                SortOption(Icons.Filled.Schedule, "Recent", sortMode == HomeSortMode.RECENT) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSortModeChange(HomeSortMode.RECENT); menuOpen = false
+            Box {
+                Surface(
+                    onClick = { menuOpen = true },
+                    shape = BadgePillShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                    ),
+                    tonalElevation = 1.dp,
+                    interactionSource = pillInteractionSource,
+                    modifier = Modifier.heightIn(min = 36.dp).scale(pillScale),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            iconForSortMode(sortMode),
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            sortModeLabel(sortMode),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            Icons.Filled.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                SortOption(Icons.Filled.BarChart, "Most Played", sortMode == HomeSortMode.MOST_PLAYED) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSortModeChange(HomeSortMode.MOST_PLAYED); menuOpen = false
-                }
-                SortOption(Icons.Filled.DateRange, "Last 7 Days", sortMode == HomeSortMode.LAST_7_DAYS) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSortModeChange(HomeSortMode.LAST_7_DAYS); menuOpen = false
-                }
-                SortOption(Icons.Filled.CalendarMonth, "Last 30 Days", sortMode == HomeSortMode.LAST_30_DAYS) {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onSortModeChange(HomeSortMode.LAST_30_DAYS); menuOpen = false
+                DropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false },
+                    shape = RoundedCornerShape(20.dp),
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 3.dp,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                ) {
+                    SortOption(Icons.Filled.Schedule, "Recent", sortMode == HomeSortMode.RECENT) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSortModeChange(HomeSortMode.RECENT); menuOpen = false
+                    }
+                    SortOption(Icons.Filled.BarChart, "Most Played", sortMode == HomeSortMode.MOST_PLAYED) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSortModeChange(HomeSortMode.MOST_PLAYED); menuOpen = false
+                    }
+                    SortOption(Icons.Filled.DateRange, "Last 7 Days", sortMode == HomeSortMode.LAST_7_DAYS) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSortModeChange(HomeSortMode.LAST_7_DAYS); menuOpen = false
+                    }
+                    SortOption(Icons.Filled.CalendarMonth, "Last 30 Days", sortMode == HomeSortMode.LAST_30_DAYS) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSortModeChange(HomeSortMode.LAST_30_DAYS); menuOpen = false
+                    }
                 }
             }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            HomeSortChip(
+                label = "Recent",
+                icon = Icons.Filled.Schedule,
+                isSelected = sortMode == HomeSortMode.RECENT,
+                onClick = {
+                    if (sortMode != HomeSortMode.RECENT) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSortModeChange(HomeSortMode.RECENT)
+                    }
+                },
+            )
+            HomeSortChip(
+                label = "Most Played",
+                icon = Icons.Filled.BarChart,
+                isSelected = sortMode == HomeSortMode.MOST_PLAYED,
+                onClick = {
+                    if (sortMode != HomeSortMode.MOST_PLAYED) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSortModeChange(HomeSortMode.MOST_PLAYED)
+                    }
+                },
+            )
+            HomeSortChip(
+                label = "Last 7 Days",
+                icon = Icons.Filled.DateRange,
+                isSelected = sortMode == HomeSortMode.LAST_7_DAYS,
+                onClick = {
+                    if (sortMode != HomeSortMode.LAST_7_DAYS) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSortModeChange(HomeSortMode.LAST_7_DAYS)
+                    }
+                },
+            )
+            HomeSortChip(
+                label = "Last 30 Days",
+                icon = Icons.Filled.CalendarMonth,
+                isSelected = sortMode == HomeSortMode.LAST_30_DAYS,
+                onClick = {
+                    if (sortMode != HomeSortMode.LAST_30_DAYS) {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSortModeChange(HomeSortMode.LAST_30_DAYS)
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeSortChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = BadgePillShape,
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.65f),
+        border = BorderStroke(
+            1.dp,
+            if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+        ),
+        tonalElevation = if (isSelected) 2.dp else 0.dp,
+        modifier = Modifier.height(36.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(15.dp),
+                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+            )
         }
     }
 }
@@ -755,10 +1072,14 @@ private fun SortOption(
 @Composable
 private fun DateHeaderRow(label: String) {
     Text(
-        label,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 8.dp, bottom = 2.dp),
+        label.uppercase(),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.sp,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
     )
 }
 
@@ -775,39 +1096,63 @@ private fun TrackRow(
     val secondaryTextColor =
         if (isNowPlaying) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
         else MaterialTheme.colorScheme.onSurfaceVariant
+
     Surface(
         shape = if (isNowPlaying) NowPlayingCardShape else TrackRowShape,
-        color = if (isNowPlaying) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        color = if (isNowPlaying) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f) else Color.Transparent,
+        border = if (isNowPlaying) BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+        ) else null,
         tonalElevation = if (isNowPlaying) 1.dp else 0.dp,
-        modifier = if (isNowPlaying) {
-            Modifier.fillMaxWidth().padding(vertical = 4.dp).combinedClickable(onClick = onClick, onLongClick = onLongClick)
-        } else {
-            Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick)
-        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = if (isNowPlaying) 4.dp else 1.dp)
+            .clip(if (isNowPlaying) NowPlayingCardShape else TrackRowShape)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 64.dp)
-                .padding(vertical = 6.dp, horizontal = 8.dp),
+                .heightIn(min = 66.dp)
+                .padding(vertical = 7.dp, horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ArtworkImage(
-                name = track.name,
-                artist = track.artist,
-                embeddedUrl = track.artworkUrl,
-                fallbackIcon = if (isNowPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote,
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(ArtworkShape)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-            )
+            Box {
+                ArtworkImage(
+                    name = track.name,
+                    artist = track.artist,
+                    embeddedUrl = track.artworkUrl,
+                    fallbackIcon = if (isNowPlaying) Icons.Filled.GraphicEq else Icons.Filled.MusicNote,
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(ArtworkShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                )
+                if (isNowPlaying) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .offset(x = 4.dp, y = 4.dp)
+                            .size(18.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            EqualizerWaveBars(tint = MaterialTheme.colorScheme.onPrimary)
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.width(14.dp))
+
             Column(Modifier.weight(1f)) {
                 Text(
                     track.name,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
+                    color = if (isNowPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -820,62 +1165,47 @@ private fun TrackRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+
             Spacer(Modifier.width(8.dp))
+
             if (isNowPlaying) {
-                val infiniteTransition = rememberInfiniteTransition(label = "nowPlayingPulse")
-                val pulseScale by infiniteTransition.animateFloat(
-                    initialValue = 1.0f,
-                    targetValue = 1.06f,
-                    animationSpec = infiniteRepeatable(
-                        animation = tween(1200, easing = LinearEasing),
-                        repeatMode = RepeatMode.Reverse,
-                    ),
-                    label = "pulseScale",
-                )
                 Surface(
                     shape = BadgePillShape,
                     color = MaterialTheme.colorScheme.primary,
-                    tonalElevation = 4.dp,
-                    shadowElevation = 2.dp,
-                    modifier = Modifier.graphicsLayer {
-                        scaleX = pulseScale
-                        scaleY = pulseScale
-                    },
+                    tonalElevation = 2.dp,
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                     ) {
-                        Spacer(
-                            Modifier
-                                .size(6.dp)
-                                .background(MaterialTheme.colorScheme.onPrimary, CircleShape),
-                        )
-                        Spacer(Modifier.width(6.dp))
+                        EqualizerWaveBars(tint = MaterialTheme.colorScheme.onPrimary)
                         Text(
-                            "Now Playing",
+                            "LIVE",
                             style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.8.sp,
                             color = MaterialTheme.colorScheme.onPrimary,
                         )
                     }
                 }
             }
-            if (badge != null) {
-                Surface(shape = BadgePillShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+
+            if (badge != null && !isNowPlaying) {
+                Surface(
+                    shape = BadgePillShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
+                ) {
                     Text(
                         badge,
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                     )
                 }
             }
-            // Home-only per item 7: a small filled tonal container around
-            // the overflow trigger. This composable is private to
-            // HomeScreen.kt, so this doesn't touch the three-dot button on
-            // Item 1 (consistency pass): the same OverflowMenuButton is now
-            // used on every screen's song list, not just Home.
+
             com.lastwave.app.ui.common.OverflowMenuButton(onClick = onMenuClick)
         }
     }

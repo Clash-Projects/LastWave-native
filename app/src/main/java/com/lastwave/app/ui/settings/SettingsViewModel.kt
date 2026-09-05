@@ -249,11 +249,25 @@ class SettingsViewModel @Inject constructor(
     fun setStudioMasterClarity(enabled: Boolean) {
         // Apply immediately; DataStore persists the same state for future engine instances.
         runCatching { audioEngine.get().setStudioMasterClarity(enabled) }
-        launchSettingsAction("update Studio Master Clarity") { settingsPreferences.setStudioMasterClarity(enabled) }
+        launchSettingsAction("update Studio Master Clarity") {
+            settingsPreferences.setStudioMasterClarity(enabled)
+            if (enabled) {
+                // Enabling DSP clarity disables Bit-Perfect mode
+                settingsPreferences.setBitPerfectEnabled(false)
+                runCatching { audioEngine.get().setBitPerfect(false) }
+            }
+        }
     }
     fun setBitPerfectEnabled(enabled: Boolean) {
         runCatching { audioEngine.get().setBitPerfect(enabled) }
-        launchSettingsAction("update Bit-Perfect mode") { settingsPreferences.setBitPerfectEnabled(enabled) }
+        launchSettingsAction("update Bit-Perfect mode") {
+            settingsPreferences.setBitPerfectEnabled(enabled)
+            if (enabled) {
+                // When Bit-Perfect is turned on, automatically turn off Studio Master Clarity
+                settingsPreferences.setStudioMasterClarity(false)
+                runCatching { audioEngine.get().setStudioMasterClarity(false) }
+            }
+        }
     }
     fun setLyricsUiVersion(version: LyricsUiVersion) = launchSettingsAction("update lyrics UI version") { settingsPreferences.setLyricsUiVersion(version) }
     fun setLyricsAnimation(animation: com.lastwave.app.data.local.LyricsAnimation) = launchSettingsAction("update lyrics animation") { settingsPreferences.setLyricsAnimation(animation) }

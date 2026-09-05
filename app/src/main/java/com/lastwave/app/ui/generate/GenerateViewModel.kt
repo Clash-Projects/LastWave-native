@@ -70,7 +70,7 @@ data class GenerateUiState(
 
 /** One-shot navigation signal. */
 sealed interface GenerateNavEvent {
-    data object NavigateToPlaylistLoading : GenerateNavEvent
+    data class NavigateToPlaylistLoading(val playlistId: Long? = null) : GenerateNavEvent
 }
 
 @HiltViewModel
@@ -300,7 +300,7 @@ class GenerateViewModel @Inject constructor(
                     } catch (e: Exception) { }
                 }
 
-                _navEvents.tryEmit(GenerateNavEvent.NavigateToPlaylistLoading)
+                _navEvents.tryEmit(GenerateNavEvent.NavigateToPlaylistLoading(saved.id))
             } catch (_: TimeoutCancellationException) {
                 _uiState.update { it.copy(error = "Playlist generation timed out. Check your connection and try again.") }
             } catch (cancellation: CancellationException) {
