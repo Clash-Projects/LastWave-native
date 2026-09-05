@@ -66,7 +66,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }.onFailure { android.util.Log.w(STARTUP_TAG, "Splash exit listener unavailable", it) }
-        runCatching { enableEdgeToEdge() }
+        runCatching {
+            enableEdgeToEdge(
+                statusBarStyle = androidx.activity.SystemBarStyle.auto(
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT,
+                ),
+                navigationBarStyle = androidx.activity.SystemBarStyle.auto(
+                    android.graphics.Color.TRANSPARENT,
+                    android.graphics.Color.TRANSPARENT,
+                ),
+            )
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {

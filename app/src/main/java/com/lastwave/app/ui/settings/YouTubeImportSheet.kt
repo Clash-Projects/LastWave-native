@@ -69,6 +69,7 @@ import com.lastwave.app.data.music.YouTubePlaylistResult
 import com.lastwave.app.data.playlist.PlaylistImportManager
 import com.lastwave.app.data.playlist.SavedPlaylist
 import com.lastwave.app.ui.common.ArtworkImage
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.theme.ArtworkShape
 import kotlinx.coroutines.launch
@@ -151,6 +152,8 @@ fun YouTubeImportSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 640.dp)
+                .align(Alignment.CenterHorizontally)
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp + safeDrawingBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(14.dp),

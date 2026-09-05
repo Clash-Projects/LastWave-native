@@ -72,6 +72,7 @@ import com.lastwave.app.data.generate.RECOMMENDATION_TRACK_COUNT
 import com.lastwave.app.ui.common.ExpressiveGroup
 import com.lastwave.app.ui.common.ExpressiveGroupSelectRow
 import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.common.wobbleOverscroll
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import com.lastwave.app.ui.theme.ExpressivePillShape
@@ -105,11 +106,16 @@ fun GenerateScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 760.dp)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+        ) {
         ExpressiveHeader(
             title = "Generator",
             subtitle = "Shape a playlist with two discovery engines",
@@ -126,10 +132,6 @@ fun GenerateScreen(
                 item(key = "loadingOverlay") {
                     com.lastwave.app.ui.common.GenerationProgressCard(message = state.loadingMessage)
                 }
-            }
-
-            item(key = "sourceFusion") {
-                SourceFusionBanner()
             }
 
             item(key = "modeGroup") {
@@ -251,77 +253,11 @@ fun GenerateScreen(
                 }
             }
         }
-        }
+    }
+    }
     }
 }
 
-@Composable
-private fun SourceFusionBanner() {
-    val shape = RoundedCornerShape(24.dp)
-    Surface(
-        shape = shape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Box(
-            modifier = Modifier
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
-                            MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.58f),
-                        ),
-                    ),
-                )
-                .padding(18.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.62f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.AutoAwesome,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "LAST.FM  ×  YOUTUBE MUSIC",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        text = "Taste graphs meet YouTube radio for wider, playable picks.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(Modifier.height(7.dp))
-                    Surface(
-                        shape = ExpressivePillShape,
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.56f),
-                    ) {
-                        Text(
-                            text = "YouTube account not required",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 private fun iconFor(mode: GenerateMode): ImageVector = when (mode) {
     GenerateMode.TOP -> Icons.Filled.ThumbUp

@@ -89,6 +89,7 @@ import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 
 import androidx.compose.foundation.BorderStroke
@@ -131,7 +132,15 @@ fun SearchScreen(
     val focusManager = LocalFocusManager.current
     val liquidGlass = LocalLiquidGlass.current
 
-    Column(Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 860.dp),
+        ) {
         Surface(
             shape = SearchHeaderShape,
             color = MaterialTheme.colorScheme.surfaceContainer,
@@ -517,6 +526,7 @@ fun SearchScreen(
                 }
             }
         }
+    }
     }
 
     menuTarget?.let { target ->

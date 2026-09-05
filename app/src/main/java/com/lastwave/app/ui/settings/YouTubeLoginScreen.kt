@@ -45,6 +45,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.adaptiveContentWidth
 
 /**
  * Native-feeling YouTube Music sign-in: a WebView loads Google's own sign-in
@@ -63,7 +64,15 @@ fun YouTubeLoginScreen(
     var loadProgressVisible by remember { mutableStateOf(true) }
     var webViewError by remember { mutableStateOf<String?>(null) }
 
-    Column(Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 760.dp),
+        ) {
         ExpressiveHeader(
             title = "Connect YouTube Music",
             subtitle = "Sign in with your Google account",
@@ -247,6 +256,7 @@ fun YouTubeLoginScreen(
                 )
             }
         }
+    }
     }
 }
 

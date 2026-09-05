@@ -210,7 +210,13 @@ class InnerTubeMusicApi @Inject constructor(
     fun prefetchStream(videoId: String) {
         if (videoId.isBlank()) return
         apiScope.launch {
-            runCatching { resolveAudioStream(videoId) }
+            try {
+                resolveAudioStream(videoId)
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                // Prefetch is opportunistic; foreground playback resolves again.
+            }
         }
     }
 
@@ -1371,9 +1377,13 @@ class InnerTubeMusicApi @Inject constructor(
     /** Resolves stream specifically optimized for download compatibility (M4A AAC container). */
     suspend fun resolveDownloadStream(videoId: String): YouTubeAudioStream = withContext(Dispatchers.IO) {
         require(videoId.isNotBlank()) { "Missing YouTube Music video id" }
-        runCatching {
+        try {
             streamExtractor.resolveAudioStream(videoId, preferM4a = true)
-        }.getOrNull() ?: resolveAudioStream(videoId)
+        } catch (cancellation: kotlinx.coroutines.CancellationException) {
+            throw cancellation
+        } catch (_: Exception) {
+            resolveAudioStream(videoId)
+        }
     }
 
     private suspend fun resolveAudioStreamInternal(
@@ -1384,7 +1394,7 @@ class InnerTubeMusicApi @Inject constructor(
 
         // InnerTubeX owns the current player/cipher/client fallback strategy.
         // Probe its result before handing it to Media3; the older direct and
-        // NewPipe paths below remain bounded compatibility fallbacks.
+        // NewPipe paths below remain compatibility fallbacks.
         val innerTubeXCandidate = try {
             val visitorData = try {
                 getWebConfig().visitorData
@@ -1393,9 +1403,7 @@ class InnerTubeMusicApi @Inject constructor(
             } catch (_: Exception) {
                 null
             }
-            kotlinx.coroutines.withTimeoutOrNull(INNERTUBEX_TIMEOUT_MS) {
-                innerTubeXExtractor.resolve(videoId, visitorData, authScope)
-            }
+            innerTubeXExtractor.resolve(videoId, visitorData, authScope)
         } catch (cancellation: kotlinx.coroutines.CancellationException) {
             throw cancellation
         } catch (failure: Throwable) {
@@ -1430,6 +1438,7 @@ class InnerTubeMusicApi @Inject constructor(
             val visitorData = getWebConfig().visitorData
             BotGuardTokenGenerator.mintToken(videoId, visitorData ?: FALLBACK_TOKEN_SESSION)
         }
+        val prerequisiteJobs = listOf(configDeferred, signatureTimestampDeferred, poTokenDeferred)
 
         val channel = kotlinx.coroutines.channels.Channel<YouTubeAudioStream>(2)
         val jobs = mutableListOf<kotlinx.coroutines.Job>()
@@ -1475,12 +1484,8 @@ class InnerTubeMusicApi @Inject constructor(
         jobs += launch(Dispatchers.IO) {
             try {
                 val config = configDeferred.await()
-                val signatureTimestamp = kotlinx.coroutines.withTimeoutOrNull(SIGNATURE_TIMESTAMP_TIMEOUT_MS) {
-                    signatureTimestampDeferred.await()
-                }
-                val poTokenResult = kotlinx.coroutines.withTimeoutOrNull(PO_TOKEN_FAST_WAIT_MS) {
-                    poTokenDeferred.await()
-                }
+                val signatureTimestamp = signatureTimestampDeferred.await()
+                val poTokenResult = poTokenDeferred.await()
                 val poToken = poTokenResult?.playerToken
                 val gvsPoToken = poTokenResult?.sessionToken?.takeIf { config.visitorData != null }
                 val availableClients = playerClients(config).filter { candidate ->
@@ -1531,17 +1536,18 @@ class InnerTubeMusicApi @Inject constructor(
                     }
                     clientJobs.joinAll()
                 }
+            } catch (cancellation: kotlinx.coroutines.CancellationException) {
+                throw cancellation
+            } catch (failure: Throwable) {
+                transientFailures += "Direct clients: ${failure.message.orEmpty()}"
+                logClientFailure(videoId, "DIRECT", failure)
             } finally {
                 resolverFinished()
             }
         }
 
         try {
-            // extractor breakage); an unbounded receive() would hang stream
-            // resolution (and therefore playback) forever.
-            val winner = kotlinx.coroutines.withTimeoutOrNull(STREAM_RACE_TIMEOUT_MS) {
-                channel.receiveCatching().getOrNull()
-            }
+            val winner = channel.receiveCatching().getOrNull()
             if (winner != null) {
                 cacheResolvedStream(winner, now)
                 lastResolvedStreams[resolutionKey(videoId, authScope)] = winner
@@ -1561,12 +1567,8 @@ class InnerTubeMusicApi @Inject constructor(
             if (e is ConfirmedUnplayableMediaException) throw e
             jobs.forEach { it.cancel() }
             streamExtractor.invalidatePlayerState(videoId)
-            // Last-resort direct NewPipe extraction — bounded as well so a
-            // stalled socket can never wedge the player's loader thread.
             val npStream = try {
-                kotlinx.coroutines.withTimeoutOrNull(FALLBACK_EXTRACT_TIMEOUT_MS) {
-                    streamExtractor.resolveAudioStream(videoId)
-                } ?: throw IOException("Timed out during fallback extraction for $videoId")
+                streamExtractor.resolveAudioStream(videoId)
             } catch (cancellation: kotlinx.coroutines.CancellationException) {
                 throw cancellation
             } catch (fallbackFailure: Throwable) {
@@ -1590,6 +1592,7 @@ class InnerTubeMusicApi @Inject constructor(
         } finally {
             channel.close()
             jobs.forEach { it.cancel() }
+            prerequisiteJobs.forEach { it.cancel() }
         }
     }
 
@@ -1647,7 +1650,6 @@ class InnerTubeMusicApi @Inject constructor(
             referer = client.referer,
             visitorData = visitorData,
             maxAttempts = MAX_PLAYER_REQUEST_ATTEMPTS,
-            callTimeoutMs = PLAYER_REQUEST_TIMEOUT_MS,
         )
         val status = root.obj("playabilityStatus")
         val state = status?.string("status")
@@ -1736,9 +1738,7 @@ class InnerTubeMusicApi @Inject constructor(
                 stream.requestHeaders.forEach { (name, value) -> header(name, value) }
             }
         val request = requestBuilder.build()
-        val call = http.newCall(request).apply {
-            timeout().timeout(STREAM_PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        }
+        val call = http.newCall(request)
         val cancellationHandle = currentCoroutineContext()[kotlinx.coroutines.Job]
             ?.invokeOnCompletion { cause ->
                 if (cause is kotlinx.coroutines.CancellationException) call.cancel()
@@ -1940,14 +1940,13 @@ class InnerTubeMusicApi @Inject constructor(
         title: String,
         artist: String,
         prefetchStreams: Boolean = true,
-    ): YouTubeMusicTrack? =
-        try {
-            kotlinx.coroutines.withTimeoutOrNull(2500L) {
-                findBestMatch(title, artist, prefetchStreams)
-            }
-        } catch (_: Exception) {
-            null
-        }
+    ): YouTubeMusicTrack? = try {
+        findBestMatch(title, artist, prefetchStreams)
+    } catch (cancellation: kotlinx.coroutines.CancellationException) {
+        throw cancellation
+    } catch (_: Exception) {
+        null
+    }
 
     suspend fun isPlayable(title: String, artist: String): Boolean =
         findBestMatchOrNull(title, artist) != null
@@ -2555,19 +2554,11 @@ class InnerTubeMusicApi @Inject constructor(
         const val MAX_CONTINUATION_PAGES = 600
         const val WRITE_ACTIONS_PER_REQUEST = 50
 
-        /** Upper bound on how long both stream-resolution racers combined may
-         *  take before falling back to direct extraction. */
-        const val STREAM_RACE_TIMEOUT_MS = 15_000L
-        const val INNERTUBEX_TIMEOUT_MS = 8_000L
         const val HEDGED_CLIENT_STAGGER_DELAY_MS = 300L
-        const val STREAM_PROBE_TIMEOUT_MS = 2_000L
         const val MAX_FORMAT_PROBES_PER_CLIENT = 2
-        const val PLAYER_REQUEST_TIMEOUT_MS = 3_000L
         const val MAX_PLAYER_REQUEST_ATTEMPTS = 2
         const val CONFIG_REQUEST_TIMEOUT_MS = 4_000L
         const val RELATED_REQUEST_TIMEOUT_MS = 8_000L
-        const val SIGNATURE_TIMESTAMP_TIMEOUT_MS = 3_000L
-        const val PO_TOKEN_FAST_WAIT_MS = 750L
         const val URL_EXPIRY_MARGIN_MS = 2 * 60 * 1000L
         const val REQUEST_RETRY_BASE_DELAY_MS = 250L
         const val REQUEST_RETRY_JITTER_MS = 180L
@@ -2575,8 +2566,6 @@ class InnerTubeMusicApi @Inject constructor(
         const val NEWPIPE_RETRY_JITTER_MS = 220L
         const val UNKNOWN_STREAM_EXPIRY_TTL_MS = 5 * 60 * 1000L
 
-        /** Upper bound for the last-resort direct NewPipe extraction. */
-        const val FALLBACK_EXTRACT_TIMEOUT_MS = 12_000L
         val CONFIRMED_UNAVAILABLE_REASONS = listOf(
             "video has been removed",
             "video has been deleted",

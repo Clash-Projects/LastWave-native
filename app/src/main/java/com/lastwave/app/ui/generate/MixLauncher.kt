@@ -1,31 +1,46 @@
 package com.lastwave.app.ui.generate
 
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
-data class MixSeed(val trackName: String, val artistName: String)
+data class MixSeed(
+    val trackName: String,
+    val artistName: String,
+    val videoId: String? = null,
+)
 
 /**
- * "Start Mix with this Song" (§6) needs to reach GenerateViewModel — which
- * lives on the Create tab, not wherever the track menu was opened from
- * (Home, Discover, Search, Playlist, Genres). Same cross-component signal
- * pattern as AuthDeepLinkDispatcher: a singleton SharedFlow, one emitter
- * (TrackContextMenuSheet's default Start Mix action), two collectors
- * (GenerateViewModel applies the seed and generates; MainShell switches
- * the pager to the Create tab). Neither collector needs to know about the
- * other, and this works whether MainShell is currently visible or sitting
- * underneath a pushed screen like Discover — its composition (and this
- * LaunchedEffect) isn't disposed just because it's not on top.
+ * "Start Mix with this Song" needs to reach NavGraph (at the root navigation
+ * level) to navigate to the Generator screen, and GenerateViewModel to populate
+ * the seed and kick off similar-song generation.
+ *
+ * Uses both a persistent [pendingSeed] StateFlow (read and consumed when
+ * navigating) and [requests] SharedFlow for ephemeral listeners (e.g. collapsing
+ * the full player in PlayerHost).
  */
 @Singleton
 class MixLauncher @Inject constructor() {
-    private val _requests = MutableSharedFlow<MixSeed>(extraBufferCapacity = 1)
+    private val _requests = MutableSharedFlow<MixSeed>(replay = 1, extraBufferCapacity = 2)
     val requests: SharedFlow<MixSeed> = _requests
 
-    fun startMix(trackName: String, artistName: String) {
+    private val _pendingSeed = MutableStateFlow<MixSeed?>(null)
+    val pendingSeed: StateFlow<MixSeed?> = _pendingSeed.asStateFlow()
+
+    fun startMix(trackName: String, artistName: String, videoId: String? = null) {
         if (trackName.isBlank() || artistName.isBlank()) return
-        _requests.tryEmit(MixSeed(trackName, artistName))
+        val seed = MixSeed(trackName.trim(), artistName.trim(), videoId?.trim())
+        _pendingSeed.value = seed
+        _requests.tryEmit(seed)
+    }
+
+    fun consume(): MixSeed? {
+        val seed = _pendingSeed.value
+        _pendingSeed.value = null
+        return seed
     }
 }

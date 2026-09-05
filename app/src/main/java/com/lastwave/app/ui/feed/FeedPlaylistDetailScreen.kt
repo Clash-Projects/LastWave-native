@@ -17,17 +17,22 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +51,11 @@ import com.lastwave.app.ui.common.ExpressiveLoadingIndicator
 import com.lastwave.app.ui.common.GroupGap
 import com.lastwave.app.ui.common.groupPositionFor
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
+import com.lastwave.app.playback.PlayableTrack
+import com.lastwave.app.ui.common.TrackContextMenuSheet
+import com.lastwave.app.ui.common.TrackMenuCapabilities
+import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 
 @Composable
@@ -60,11 +70,17 @@ fun FeedPlaylistDetailScreen(
         viewModel.load(playlistId)
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background),
+        contentAlignment = Alignment.TopCenter,
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 860.dp),
+        ) {
         val playlist = (state as? FeedPlaylistDetailUiState.Success)?.playlist
         ExpressiveHeader(
             title = playlist?.title?.takeIf(String::isNotBlank) ?: "Mix",
@@ -124,6 +140,7 @@ private fun PlaylistContent(
     onPlay: (Int) -> Unit,
     onShuffle: () -> Unit,
 ) {
+    var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
@@ -209,6 +226,7 @@ private fun PlaylistContent(
                 subtitle = track.artistAndAlbum(),
                 position = groupPositionFor(index, playlist.tracks.size),
                 onClick = { onPlay(index) },
+                onLongClick = { menuTrack = track },
                 modifier = Modifier.padding(horizontal = 16.dp),
                 leading = {
                     ArtworkImage(
@@ -222,16 +240,49 @@ private fun PlaylistContent(
                     )
                 },
                 trailing = {
-                    track.durationSeconds?.let { duration ->
-                        Text(
-                            text = duration.toDurationLabel(),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        track.durationSeconds?.let { duration ->
+                            Text(
+                                text = duration.toDurationLabel(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(
+                            onClick = { menuTrack = track },
+                            modifier = Modifier.size(36.dp),
+                        ) {
+                            Icon(
+                                Icons.Filled.MoreVert,
+                                contentDescription = "Track options",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
                     }
                 },
             )
         }
+    }
+    }
+
+    menuTrack?.let { track ->
+        TrackContextMenuSheet(
+            target = TrackMenuTarget.Track(track.title, track.artist, ""),
+            capabilities = TrackMenuCapabilities(showCopyActions = true, showDeleteScrobble = false),
+            playableTrack = PlayableTrack(
+                title = track.title,
+                artist = track.artist,
+                album = track.album,
+                artworkUrl = track.artworkUrl,
+                videoId = track.videoId.takeIf(String::isNotBlank),
+            ),
+            playbackSourceLabel = playlist.title.ifBlank { "Mix" },
+            onDismiss = { menuTrack = null },
+        )
     }
 }
 

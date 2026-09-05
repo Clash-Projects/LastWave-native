@@ -48,5 +48,13 @@ sealed class Screen(val route: String) {
             return "album_detail/$encTitle?artistName=$encArtist&browseId=$encBrowseId"
         }
     }
+    data object FriendProfile : Screen("friend_profile/{username}?displayName={displayName}&avatarUrl={avatarUrl}") {
+        fun createRoute(username: String, displayName: String? = null, avatarUrl: String? = null): String {
+            val encName = android.net.Uri.encode(username)
+            val encDisplay = if (!displayName.isNullOrBlank()) android.net.Uri.encode(displayName) else ""
+            val encAvatar = if (!avatarUrl.isNullOrBlank()) android.net.Uri.encode(avatarUrl) else ""
+            return "friend_profile/$encName?displayName=$encDisplay&avatarUrl=$encAvatar"
+        }
+    }
 }
 

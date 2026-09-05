@@ -70,6 +70,7 @@ import com.lastwave.app.ui.common.GroupPosition
 import com.lastwave.app.ui.common.HeaderActionIcon
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
@@ -133,8 +134,16 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
         if (shouldLoadMore && !state.isLoading && !state.isLoadingMore && state.tracks.isNotEmpty()) viewModel.loadMore()
     }
 
-    Column(Modifier.fillMaxSize()) {
-        ExpressiveHeader(
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 860.dp),
+        ) {
+            ExpressiveHeader(
             title = "Discover",
             subtitle = if (state.isYtConnected) "Fresh tracks, powered by Last.fm & YouTube Music" else "Fresh tracks, powered by Last.fm",
             onBack = onBack,
@@ -239,6 +248,7 @@ fun DiscoverScreen(onBack: () -> Unit = {}, viewModel: DiscoverViewModel = hiltV
                 Text(msg, color = MaterialTheme.colorScheme.inverseOnSurface, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
             }
         }
+    }
     }
 
     menuTrack?.let { track ->

@@ -57,6 +57,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import com.lastwave.app.ui.common.PredictiveBackScreen
 import com.lastwave.app.ui.common.ExpressiveMotion
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.feed.FeedScreen
 import com.lastwave.app.ui.generate.MixLauncher
 import com.lastwave.app.ui.home.HomeScreen
@@ -80,13 +81,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
-/** Thin bridge exposing MixLauncher's requests and Update alerts to MainShell */
+/** Thin bridge exposing Update alerts to MainShell */
 @HiltViewModel
 class MainShellViewModel @Inject constructor(
-    mixLauncher: MixLauncher,
     val appUpdateManager: com.lastwave.app.data.update.AppUpdateManager,
 ) : ViewModel() {
-    val mixRequests = mixLauncher.requests
     val updateInfo = appUpdateManager.updateInfo
 
     fun dismissUpdate(version: String) {
@@ -138,6 +137,7 @@ fun MainShell(
     onOpenDiscover: () -> Unit,
     onOpenGenres: () -> Unit,
     onOpenFriends: () -> Unit,
+    onOpenFriendProfile: (username: String, displayName: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
     onOpenFeedPlaylist: (String) -> Unit,
     onOpenPlaylist: (Long) -> Unit = {},
     onOpenGenerator: () -> Unit = {},
@@ -149,13 +149,6 @@ fun MainShell(
     val context = LocalContext.current
     val updateInfo by mainShellViewModel.updateInfo.collectAsStateWithLifecycle()
     val showUpdateBanner = updateInfo.isUpdateAvailable && !updateInfo.isDismissed
-
-    // "Start Mix with this Song" (§6) opens the Generator from anywhere
-    LaunchedEffect(Unit) {
-        mainShellViewModel.mixRequests.collect {
-            onOpenGenerator()
-        }
-    }
 
     // A plain Box, not Scaffold(bottomBar = ...): the nav floats ON TOP of
     // content via Box alignment, never reserving/subtracting its own
@@ -180,6 +173,8 @@ fun MainShell(
                         onOpenPlaylist = onOpenPlaylist,
                         onOpenFeedPlaylist = onOpenFeedPlaylist,
                         onOpenGenerator = onOpenGenerator,
+                        onOpenFriends = onOpenFriends,
+                        onOpenFriendProfile = onOpenFriendProfile,
                     )
                     MainTab.STATS -> HomeScreen(
                         onOpenSettings = onOpenSettings,
@@ -200,6 +195,7 @@ fun MainShell(
             exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .adaptiveContentWidth(maxWidth = 600.dp)
                 .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .zIndex(10f),

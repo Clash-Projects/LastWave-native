@@ -47,6 +47,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.lastwave.app.data.model.AuthState
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.theme.ExpressivePillShape
 
 /**
@@ -108,15 +109,20 @@ fun LoginScreen(
     }
 
     Scaffold { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(padding)
-                .padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .adaptiveContentWidth(maxWidth = 480.dp)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(padding)
+                    .padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
             Box(Modifier.padding(bottom = 12.dp), contentAlignment = Alignment.Center) {
                 Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                     Icon(
@@ -224,6 +230,7 @@ fun LoginScreen(
             }
         }
     }
+}
 }
 
 @Composable

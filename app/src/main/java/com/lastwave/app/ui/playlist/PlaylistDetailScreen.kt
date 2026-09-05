@@ -20,7 +20,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -52,7 +54,7 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Lock
@@ -115,6 +117,7 @@ import com.lastwave.app.ui.common.PlaylistCover
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import com.lastwave.app.ui.theme.ArtworkShape
 import com.lastwave.app.ui.theme.ExpressivePillShape
@@ -287,7 +290,10 @@ fun PlaylistDetailScreen(
                 bottom = FloatingNavDefaults.contentBottomPadding(),
             ),
             verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 860.dp)
+                .align(Alignment.TopCenter),
         ) {
             // Hero Header Section
             item(key = "hero_section") {
@@ -601,6 +607,7 @@ fun PlaylistDetailScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .adaptiveContentWidth(maxWidth = 860.dp)
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -720,7 +727,7 @@ fun PlaylistDetailScreen(
                             if (playlist.isYouTubeOnly) {
                                 DropdownMenuItem(
                                     text = { Text("Make available locally") },
-                                    leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                                    leadingIcon = { Icon(Icons.Filled.BookmarkAdd, contentDescription = null) },
                                     onClick = {
                                         viewModel.makeLocal(playlistId)
                                         overflowMenuOpen = false
@@ -1013,16 +1020,49 @@ private fun NativeTrackRow(
         label = "rowBg",
     )
 
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
-        color = rowBackground,
-        modifier = Modifier
+    val rowModifier = if (isPlaying) {
+        Modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
+                    ),
+                ),
+            )
+            .border(
+                BorderStroke(
+                    1.dp,
+                    Brush.horizontalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.40f),
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        ),
+                    ),
+                ),
+                shape = RoundedCornerShape(14.dp),
+            )
             .graphicsLayer {
                 scaleX = rowScale
                 scaleY = rowScale
-            },
+            }
+    } else {
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .graphicsLayer {
+                scaleX = rowScale
+                scaleY = rowScale
+            }
+    }
+
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = Color.Transparent,
+        modifier = rowModifier,
     ) {
         Row(
             modifier = Modifier
@@ -1088,27 +1128,46 @@ private fun NativeTrackRow(
             // Now Playing badge if active
             if (isPlaying) {
                 val transition = rememberInfiniteTransition(label = "nowPlayingAnim")
-                val pulseScale = transition.animateFloat(
-                    initialValue = 0.985f,
-                    targetValue = 1.015f,
-                    animationSpec = infiniteRepeatable(tween(1400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                val pulseScale by transition.animateFloat(
+                    initialValue = 1.0f,
+                    targetValue = 1.06f,
+                    animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Reverse),
                     label = "pulseScale",
+                )
+                val dotAlpha by transition.animateFloat(
+                    initialValue = 0.45f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse),
+                    label = "dotAlpha",
                 )
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = MaterialTheme.colorScheme.primary,
+                    tonalElevation = 4.dp,
+                    shadowElevation = 2.dp,
                     modifier = Modifier.graphicsLayer {
-                        scaleX = pulseScale.value
-                        scaleY = pulseScale.value
+                        scaleX = pulseScale
+                        scaleY = pulseScale
                     },
                 ) {
-                    Text(
-                        "Now Playing",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Medium,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .graphicsLayer { alpha = dotAlpha }
+                                .background(MaterialTheme.colorScheme.onPrimary, CircleShape),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Now Playing",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
                 }
                 Spacer(Modifier.width(4.dp))
             }

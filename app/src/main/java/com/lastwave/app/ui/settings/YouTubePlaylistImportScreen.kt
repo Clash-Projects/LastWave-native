@@ -104,6 +104,7 @@ import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.groupPositionFor
 import com.lastwave.app.ui.common.groupShape
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import com.lastwave.app.ui.theme.ArtworkShape
@@ -146,10 +147,11 @@ fun YouTubePlaylistImportScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 860.dp)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         ) {
             ExpressiveHeader(
@@ -624,6 +626,7 @@ fun YouTubePlaylistImportScreen(
             exit = fadeOut(),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .adaptiveContentWidth(maxWidth = 600.dp)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
                 .padding(bottom = 16.dp + LocalMiniPlayerScrollClearance.current)
                 .padding(horizontal = 20.dp),
@@ -773,6 +776,8 @@ private fun PlaylistPreviewModal(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 640.dp)
+                .align(Alignment.CenterHorizontally)
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp + safeDrawingBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(14.dp),

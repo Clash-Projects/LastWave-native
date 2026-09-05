@@ -21,3 +21,10 @@ data class HomeTrack(
 }
 
 enum class HomeSortMode { RECENT, MOST_PLAYED, LAST_7_DAYS, LAST_30_DAYS }
+ 
+@Immutable
+data class HomeArtistItem(
+    val name: String,
+    val playCount: Long = 0L,
+    val artworkUrl: String? = null,
+)

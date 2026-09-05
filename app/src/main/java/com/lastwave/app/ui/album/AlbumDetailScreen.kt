@@ -35,7 +35,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Album
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -84,6 +83,8 @@ import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.safeHorizontalContentPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.player.LocalMusicPlayer
 import com.lastwave.app.ui.player.PlayingWaveBars
@@ -178,10 +179,13 @@ fun AlbumDetailScreen(
                         start = 16.dp,
                         end = 16.dp,
                         top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 56.dp,
-                        bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
+                        bottom = 32.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                     ),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .adaptiveContentWidth(maxWidth = 860.dp)
+                        .align(Alignment.TopCenter)
+                        .safeHorizontalContentPadding(),
                 ) {
                     // 1. Album Hero Header
                     item(key = "album_hero") {
@@ -221,6 +225,8 @@ fun AlbumDetailScreen(
                                     ) {
                                         PlayingWaveBars(
                                             modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                                            containerColor = Color.Transparent,
+                                            waveColor = MaterialTheme.colorScheme.primary,
                                         )
                                     }
                                 }
@@ -303,43 +309,21 @@ fun AlbumDetailScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
+                                FilledTonalIconButton(
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        viewModel.playShuffle()
+                                    },
+                                    enabled = data.tracks.isNotEmpty(),
+                                    shape = CircleShape,
+                                    modifier = Modifier.size(48.dp),
                                 ) {
-                                    FilledTonalIconButton(
-                                        onClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            viewModel.playShuffle()
-                                        },
-                                        enabled = data.tracks.isNotEmpty(),
-                                        shape = CircleShape,
-                                        modifier = Modifier.size(48.dp),
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.Shuffle,
-                                            contentDescription = "Shuffle Album",
-                                            modifier = Modifier.size(22.dp),
-                                            tint = MaterialTheme.colorScheme.primary,
-                                        )
-                                    }
-
-                                    FilledTonalIconButton(
-                                        onClick = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            viewModel.downloadAlbum()
-                                        },
-                                        enabled = data.tracks.isNotEmpty(),
-                                        shape = CircleShape,
-                                        modifier = Modifier.size(48.dp),
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.Download,
-                                            contentDescription = "Download Album",
-                                            modifier = Modifier.size(22.dp),
-                                            tint = MaterialTheme.colorScheme.primary,
-                                        )
-                                    }
+                                    Icon(
+                                        Icons.Filled.Shuffle,
+                                        contentDescription = "Shuffle Album",
+                                        modifier = Modifier.size(22.dp),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
                                 }
 
                                 // Large Floating Primary Play Button (56dp circle)
@@ -432,14 +416,12 @@ fun AlbumDetailScreen(
                                         modifier = Modifier.fillMaxSize(),
                                     )
                                     if (isPlayingThis) {
-                                        Box(
+                                        PlayingWaveBars(
                                             modifier = Modifier
-                                                .fillMaxSize()
-                                                .background(Color.Black.copy(alpha = 0.45f)),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            PlayingWaveBars(modifier = Modifier.size(18.dp))
-                                        }
+                                                .align(Alignment.BottomEnd)
+                                                .padding(2.dp)
+                                                .size(24.dp, 18.dp),
+                                        )
                                     }
                                 }
 
@@ -557,6 +539,7 @@ fun AlbumDetailScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .adaptiveContentWidth(maxWidth = 860.dp)
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,

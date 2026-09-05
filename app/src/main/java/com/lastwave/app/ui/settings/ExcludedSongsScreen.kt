@@ -42,6 +42,7 @@ import androidx.lifecycle.viewModelScope
 import com.lastwave.app.data.generate.GenerateRepository
 import com.lastwave.app.data.local.db.RecommendationExclusionEntity
 import com.lastwave.app.ui.common.ExpressiveHeader
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.common.LiquidGlassCard
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
@@ -75,11 +76,16 @@ fun ExcludedSongsScreen(
 ) {
     val exclusions by viewModel.exclusions.collectAsStateWithLifecycle()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 860.dp)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+        ) {
         ExpressiveHeader(
             title = "Excluded Songs",
             subtitle = "${exclusions.size} song${if (exclusions.size == 1) "" else "s"} hidden from recommendations",
@@ -141,6 +147,7 @@ fun ExcludedSongsScreen(
                 }
             }
         }
+    }
     }
 }
 

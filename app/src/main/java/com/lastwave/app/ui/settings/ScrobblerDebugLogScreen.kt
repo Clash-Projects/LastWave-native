@@ -26,6 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
 
 /**
  * Watch MediaScrobbleListenerService's actual decisions live — added after
@@ -43,7 +44,15 @@ fun ScrobblerDebugLogScreen(
 ) {
     val entries by viewModel.entries.collectAsStateWithLifecycle()
 
-    Column(Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 860.dp),
+        ) {
         ExpressiveHeader(
             title = "Scrobbler debug log",
             subtitle = "Live \u2014 keep this open while a track plays",
@@ -87,5 +96,6 @@ fun ScrobblerDebugLogScreen(
                 }
             }
         }
+    }
     }
 }

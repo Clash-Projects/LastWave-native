@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lastwave.app.ui.common.ArtworkImage
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.common.ExpressiveGroup
 import com.lastwave.app.ui.common.ExpressiveGroupTrackRow
 import com.lastwave.app.ui.common.ExpressiveHeader
@@ -52,6 +53,7 @@ private val FriendsContainerShape = androidx.compose.foundation.shape.RoundedCor
 fun FriendsScreen(
     viewModel: HomeViewModel,
     onBack: () -> Unit,
+    onOpenFriendProfile: (username: String, displayName: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -67,7 +69,15 @@ fun FriendsScreen(
     val isLoading = uiState.isLoadingFriends
     val isViewingFriend = uiState.isViewingFriend
 
-    Column(Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 760.dp),
+        ) {
         ExpressiveHeader(
             title = "Friends",
             subtitle = if (friends.isNotEmpty()) "Long-press a friend to pin them to the top" else null,
@@ -150,8 +160,7 @@ fun FriendsScreen(
                                 subtitle = "@${friend.name}",
                                 position = position,
                                 onClick = {
-                                    viewModel.viewFriend(friend)
-                                    onBack()
+                                    onOpenFriendProfile(friend.name, friend.displayName, friend.avatarUrl)
                                 },
                                 onLongClick = { viewModel.toggleFriendPinned(friend.name) },
                                 leading = {
@@ -183,4 +192,5 @@ fun FriendsScreen(
         }
         }
     }
+}
 }

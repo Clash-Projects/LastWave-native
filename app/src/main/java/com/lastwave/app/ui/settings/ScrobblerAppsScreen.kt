@@ -43,6 +43,7 @@ import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.groupPositionFor
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 
 @Composable
@@ -58,8 +59,12 @@ fun ScrobblerAppsScreen(
     val detectedCount = apps.count { it.isKnownMusicPlayer }
     val undetectedSelected = detectedCount > 0 && apps.filter { it.isKnownMusicPlayer }.any { it.packageName !in selected }
 
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 860.dp),
+        ) {
             ExpressiveHeader(
                 title = "Choose apps",
                 subtitle = "${selected.size} app${if (selected.size == 1) "" else "s"} selected",

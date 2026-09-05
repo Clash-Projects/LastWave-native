@@ -38,6 +38,8 @@ class YouTubeStreamExtractor @Inject constructor(
         initialize()
         val info = try {
             StreamInfo.getInfo(ServiceList.YouTube, "https://www.youtube.com/watch?v=$videoId")
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
         } catch (error: Exception) {
             throw IOException("YouTube stream extraction failed for $videoId", error)
         }
@@ -82,7 +84,13 @@ class YouTubeStreamExtractor @Inject constructor(
 
     suspend fun getSignatureTimestamp(videoId: String): Int? = withContext(Dispatchers.IO) {
         initialize()
-        runCatching { YoutubeJavaScriptPlayerManager.getSignatureTimestamp(videoId) }.getOrNull()
+        try {
+            YoutubeJavaScriptPlayerManager.getSignatureTimestamp(videoId)
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
     }
 
     fun decipherStreamUrl(videoId: String, signatureCipher: String): String? {

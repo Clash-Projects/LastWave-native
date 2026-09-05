@@ -19,6 +19,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
@@ -28,6 +29,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -62,7 +65,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
+import com.lastwave.app.ui.common.isTabletOrWideScreen
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -367,7 +373,10 @@ class PlayerViewModel @Inject constructor(
             .filter { playlist ->
                 playlist.id in playlistIds &&
                     playlist.remotePlaylistId == null &&
-                    playlist.tracks.any { it.key == generatedTrack.key }
+                    playlist.tracks.any {
+                        it.key == generatedTrack.key ||
+                            (it.name.equals(generatedTrack.name, ignoreCase = true) && it.artist.equals(generatedTrack.artist, ignoreCase = true))
+                    }
             }
             .mapTo(mutableSetOf(), SavedPlaylist::id)
         val remoteIds = playlistIds.filterTo(mutableSetOf()) { it < 0L }
@@ -644,12 +653,13 @@ private fun MiniPlayer(
     val shownX by animateFloatAsState(dragX, ExpressiveMotion.spatialSpring(), label = "miniPlayerX")
     val shownY by animateFloatAsState(dragY, ExpressiveMotion.spatialSpring(), label = "miniPlayerY")
     val threshold = with(LocalDensity.current) { 72.dp.toPx() }
-    val shape = if (edgeToEdge) {
+    val isTablet = isTabletOrWideScreen()
+    val shape = if (edgeToEdge && !isTablet) {
         RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
     } else {
         RoundedCornerShape(32.dp)
     }
-    val positionedModifier = if (edgeToEdge) {
+    val positionedModifier = if (edgeToEdge && !isTablet) {
         modifier.fillMaxWidth()
     } else {
         modifier
@@ -657,7 +667,8 @@ private fun MiniPlayer(
                 WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
             )
             .padding(horizontal = 14.dp)
-            .padding(bottom = bottomPadding)
+            .padding(bottom = if (isTablet && edgeToEdge) 14.dp else bottomPadding)
+            .widthIn(max = 680.dp)
             .fillMaxWidth()
     }
     Box(
@@ -808,47 +819,83 @@ fun PlayingWaveBars(
     modifier: Modifier = Modifier,
     waveColor: Color = MaterialTheme.colorScheme.onPrimaryContainer,
     containerColor: Color = MaterialTheme.colorScheme.primaryContainer,
+    shape: Shape = CircleShape,
 ) {
     val transition = rememberInfiniteTransition(label = "miniArtworkWave")
     val first = transition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(420), RepeatMode.Reverse),
+        initialValue = 0.25f,
+        targetValue = 0.95f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 480, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
         label = "miniWaveFirst",
     )
     val second = transition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.4f,
-        animationSpec = infiniteRepeatable(tween(560), RepeatMode.Reverse),
+        initialValue = 0.95f,
+        targetValue = 0.30f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 640, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
         label = "miniWaveSecond",
     )
     val third = transition.animateFloat(
-        initialValue = 0.5f,
+        initialValue = 0.35f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(480), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 530, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
         label = "miniWaveThird",
     )
-    Surface(
-        shape = CircleShape,
-        color = containerColor,
-        modifier = modifier.size(width = 26.dp, height = 22.dp),
-    ) {
-        androidx.compose.foundation.Canvas(Modifier.fillMaxSize().padding(horizontal = 6.dp, vertical = 4.dp)) {
-            val barWidth = size.width / 5f
-            repeat(3) { index ->
+
+    val content: @Composable () -> Unit = {
+        androidx.compose.foundation.Canvas(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 5.dp, vertical = 3.5.dp)
+        ) {
+            val barCount = 3
+            val barWidth = (size.width / 5.2f).coerceAtLeast(1.5f)
+            val barGap = barWidth * 0.9f
+            val totalContentWidth = barCount * barWidth + (barCount - 1) * barGap
+            val startX = ((size.width - totalContentWidth) / 2f).coerceAtLeast(0f)
+
+            repeat(barCount) { index ->
                 val fraction = when (index) {
                     0 -> first.value
                     1 -> second.value
                     else -> third.value
                 }
-                val barHeight = size.height * fraction
+                val barHeight = (size.height * fraction).coerceIn(barWidth, size.height)
                 drawRoundRect(
                     color = waveColor,
-                    topLeft = androidx.compose.ui.geometry.Offset(index * barWidth * 2f, size.height - barHeight),
+                    topLeft = androidx.compose.ui.geometry.Offset(
+                        x = startX + index * (barWidth + barGap),
+                        y = size.height - barHeight,
+                    ),
                     size = androidx.compose.ui.geometry.Size(barWidth, barHeight),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(barWidth / 2f, barWidth / 2f),
                 )
             }
+        }
+    }
+
+    if (containerColor == Color.Transparent) {
+        Box(
+            modifier = modifier.defaultMinSize(minWidth = 24.dp, minHeight = 18.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            content()
+        }
+    } else {
+        Surface(
+            shape = shape,
+            color = containerColor,
+            modifier = modifier.defaultMinSize(minWidth = 26.dp, minHeight = 22.dp),
+        ) {
+            content()
         }
     }
 }
@@ -895,7 +942,10 @@ private fun AddToPlaylistDialog(
         if (playlistIds.isEmpty() || isCheckingDuplicates) return
         val immediateDuplicates = playlistIds.filter { id ->
             id in knownDuplicatePlaylistIds ||
-                sanitizedPlaylists.firstOrNull { it.id == id }?.tracks?.any { it.key == trackKey } == true
+                sanitizedPlaylists.firstOrNull { it.id == id }?.tracks?.any {
+                    it.key == trackKey ||
+                        (it.name.equals(track.title, ignoreCase = true) && it.artist.equals(track.artist, ignoreCase = true))
+                } == true
         }.toSet()
         if (immediateDuplicates.isNotEmpty()) {
             duplicatePlaylistIds = emptySet()
@@ -923,11 +973,42 @@ private fun AddToPlaylistDialog(
 
     duplicateConfirmation?.let { duplicates ->
         val duplicatePlaylists = sanitizedPlaylists.filter { it.id in duplicates }
+        if (duplicatePlaylists.size == 1) {
+            val playlist = duplicatePlaylists.first()
+            AlertDialog(
+                onDismissRequest = { duplicateConfirmation = null },
+                title = { Text("Song already in playlist") },
+                text = {
+                    Text(
+                        "${track.title} by ${track.artist} is already present in ${playlist.title}. " +
+                            "You can leave the playlist unchanged or add another copy.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            onAdd(selectedPlaylistIds, setOf(playlist.id))
+                            duplicateConfirmation = null
+                        },
+                    ) {
+                        Text("Add anyway")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { duplicateConfirmation = null }) {
+                        Text("Leave unchanged")
+                    }
+                },
+            )
+            return
+        }
+
         val missingCount = selectedPlaylistIds.size - duplicates.size
         AlertDialog(
             onDismissRequest = { duplicateConfirmation = null },
             title = {
-                Text(if (duplicates.size == 1) "Already in this playlist" else "Already in ${duplicates.size} playlists")
+                Text("${duplicates.size} playlists already have this song")
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -988,22 +1069,28 @@ private fun AddToPlaylistDialog(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { onAdd(selectedPlaylistIds, duplicatePlaylistIds) }) {
+                TextButton(
+                    onClick = {
+                        onAdd(selectedPlaylistIds, duplicatePlaylistIds)
+                        duplicateConfirmation = null
+                    },
+                ) {
                     Text(
                         when {
-                            duplicatePlaylistIds.isNotEmpty() -> "Continue"
+                            duplicatePlaylistIds.isNotEmpty() -> "Add anyway"
                             missingCount > 0 -> "Add missing"
-                            else -> "Keep unchanged"
+                            else -> "Leave unchanged"
                         },
                     )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { duplicateConfirmation = null }) {
-                    Text("Back")
+                    Text("Leave unchanged")
                 }
             },
         )
+        return
     }
 
     ModalBottomSheet(
@@ -1014,6 +1101,8 @@ private fun AddToPlaylistDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 640.dp)
+                .align(Alignment.CenterHorizontally)
                 .padding(start = 20.dp, end = 20.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
@@ -1082,7 +1171,10 @@ private fun AddToPlaylistDialog(
                     ) { _, playlist ->
                         val selected = playlist.id in selectedPlaylistIds
                         val alreadyAdded = playlist.id in knownDuplicatePlaylistIds ||
-                            playlist.tracks.any { it.key == trackKey }
+                            playlist.tracks.any {
+                                it.key == trackKey ||
+                                    (it.name.equals(track.title, ignoreCase = true) && it.artist.equals(track.artist, ignoreCase = true))
+                            }
                         val trackCount = playlist.remoteTrackCount
                             ?: playlist.tracks.size.takeIf { playlist.remotePlaylistId == null }
                         val countLabel = when (trackCount) {
@@ -1438,11 +1530,13 @@ private fun FullPlayer(
                 Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // ── Header: slimmer, calmer, premium ─────────────────────
                 Box(
                     Modifier
                         .fillMaxWidth()
+                        .adaptiveContentWidth(maxWidth = 640.dp)
                         .height(52.dp)
                         .padding(horizontal = 20.dp)
                         .playerVerticalSwipe(enabled = currentTab != FullPlayerTab.NOW_PLAYING),
@@ -1520,7 +1614,7 @@ private fun FullPlayer(
 
                 AnimatedContent(
                     targetState = currentTab,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).adaptiveContentWidth(maxWidth = 680.dp),
                     transitionSpec = {
                         if (targetState != FullPlayerTab.NOW_PLAYING) {
                             (slideInVertically(animationSpec = ExpressiveMotion.smoothSpring()) { it / 6 } +
@@ -1547,7 +1641,10 @@ private fun FullPlayer(
                                     wavySeekbarEnabled = wavySeekbarEnabled,
                                     onRetry = onRetryLyrics,
                                     onOpenPlayer = { onTabChange(FullPlayerTab.NOW_PLAYING) },
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .adaptiveContentWidth(maxWidth = 720.dp)
+                                        .align(Alignment.TopCenter),
                                 )
                             } else {
                                 LyricsPanel(
@@ -1559,13 +1656,24 @@ private fun FullPlayer(
                                     wavySeekbarEnabled = wavySeekbarEnabled,
                                     onRetry = onRetryLyrics,
                                     onOpenPlayer = { onTabChange(FullPlayerTab.NOW_PLAYING) },
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .adaptiveContentWidth(maxWidth = 720.dp)
+                                        .align(Alignment.TopCenter),
                                 )
                             }
                         }
 
                         FullPlayerTab.QUEUE -> {
-                            QueuePanel(state, player, Modifier.fillMaxSize().padding(horizontal = 20.dp))
+                            QueuePanel(
+                                state,
+                                player,
+                                Modifier
+                                    .fillMaxSize()
+                                    .adaptiveContentWidth(maxWidth = 720.dp)
+                                    .align(Alignment.TopCenter)
+                                    .padding(horizontal = 20.dp),
+                            )
                         }
 
                         FullPlayerTab.NOW_PLAYING -> {

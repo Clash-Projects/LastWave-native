@@ -1,10 +1,9 @@
 package com.lastwave.app.ui.feed
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +25,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Explore
@@ -54,7 +54,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,9 +87,12 @@ import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.HeaderActionIcon
 import com.lastwave.app.ui.common.TrackContextMenuSheet
+import com.lastwave.app.ui.common.WindowSizeClass
+import com.lastwave.app.ui.common.rememberWindowSizeClass
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.common.ExpressiveLoadingIndicator
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
 import com.lastwave.app.ui.navigation.ArtistAlbumNavigator
 import com.lastwave.app.ui.player.LocalMusicPlayer
@@ -98,10 +100,6 @@ import com.lastwave.app.ui.player.PlayingWaveBars
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import com.lastwave.app.ui.theme.LocalLiquidGlass
 import com.lastwave.app.ui.theme.liquidGlassChrome
-
-private enum class FeedFilter(val label: String) {
-    FOR_YOU("For you"), SONGS("Songs"), PLAYLISTS("Playlists")
-}
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -112,17 +110,15 @@ fun FeedScreen(
     onOpenFeedPlaylist: (String) -> Unit,
     onOpenPlaylist: (Long) -> Unit = {},
     onOpenGenerator: () -> Unit = {},
+    onOpenFriends: () -> Unit = {},
+    onOpenFriendProfile: (username: String, displayName: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
     viewModel: FeedViewModel = hiltViewModel(),
     artistAlbumNavigator: ArtistAlbumNavigator = hiltViewModel<ArtistAlbumNavBridgeFeed>().navigator,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val musicPlayer = LocalMusicPlayer.current
     val playbackState by musicPlayer.chromeState.collectAsStateWithLifecycle()
-    var selectedFilter by rememberSaveable { mutableStateOf(FeedFilter.FOR_YOU) }
     var menuTrack by remember { mutableStateOf<YouTubeMusicTrack?>(null) }
-    val showSongs = selectedFilter != FeedFilter.PLAYLISTS
-    val showPlaylists = selectedFilter != FeedFilter.SONGS
-    val showHighlights = selectedFilter == FeedFilter.FOR_YOU
     val snackbarHostState = remember { SnackbarHostState() }
     val hasFeedContent = with(state.feedData) {
         quickTiles.isNotEmpty() || mixes.isNotEmpty() || topArtists.isNotEmpty() ||
@@ -130,14 +126,6 @@ fun FeedScreen(
             heavyRotation.isNotEmpty() || ytLikedSongs.isNotEmpty() || ytRecentSongs.isNotEmpty() ||
             (becauseYouListenTo?.items?.isNotEmpty() == true) || spotlight != null ||
             charts.isNotEmpty() || newReleases.isNotEmpty() || friends.isNotEmpty()
-    }
-    val hasFilteredContent = with(state.feedData) {
-        when (selectedFilter) {
-            FeedFilter.FOR_YOU -> hasFeedContent
-            FeedFilter.SONGS -> quickPicks.isNotEmpty() || jumpBackIn.isNotEmpty() || heavyRotation.isNotEmpty() ||
-                charts.isNotEmpty() || ytLikedSongs.isNotEmpty() || ytRecentSongs.isNotEmpty()
-            FeedFilter.PLAYLISTS -> mixes.isNotEmpty()
-        }
     }
     LaunchedEffect(state.error, hasFeedContent) {
         val error = state.error ?: return@LaunchedEffect
@@ -148,12 +136,15 @@ fun FeedScreen(
         }
     }
 
-    PullToRefreshBox(
-        isRefreshing = state.isRefreshing,
-        onRefresh = viewModel::refresh,
+    Box(
         modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
     ) {
-        Column(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 920.dp),
+        ) {
             ExpressiveHeader(
                 title = "LastWave",
                 actions = {
@@ -163,7 +154,14 @@ fun FeedScreen(
                 },
             )
 
-            if (state.isLoading) {
+            PullToRefreshBox(
+                isRefreshing = state.isRefreshing,
+                onRefresh = viewModel::refresh,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                if (state.isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     ExpressiveLoadingIndicator()
                 }
@@ -186,39 +184,11 @@ fun FeedScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(28.dp),
                 ) {
-                    item(key = "welcome_and_filter") {
-                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            FeedWelcome(onOpenGenerator = onOpenGenerator)
-                            FeedFilterPills(
-                                selectedFilter = selectedFilter,
-                                onSelectFilter = { selectedFilter = it },
-                            )
-                        }
+                    item(key = "welcome") {
+                        FeedWelcome(onOpenGenerator = onOpenGenerator)
                     }
 
-                    if (!hasFilteredContent) {
-                        item(key = "filter_empty") {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 40.dp, horizontal = 24.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Text(
-                                    "Nothing here yet",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                                Spacer(Modifier.height(6.dp))
-                                TextButton(onClick = onOpenSearch) {
-                                    Text("Find music", color = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
-                    }
-
-                    if (showHighlights && state.feedData.quickTiles.isNotEmpty()) {
+                    if (state.feedData.quickTiles.isNotEmpty()) {
                         item(key = "quick_tiles") {
                             QuickTilesGrid(
                                 tiles = state.feedData.quickTiles,
@@ -233,7 +203,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showSongs && state.feedData.quickPicks.isNotEmpty()) {
+                    if (state.feedData.quickPicks.isNotEmpty()) {
                         item(key = "quick_picks") {
                             val title = if (state.feedData.hasYtRecommendations) "Picked for you" else "Quick picks"
                             val subtitle = if (state.feedData.hasYtRecommendations) {
@@ -258,7 +228,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showSongs && state.feedData.isYtConnected && state.feedData.ytLikedSongs.isNotEmpty()) {
+                    if (state.feedData.isYtConnected && state.feedData.ytLikedSongs.isNotEmpty()) {
                         item(key = "yt_liked_songs") {
                             FeedSectionHeader(
                                 title = "Liked on YouTube",
@@ -282,7 +252,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showSongs && state.feedData.isYtConnected && state.feedData.ytRecentSongs.isNotEmpty()) {
+                    if (state.feedData.isYtConnected && state.feedData.ytRecentSongs.isNotEmpty()) {
                         item(key = "yt_recent_songs") {
                             FeedSectionHeader(
                                 title = "Recently on YouTube Music",
@@ -306,7 +276,7 @@ fun FeedScreen(
                         }
                     }
 
-                    state.feedData.becauseYouListenTo?.takeIf { showSongs && it.items.isNotEmpty() }?.let { section ->
+                    state.feedData.becauseYouListenTo?.takeIf { it.items.isNotEmpty() }?.let { section ->
                         item(key = "because_you_listen_to") {
                             FeedSectionHeader(
                                 title = section.title,
@@ -330,7 +300,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showSongs && state.feedData.jumpBackIn.isNotEmpty()) {
+                    if (state.feedData.jumpBackIn.isNotEmpty()) {
                         item(key = "jump_back_in") {
                             FeedSectionHeader(
                                 title = "Jump back in",
@@ -354,7 +324,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showPlaylists && state.feedData.mixes.isNotEmpty()) {
+                    if (state.feedData.mixes.isNotEmpty()) {
                         item(key = "mixed_for_you") {
                             FeedSectionHeader(
                                 title = "Mixes to explore",
@@ -380,7 +350,7 @@ fun FeedScreen(
                         }
                     }
 
-                    state.feedData.spotlight?.takeIf { showHighlights }?.let { spotlight ->
+                    state.feedData.spotlight?.let { spotlight ->
                         item(key = "spotlight_hero") {
                             SpotlightHeroCard(
                                 spotlight = spotlight,
@@ -394,7 +364,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showHighlights && state.feedData.topArtists.isNotEmpty()) {
+                    if (state.feedData.topArtists.isNotEmpty()) {
                         item(key = "top_artists") {
                             FeedSectionHeader(
                                 title = "Artists for you",
@@ -420,7 +390,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showSongs && state.feedData.heavyRotation.isNotEmpty()) {
+                    if (state.feedData.heavyRotation.isNotEmpty()) {
                         item(key = "heavy_rotation") {
                             FeedSectionHeader(
                                 title = "Favorites to revisit",
@@ -444,7 +414,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showHighlights && state.feedData.recentAlbums.isNotEmpty()) {
+                    if (state.feedData.recentAlbums.isNotEmpty()) {
                         item(key = "albums_in_rotation") {
                             FeedSectionHeader(
                                 title = "Albums for you",
@@ -471,7 +441,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showSongs && state.feedData.charts.isNotEmpty()) {
+                    if (state.feedData.charts.isNotEmpty()) {
                         item(key = "trending_charts") {
                             FeedSectionHeader(
                                 title = "Trending now",
@@ -496,7 +466,7 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showHighlights && state.feedData.newReleases.isNotEmpty()) {
+                    if (state.feedData.newReleases.isNotEmpty()) {
                         item(key = "new_releases") {
                             FeedSectionHeader(
                                 title = "New releases",
@@ -523,11 +493,14 @@ fun FeedScreen(
                         }
                     }
 
-                    if (showHighlights && state.feedData.friends.isNotEmpty()) {
+                    if (state.feedData.friends.isNotEmpty()) {
                         item(key = "friends_activity") {
                             FeedSectionHeader(
                                 title = "Your friends",
                                 subtitle = "People in your listening circle",
+                                actionText = "See all",
+                                actionIcon = Icons.AutoMirrored.Filled.ArrowForwardIos,
+                                onActionClick = onOpenFriends,
                             )
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 24.dp),
@@ -535,7 +508,12 @@ fun FeedScreen(
                                 modifier = Modifier.padding(top = 12.dp),
                             ) {
                                 items(state.feedData.friends) { friend ->
-                                    FriendAvatarCard(friend = friend)
+                                    FriendAvatarCard(
+                                        friend = friend,
+                                        onClick = {
+                                            onOpenFriendProfile(friend.name, friend.displayName, friend.avatarUrl)
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -543,9 +521,11 @@ fun FeedScreen(
                 }
             }
         }
+    }
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)
+                .adaptiveContentWidth(maxWidth = 600.dp)
                 .safeHorizontalContentPadding()
                 .padding(bottom = FloatingNavDefaults.contentBottomPadding()),
         )
@@ -629,75 +609,48 @@ private fun FeedWelcome(
     }
 }
 
-@Composable
-private fun FeedFilterPills(
-    selectedFilter: FeedFilter,
-    onSelectFilter: (FeedFilter) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        FeedFilter.entries.forEach { filter ->
-            val selected = selectedFilter == filter
-            val animContainer by animateColorAsState(
-                targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                animationSpec = tween(durationMillis = 200),
-                label = "filterContainer",
-            )
-            val animContent by animateColorAsState(
-                targetValue = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                animationSpec = tween(durationMillis = 200),
-                label = "filterContent",
-            )
-            Surface(
-                onClick = { onSelectFilter(filter) },
-                shape = CircleShape,
-                color = animContainer,
-                border = if (!selected) BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)) else null,
-            ) {
-                Text(
-                    text = filter.label,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                    color = animContent,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
-        }
-    }
-}
+
 
 @Composable
 private fun QuickTilesGrid(
     tiles: List<FeedQuickTile>,
     onTileClick: (FeedQuickTile) -> Unit,
 ) {
-    val rows = remember(tiles) { tiles.take(6).chunked(2) }
+    val sizeClass = rememberWindowSizeClass()
+    val columns = when (sizeClass) {
+        WindowSizeClass.COMPACT -> 2
+        WindowSizeClass.MEDIUM -> 3
+        WindowSizeClass.EXPANDED -> 4
+    }
+    val tileLimit = when (sizeClass) {
+        WindowSizeClass.COMPACT -> 6
+        WindowSizeClass.MEDIUM -> 6
+        WindowSizeClass.EXPANDED -> 8
+    }
+    val rows = remember(tiles, columns, tileLimit) { tiles.take(tileLimit).chunked(columns) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        rows.forEach { pair ->
+        rows.forEach { rowItems ->
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                pair.forEach { tile ->
+                rowItems.forEach { tile ->
                     QuickTileCard(
                         tile = tile,
                         modifier = Modifier.weight(1f),
                         onClick = { onTileClick(tile) },
                     )
                 }
-                if (pair.size == 1) {
-                    Spacer(Modifier.weight(1f))
+                val remaining = columns - rowItems.size
+                if (remaining > 0) {
+                    repeat(remaining) {
+                        Spacer(Modifier.weight(1f))
+                    }
                 }
             }
         }
@@ -777,6 +730,12 @@ private fun QuickPicksRows(
     onTrackClick: (Int) -> Unit,
     onMenuClick: (YouTubeMusicTrack) -> Unit,
 ) {
+    val sizeClass = rememberWindowSizeClass()
+    val widthFraction = when (sizeClass) {
+        WindowSizeClass.COMPACT -> 0.86f
+        WindowSizeClass.MEDIUM -> 0.48f
+        WindowSizeClass.EXPANDED -> 0.32f
+    }
     val columns = remember(tracks) { tracks.chunked(3) }
     LazyRow(
         contentPadding = PaddingValues(horizontal = 24.dp),
@@ -785,7 +744,7 @@ private fun QuickPicksRows(
     ) {
         itemsIndexed(columns) { columnIndex, column ->
             Column(
-                modifier = Modifier.fillParentMaxWidth(0.86f),
+                modifier = Modifier.fillParentMaxWidth(widthFraction),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 column.forEachIndexed { rowIndex, track ->
@@ -815,15 +774,12 @@ private fun QuickPicksRows(
                                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
                                 )
                                 if (isCurrent && isPlaying) {
-                                    Box(
+                                    PlayingWaveBars(
                                         modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(Color.Black.copy(alpha = 0.45f)),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        PlayingWaveBars(modifier = Modifier.size(18.dp))
-                                    }
+                                            .align(Alignment.BottomEnd)
+                                            .padding(2.dp)
+                                            .size(24.dp, 18.dp),
+                                    )
                                 }
                             }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1477,12 +1433,22 @@ private fun ArtistAvatarCard(
 }
 
 @Composable
-private fun FriendAvatarCard(friend: FriendEntry) {
+private fun FriendAvatarCard(
+    friend: FriendEntry,
+    onClick: () -> Unit = {},
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(80.dp),
+        modifier = Modifier
+            .width(80.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
     ) {
         Surface(
+            onClick = onClick,
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
@@ -1535,7 +1501,19 @@ private fun FeedSectionHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .then(
+                    if (onActionClick != null) {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onActionClick,
+                        )
+                    } else Modifier
+                ),
+        ) {
             Text(
                 title,
                 style = MaterialTheme.typography.titleMedium.copy(fontSize = 19.sp, letterSpacing = (-0.3).sp),

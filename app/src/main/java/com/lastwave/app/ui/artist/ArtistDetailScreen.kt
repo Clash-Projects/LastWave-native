@@ -95,6 +95,7 @@ import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.genres.GenreExplorer
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.player.LocalMusicPlayer
@@ -189,7 +190,10 @@ fun ArtistDetailScreen(
                         bottom = 24.dp + LocalMiniPlayerScrollClearance.current + safeDrawingBottomPadding(),
                     ),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .adaptiveContentWidth(maxWidth = 860.dp)
+                        .align(Alignment.TopCenter),
                 ) {
                     // 1. Artist Hero Section
                     item(key = "artist_hero") {
@@ -252,13 +256,15 @@ fun ArtistDetailScreen(
 
                                 if (isArtistPlaying) {
                                     Surface(
-                                        shape = RoundedCornerShape(topStart = 12.dp),
+                                        shape = RoundedCornerShape(topStart = 14.dp, bottomEnd = 28.dp),
                                         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.92f),
                                         tonalElevation = 4.dp,
-                                        modifier = Modifier.align(Alignment.TopEnd),
+                                        modifier = Modifier.align(Alignment.BottomEnd),
                                     ) {
                                         PlayingWaveBars(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                                            containerColor = Color.Transparent,
+                                            waveColor = MaterialTheme.colorScheme.primary,
                                         )
                                     }
                                 }
@@ -267,7 +273,7 @@ fun ArtistDetailScreen(
                                 Column(
                                     modifier = Modifier
                                         .align(Alignment.BottomStart)
-                                        .padding(18.dp),
+                                        .padding(start = 18.dp, bottom = 18.dp, top = 18.dp, end = if (isArtistPlaying) 72.dp else 18.dp),
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -471,11 +477,6 @@ fun ArtistDetailScreen(
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
                                 )
-                                Text(
-                                    text = "${data.topSongs.size} tracks",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
                             }
                         }
 
@@ -522,14 +523,12 @@ fun ArtistDetailScreen(
                                             modifier = Modifier.fillMaxSize(),
                                         )
                                         if (isPlayingThis) {
-                                            Box(
+                                            PlayingWaveBars(
                                                 modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .background(Color.Black.copy(alpha = 0.45f)),
-                                                contentAlignment = Alignment.Center,
-                                            ) {
-                                                PlayingWaveBars(modifier = Modifier.size(18.dp))
-                                            }
+                                                    .align(Alignment.BottomEnd)
+                                                    .padding(2.dp)
+                                                    .size(24.dp, 18.dp),
+                                            )
                                         }
                                     }
 
@@ -595,7 +594,7 @@ fun ArtistDetailScreen(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         ) {
                                             Text(
-                                                text = if (showAllSongs) "Show less" else "Show all ${data.topSongs.size} songs",
+                                                text = if (showAllSongs) "Show less" else "Show all songs",
                                                 style = MaterialTheme.typography.labelLarge,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = MaterialTheme.colorScheme.primary,
@@ -712,6 +711,7 @@ fun ArtistDetailScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .adaptiveContentWidth(maxWidth = 860.dp)
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,

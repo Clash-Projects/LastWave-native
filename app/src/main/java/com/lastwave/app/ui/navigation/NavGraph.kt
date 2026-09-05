@@ -50,6 +50,9 @@ class GenreExplorerNavBridge @Inject constructor(genreExplorer: GenreExplorer) :
 }
 
 @HiltViewModel
+class MixLauncherNavBridge @Inject constructor(val mixLauncher: com.lastwave.app.ui.generate.MixLauncher) : androidx.lifecycle.ViewModel()
+
+@HiltViewModel
 class ArtistAlbumNavBridge @Inject constructor(val navigator: ArtistAlbumNavigator) : androidx.lifecycle.ViewModel()
 
 @HiltViewModel
@@ -59,6 +62,15 @@ class AppRouteNavBridge @Inject constructor(val routeNavigator: AppRouteNavigato
 fun LastWaveNavHost(
     navController: NavHostController = rememberNavController(),
 ) {
+    val mixNavBridge: MixLauncherNavBridge = hiltViewModel()
+    val pendingMixSeed by mixNavBridge.mixLauncher.pendingSeed.collectAsStateWithLifecycle()
+    LaunchedEffect(pendingMixSeed) {
+        if (pendingMixSeed != null) {
+            navController.navigate(Screen.Create.route) {
+                launchSingleTop = true
+            }
+        }
+    }
     val appRouteBridge: AppRouteNavBridge = hiltViewModel()
     val pendingAppRoute by appRouteBridge.routeNavigator.pendingRoute.collectAsStateWithLifecycle()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
@@ -188,6 +200,9 @@ fun LastWaveNavHost(
                 onOpenDiscover = { navController.navigate(Screen.Discover.route) },
                 onOpenGenres = { navController.navigate(Screen.Genres.route) },
                 onOpenFriends = { navController.navigate(Screen.Friends.route) },
+                onOpenFriendProfile = { username, displayName, avatarUrl ->
+                    navController.navigate(Screen.FriendProfile.createRoute(username, displayName, avatarUrl))
+                },
                 onOpenPlaylist = { playlistId ->
                     navController.navigate(Screen.PlaylistDetail.createRoute(playlistId))
                 },
@@ -239,6 +254,42 @@ fun LastWaveNavHost(
                 com.lastwave.app.ui.home.FriendsScreen(
                     viewModel = homeViewModel,
                     onBack = { navController.popBackStack() },
+                    onOpenFriendProfile = { username, displayName, avatarUrl ->
+                        navController.navigate(Screen.FriendProfile.createRoute(username, displayName, avatarUrl))
+                    },
+                )
+            }
+        }
+
+        composable(
+            route = Screen.FriendProfile.route,
+            arguments = listOf(
+                androidx.navigation.navArgument("username") { type = androidx.navigation.NavType.StringType },
+                androidx.navigation.navArgument("displayName") {
+                    type = androidx.navigation.NavType.StringType
+                    defaultValue = ""
+                },
+                androidx.navigation.navArgument("avatarUrl") {
+                    type = androidx.navigation.NavType.StringType
+                    defaultValue = ""
+                },
+            ),
+        ) { backStackEntry ->
+            val username = backStackEntry.arguments?.getString("username").orEmpty()
+            val displayName = backStackEntry.arguments?.getString("displayName")?.takeIf(String::isNotBlank)
+            val avatarUrl = backStackEntry.arguments?.getString("avatarUrl")?.takeIf(String::isNotBlank)
+            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
+                com.lastwave.app.ui.home.FriendProfileScreen(
+                    username = username,
+                    initialDisplayName = displayName,
+                    initialAvatarUrl = avatarUrl,
+                    onBack = { navController.popBackStack() },
+                    onOpenArtist = { artistName ->
+                        navController.navigate(Screen.ArtistDetail.createRoute(artistName))
+                    },
+                    onOpenAlbum = { albumTitle, artistName ->
+                        navController.navigate(Screen.AlbumDetail.createRoute(albumTitle, artistName))
+                    },
                 )
             }
         }

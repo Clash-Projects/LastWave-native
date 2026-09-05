@@ -166,16 +166,86 @@ class GenerateRepository @Inject constructor(
         return deduplicate(blended)
     }
 
+    private suspend fun resolveSeedVideoId(
+        track: String,
+        artist: String,
+        seedVideoId: String? = null,
+    ): String? {
+        if (!seedVideoId.isNullOrBlank() && YOUTUBE_VIDEO_ID_REGEX.matches(seedVideoId)) {
+            return seedVideoId
+        }
+        // 1. Strict best match with scoring
+        innerTube.findBestMatchOrNull(track, artist, prefetchStreams = false)?.videoId?.let { return it }
+
+        // 2. Direct search "$track $artist"
+        val query1 = listOf(track, artist).filter { it.isNotBlank() }.joinToString(" ")
+        if (query1.isNotBlank()) {
+            runCatching {
+                innerTube.searchSongs(query1, limit = 5, prefetchStreams = false)
+            }.getOrNull()?.firstOrNull()?.videoId?.let { return it }
+        }
+
+        // 3. Direct search "$artist $track"
+        val query2 = listOf(artist, track).filter { it.isNotBlank() }.joinToString(" ")
+        if (query2.isNotBlank() && query2 != query1) {
+            runCatching {
+                innerTube.searchSongs(query2, limit = 5, prefetchStreams = false)
+            }.getOrNull()?.firstOrNull()?.videoId?.let { return it }
+        }
+
+        return null
+    }
+
+    private fun cleanTitleForComparison(title: String): String {
+        return title.lowercase()
+            .replace(Regex("\\s*[({\\[][^)\\]]*[)}\\]]"), " ")
+            .replace(Regex("(?i)\\b(official\\s+video|official\\s+audio|lyrics?|remix|mix|edit|bootleg|flip|vip|slowed|reverb|sped\\s+up|speed\\s+up|cover|version|live|acoustic|instrumental|feat\\.?|ft\\.?)\\b.*"), " ")
+            .replace(Regex("[^a-z0-9]"), "")
+            .trim()
+    }
+
+    private fun isSameSongOrEdit(
+        candidateName: String,
+        candidateArtist: String,
+        seedTrack: String,
+        seedArtist: String,
+    ): Boolean {
+        val cleanSeed = cleanTitleForComparison(seedTrack)
+        val cleanCandidate = cleanTitleForComparison(candidateName)
+        if (cleanCandidate.isBlank() || cleanSeed.isBlank()) return false
+
+        // 1. Identical normalized base title (e.g. "Deep Swim" vs "Deep Swim (VIP)" or "Deep Swim (Remix)" or covers)
+        if (cleanCandidate == cleanSeed) return true
+
+        // 2. Candidate raw title mentions seed track AND has remix/cover/edit/version indicators
+        val lowerCandidate = candidateName.lowercase()
+        val lowerSeed = seedTrack.lowercase().trim()
+        if (lowerSeed.length >= 3 && lowerCandidate.contains(lowerSeed)) {
+            val editIndicators = listOf(
+                "remix", "edit", "mix", "cover", "version", "flip", "bootleg",
+                "vip", "slowed", "reverb", "sped", "speed", "acoustic", "instrumental",
+                "tribute", "karaoke", "live", "rework", "dub", "mashup", "rendition",
+            )
+            if (editIndicators.any { lowerCandidate.contains(it) }) return true
+
+            val lowerArtist = seedArtist.lowercase().trim()
+            if (lowerArtist.length >= 3 && lowerCandidate.contains(lowerArtist)) return true
+        }
+
+        // 3. For long specific titles (>= 10 chars), check direct containment
+        if (cleanSeed.length >= 10 && cleanCandidate.contains(cleanSeed)) return true
+        if (cleanCandidate.length >= 10 && cleanSeed.contains(cleanCandidate)) return true
+
+        return false
+    }
+
     private suspend fun fetchYouTubeRadio(
         track: String,
         artist: String,
         seedVideoId: String? = null,
         limit: Int,
     ): List<GeneratedTrack> {
-        val seed = seedVideoId
-            ?.takeIf(YOUTUBE_VIDEO_ID_REGEX::matches)
-            ?: innerTube.findBestMatchOrNull(track, artist, prefetchStreams = false)?.videoId
-            ?: return emptyList()
+        val seed = resolveSeedVideoId(track, artist, seedVideoId) ?: return emptyList()
         return innerTube.fetchRelatedSongs(seed, limit, prefetchStreams = false)
             .map { it.toGeneratedTrack() }
     }
@@ -385,33 +455,116 @@ class GenerateRepository @Inject constructor(
         limit: Int,
         seedVideoId: String? = null,
     ): List<GeneratedTrack> = kotlinx.coroutines.supervisorScope {
-        val lastFm = async(Dispatchers.IO) {
+        val targetSize = limit.coerceIn(25, 35)
+        val resolvedVideoId = resolveSeedVideoId(track, artist, seedVideoId)
+
+        // 1. Primary discovery: YouTube Music Radio
+        var youtubeTracks: List<YouTubeMusicTrack> = emptyList()
+        if (resolvedVideoId != null) {
+            try {
+                val primaryRadio = innerTube.fetchRelatedSongs(
+                    videoId = resolvedVideoId,
+                    limit = maxOf(targetSize * 2, 50),
+                    prefetchStreams = false,
+                )
+                val list = primaryRadio.toMutableList()
+                if (list.size < 40 && list.isNotEmpty()) {
+                    val branchSeed = list.firstOrNull { it.videoId != resolvedVideoId }?.videoId
+                    if (branchSeed != null) {
+                        val branchRadio = innerTube.fetchRelatedSongs(
+                            videoId = branchSeed,
+                            limit = 35,
+                            prefetchStreams = false,
+                        )
+                        val existingIds = list.mapTo(mutableSetOf()) { it.videoId }
+                        for (item in branchRadio) {
+                            if (existingIds.add(item.videoId)) {
+                                list.add(item)
+                            }
+                        }
+                    }
+                }
+                youtubeTracks = list
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (error: Exception) {
+                Log.d(TAG, "YouTube Music radio error", error)
+            }
+        }
+
+        // 2. Secondary fallback: Last.fm
+        val lastFmTracks: List<GeneratedTrack> = if (youtubeTracks.size < targetSize) {
             try {
                 val result = call(
-                    mapOf("method" to "track.getsimilar", "track" to track, "artist" to artist, "limit" to minOf(limit * 4, 200).toString()),
+                    mapOf("method" to "track.getsimilar", "track" to track, "artist" to artist, "limit" to "100"),
                 )
                 GenerateJson.normalise(result["similartracks"]?.jsonObject?.get("track")).shuffled()
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: Exception) {
-                Log.d(TAG, "Last.fm similar-track source unavailable", error)
+                Log.d(TAG, "Last.fm similar-track fallback unavailable", error)
                 emptyList()
             }
+        } else {
+            emptyList()
         }
-        val youtube = async(Dispatchers.IO) {
-            try {
-                fetchYouTubeRadio(track, artist, seedVideoId, minOf(limit * 2, 75)).shuffled()
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (error: Exception) {
-                Log.d(TAG, "YouTube radio source unavailable", error)
-                emptyList()
-            }
-        }
+
+        // 3. Combine raw candidates prioritizing YouTube Music radio
+        val rawCandidates = (youtubeTracks.map { it.toGeneratedTrack() } + lastFmTracks)
+
+        // 4. Strict filtering:
+        //    - No exact seed track
+        //    - No edits/remixes/covers of the seed track ("not same song of different artist edit n all")
+        //    - Truly different similar songs of that song related taste!
         val seedKey = GeneratedTrack(track, artist, null).key
-        val blended = blendSources(youtube.await(), lastFm.await())
-            .filterNot { it.key == seedKey }
-        filterPlayable(filterRecommendationExclusions(blended)).take(limit)
+
+        val filtered = rawCandidates.filter { candidate ->
+            if (candidate.name.isBlank() || candidate.artist.isBlank()) return@filter false
+            if (candidate.key == seedKey) return@filter false
+            if (resolvedVideoId != null && candidate.youtubeVideoIdOrNull() == resolvedVideoId) return@filter false
+            if (isSameSongOrEdit(candidate.name, candidate.artist, track, artist)) return@filter false
+            true
+        }
+
+        // 5. Unique songs only (no duplicate song titles with different edits/remixes)
+        val seenTitles = mutableSetOf<String>()
+        val distinctSongs = mutableListOf<GeneratedTrack>()
+        for (item in filtered) {
+            val cTitle = cleanTitleForComparison(item.name)
+            if (cTitle.isNotBlank() && !seenTitles.add(cTitle)) {
+                continue
+            }
+            distinctSongs.add(item)
+        }
+
+        // 6. Artist diversity cap: at most 1 track for the seed artist, at most 2 for other artists
+        //    so the playlist is full of truly different similar songs by related artists
+        fun applyArtistCap(maxSeedArtist: Int, maxOtherArtist: Int): List<GeneratedTrack> {
+            val counts = mutableMapOf<String, Int>()
+            return distinctSongs.filter { item ->
+                val aKey = item.artist.trim().lowercase()
+                val isSeedArtist = aKey.equals(artist.trim().lowercase(), ignoreCase = true)
+                val maxAllowed = if (isSeedArtist) maxSeedArtist else maxOtherArtist
+                val current = counts[aKey] ?: 0
+                if (current < maxAllowed) {
+                    counts[aKey] = current + 1
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+
+        var curated = applyArtistCap(maxSeedArtist = 1, maxOtherArtist = 2)
+        if (curated.size < targetSize) {
+            curated = applyArtistCap(maxSeedArtist = 2, maxOtherArtist = 3)
+        }
+        if (curated.size < targetSize) {
+            curated = distinctSongs
+        }
+
+        val finalResult = filterPlayable(filterRecommendationExclusions(curated))
+        finalResult.take(targetSize)
     }
 
     suspend fun fetchSimilarArtistTracks(artist: String, limit: Int): List<GeneratedTrack> = kotlinx.coroutines.supervisorScope {
@@ -975,79 +1128,15 @@ class GenerateRepository @Inject constructor(
         filterPlayable(filterRecommendationExclusions(blended)).take(total)
     }
 
-    // ── Start Mix From Track — exact port of startMixFromTrack()'s 3-source blend ──
+    // ── Start Mix From Track — YouTube Music Radio primary ──
 
-    suspend fun startMixFromTrack(trackName: String, artistName: String, onProgress: (String) -> Unit = {}): List<GeneratedTrack> {
-        val MIX_SIZE = 25
-        data class Weighted(val track: GeneratedTrack, val weight: Int)
-        val pool = mutableListOf<Weighted>()
-
-        try {
-            onProgress("Finding tracks similar to \"$trackName\"\u2026")
-            val d = call(mapOf("method" to "track.getsimilar", "track" to trackName, "artist" to artistName, "limit" to "80"))
-            GenerateJson.normalise(d["similartracks"]?.jsonObject?.get("track")).forEach { pool += Weighted(it, 3) }
-        } catch (e: Exception) { Log.d(TAG, "startMixFromTrack similar-tracks miss", e) }
-
-        try {
-            onProgress("Loading top tracks by $artistName\u2026")
-            val d = call(mapOf("method" to "artist.gettoptracks", "artist" to artistName, "limit" to "30"))
-            GenerateJson.normalise(d["toptracks"]?.jsonObject?.get("track")).forEach { pool += Weighted(it, 2) }
-        } catch (e: Exception) { Log.d(TAG, "startMixFromTrack artist-toptracks miss", e) }
-
-        try {
-            onProgress("Exploring artists like $artistName\u2026")
-            val d = call(mapOf("method" to "artist.getsimilar", "artist" to artistName, "limit" to "12"))
-            val simPool = GenerateJson.namesOf(d["similarartists"]?.jsonObject?.get("artist")).shuffled().take(4)
-            val perArtist = coroutineScope {
-                simPool.map { saName ->
-                    async {
-                        try {
-                            val d2 = call(mapOf("method" to "artist.gettoptracks", "artist" to saName, "limit" to "8"))
-                            GenerateJson.normalise(d2["toptracks"]?.jsonObject?.get("track"))
-                        } catch (e: Exception) {
-                            Log.d(TAG, "startMixFromTrack similar-artist toptracks miss", e)
-                            emptyList()
-                        }
-                    }
-                }.awaitAll().flatten()
-            }
-            perArtist.forEach { pool += Weighted(it, 1) }
-        } catch (e: Exception) { Log.d(TAG, "startMixFromTrack similar-artists miss", e) }
-
-        val seedKey = "$trackName|$artistName".lowercase()
-        val bestWeight = mutableMapOf<String, Int>()
-        val trackOf = mutableMapOf<String, GeneratedTrack>()
-        for ((track, weight) in pool) {
-            if (track.name.isBlank() || track.artist.isBlank()) continue
-            val k = track.key
-            if (k == seedKey) continue
-            if ((bestWeight[k] ?: -1) < weight) {
-                bestWeight[k] = weight
-                trackOf[k] = track
-            }
-        }
-
-        val sorted = listOf(3, 2, 1).flatMap { w ->
-            bestWeight.entries.filter { it.value == w }.map { trackOf[it.key]!! }.shuffled()
-        }
-
-        // Artist cap 3, progressively relaxed to 6 then uncapped if too thin.
-        fun capped(cap: Int): List<GeneratedTrack> {
-            val counts = mutableMapOf<String, Int>()
-            return sorted.filter {
-                val key = it.artist.lowercase()
-                val c = (counts[key] ?: 0) + 1
-                counts[key] = c
-                c <= cap
-            }
-        }
-
-        var result = capped(3)
-        if (result.size < MIX_SIZE) result = capped(6)
-        if (result.size < MIX_SIZE) result = sorted
-
-        val allowed = filterRecommendationExclusions(result)
-        return filterPlayable(allowed).take(MIX_SIZE)
+    suspend fun startMixFromTrack(
+        trackName: String,
+        artistName: String,
+        onProgress: (String) -> Unit = {},
+    ): List<GeneratedTrack> {
+        onProgress("Finding similar songs with YouTube Music\u2026")
+        return fetchSimilarTracks(track = trackName, artist = artistName, limit = 28)
     }
 
     // ── Seed pickers / search ──

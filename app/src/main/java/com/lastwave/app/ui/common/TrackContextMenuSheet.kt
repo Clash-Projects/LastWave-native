@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -114,8 +115,8 @@ class ArtistAlbumMenuViewModel @Inject constructor(
  *  "Start Mix with this Song" working for free, with no per-screen wiring. */
 @HiltViewModel
 class StartMixMenuViewModel @Inject constructor(private val mixLauncher: MixLauncher) : ViewModel() {
-    fun startMix(trackName: String, artistName: String) {
-        mixLauncher.startMix(trackName, artistName)
+    fun startMix(trackName: String, artistName: String, videoId: String? = null) {
+        mixLauncher.startMix(trackName, artistName, videoId)
     }
 }
 
@@ -294,6 +295,7 @@ fun TrackContextMenuSheet(
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = {
             Surface(
                 shape = RoundedCornerShape(50),
@@ -304,16 +306,19 @@ fun TrackContextMenuSheet(
             ) {}
         },
     ) {
+        EdgeToEdgeDialogWindow()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 600.dp)
+                .align(Alignment.CenterHorizontally)
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 24.dp + safeDrawingBottomPadding()),
         ) {
             if (target is TrackMenuTarget.Track) {
                 StartMixCard {
                     if (onStartMix != null) onStartMix(target.name, target.artist)
-                    else startMixViewModel.startMix(target.name, target.artist)
+                    else startMixViewModel.startMix(target.name, target.artist, playableTrack?.videoId)
                     onDismiss()
                 }
                 Spacer(Modifier.height(4.dp))

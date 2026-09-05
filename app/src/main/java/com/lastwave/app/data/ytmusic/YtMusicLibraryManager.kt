@@ -434,8 +434,9 @@ class YtMusicLibraryManager @Inject constructor(
         val exactVideoId = track.youtubeVideoIdOrNull()
         val match = if (exactVideoId == null) innerTube.findBestMatchOrNull(track.name, track.artist) else null
         val videoId = exactVideoId ?: match?.videoId ?: return@withContext false
-        if (!allowDuplicate && cachedPlaylist != null) {
-            if (cachedPlaylist.tracks.any { it.matches(track, match) }) return@withContext false
+        if (!allowDuplicate) {
+            val playlist = cachedPlaylist?.takeIf { it.tracks.isNotEmpty() } ?: loadDetail(localId)
+            if (playlist != null && playlist.tracks.any { it.matches(track, match) }) return@withContext false
         }
         val added = innerTube.addVideosToRemotePlaylist(remoteId, listOf(videoId))
         if (added) {
@@ -455,7 +456,19 @@ class YtMusicLibraryManager @Inject constructor(
         localIds: Set<Long>,
         track: GeneratedTrack,
     ): Set<Long> = withContext(Dispatchers.IO) {
-        findCachedDuplicatePlaylistIds(localIds, track)
+        if (localIds.isEmpty()) return@withContext emptySet()
+        val directVideoId = track.youtubeVideoIdOrNull()
+        val match = if (directVideoId == null) innerTube.findBestMatchOrNull(track.name, track.artist) else null
+        localIds.filterTo(mutableSetOf()) { localId ->
+            val cached = details[localId] ?: readFromDiskCache(localId)
+            if (cached != null && cached.tracks.isNotEmpty()) {
+                if (cached.tracks.any { it.matches(track, match) }) {
+                    return@filterTo true
+                }
+            }
+            val playlist = refreshDetailFromNetwork(localId) ?: loadDetail(localId)
+            playlist?.tracks?.any { it.matches(track, match) } == true
+        }
     }
 
     suspend fun findCachedDuplicatePlaylistIds(

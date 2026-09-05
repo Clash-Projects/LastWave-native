@@ -43,9 +43,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ExpandLess
@@ -100,6 +98,7 @@ import com.lastwave.app.ui.common.PlaylistCover
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.shell.FloatingNavDefaults
 import com.lastwave.app.ui.theme.ExpressivePillShape
 import java.text.SimpleDateFormat
@@ -148,7 +147,12 @@ fun PlaylistScreen(
     var menuTarget by remember { mutableStateOf<Pair<Long, GeneratedTrack>?>(null) }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 860.dp)
+                .align(Alignment.TopCenter),
+        ) {
             var sortMenuExpanded by remember { mutableStateOf(false) }
             ExpressiveHeader(
                 title = "Playlist",
@@ -669,7 +673,7 @@ private fun PlaylistCard(
                     if (playlist.isYouTubeOnly) {
                         DropdownMenuItem(
                             text = { Text("Make available locally") },
-                            leadingIcon = { Icon(Icons.Filled.Download, contentDescription = null) },
+                            leadingIcon = { Icon(Icons.Filled.BookmarkAdd, contentDescription = null) },
                             onClick = { onMakeLocal(); menuExpanded = false },
                         )
                     } else {

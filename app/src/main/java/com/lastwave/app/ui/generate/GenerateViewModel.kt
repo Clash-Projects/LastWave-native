@@ -91,22 +91,25 @@ class GenerateViewModel @Inject constructor(
     val lastSavedPlaylistId = MutableStateFlow<Long?>(null)
 
     init {
-        // "Start Mix with this Song" (§6) landing here from any screen's
+        // "Start Mix with this Song" landing here from any screen's
         // track menu: pre-fill Similar Tracks with the tapped song and
-        // generate immediately — a real one-tap mix, not just a
-        // pre-filled form waiting for another tap.
+        // generate immediately — a real one-tap mix.
         viewModelScope.launch {
-            mixLauncher.requests.collect { seed ->
-                _uiState.update {
-                    it.copy(
-                        selectedMode = GenerateMode.SIMILAR_TRACKS,
-                        seedTrackName = seed.trackName,
-                        seedArtistName = seed.artistName,
-                        seedVideoId = null,
-                        error = null,
-                    )
+            mixLauncher.pendingSeed.collect { seed ->
+                if (seed != null) {
+                    val consumed = mixLauncher.consume() ?: seed
+                    _uiState.update {
+                        it.copy(
+                            selectedMode = GenerateMode.SIMILAR_TRACKS,
+                            seedTrackName = consumed.trackName,
+                            seedArtistName = consumed.artistName,
+                            seedVideoId = consumed.videoId,
+                            trackCount = 28,
+                            error = null,
+                        )
+                    }
+                    generate()
                 }
-                generate()
             }
         }
     }
@@ -218,7 +221,11 @@ class GenerateViewModel @Inject constructor(
                     generationStatus.update(isGenerating = true, message = msg)
                 }
 
-                onProgress("Blending Last.fm and YouTube Music\u2026")
+                if (mode == GenerateMode.SIMILAR_TRACKS) {
+                    onProgress("Finding similar songs with YouTube Music\u2026")
+                } else {
+                    onProgress("Blending Last.fm and YouTube Music\u2026")
+                }
 
                 val targetCount = if (mode == GenerateMode.RECOMMENDATIONS) {
                     RECOMMENDATION_TRACK_COUNT

@@ -71,6 +71,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.data.download.DownloadProgress
 import com.lastwave.app.data.local.db.DownloadedTrackEntity
 import com.lastwave.app.ui.common.ArtworkImage
@@ -121,10 +122,11 @@ fun DownloadsScreen(
     val totalSizeText = formatBytes(totalBytes ?: 0L)
     val subtitleText = "${tracks.size} song(s) \u2022 $totalSizeText \u2022 Music/LastWave"
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 860.dp)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
         ) {
             ExpressiveHeader(

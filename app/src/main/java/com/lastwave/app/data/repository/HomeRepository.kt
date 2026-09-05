@@ -22,6 +22,11 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -311,6 +316,65 @@ class HomeRepository @Inject constructor(
     /** user.gettoptracks(period=overall, limit=50) — real playcounts, used
      *  for the Most Played tab and to merge counts onto Recent entries. */
     suspend fun fetchTopTracksOverall(limit: Int = 50, username: String? = null): Result<List<HomeTrack>> = fetchTopTracksForPeriod("overall", limit, username)
+
+    suspend fun fetchTopArtistsForPeriod(period: String = "overall", limit: Int = 30, username: String? = null): Result<List<HomeArtistItem>> = try {
+        val session = requireSession()
+        val targetUser = username ?: session.username
+        val response = if (targetUser.isBlank() || targetUser.equals("Guest User", ignoreCase = true)) {
+            api.get(
+                mapOf(
+                    "method" to "chart.gettopartists",
+                    "limit" to limit.toString(),
+                    "api_key" to session.apiKey,
+                    "format" to "json",
+                )
+            )
+        } else {
+            api.get(
+                mapOf(
+                    "method" to "user.gettopartists",
+                    "user" to targetUser,
+                    "period" to period,
+                    "limit" to limit.toString(),
+                    "api_key" to session.apiKey,
+                    "format" to "json",
+                )
+            )
+        }
+        val body = response.body()?.string() ?: throw LastFmException("Empty response from Last.fm")
+        val jsonElem = json.parseToJsonElement(body).jsonObject
+        if (jsonElem.containsKey("error")) {
+            val errCode = jsonElem["error"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+            val errMsg = jsonElem["message"]?.jsonPrimitive?.contentOrNull
+            throw LastFmException(LastFmErrors.friendlyMessage(errCode ?: 0, errMsg), errCode)
+        }
+        val topartists = jsonElem["topartists"]?.jsonObject
+        val artistElem = topartists?.get("artist")
+        val artistList = when (artistElem) {
+            is JsonArray -> artistElem
+            is JsonObject -> listOf(artistElem)
+            else -> emptyList()
+        }
+        val artists = artistList.mapNotNull { elem ->
+            val obj = elem as? JsonObject ?: return@mapNotNull null
+            val name = obj["name"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+            if (name.isBlank()) return@mapNotNull null
+            val playcount = obj["playcount"]?.jsonPrimitive?.contentOrNull?.toLongOrNull() ?: 0L
+            val imgArr = obj["image"] as? JsonArray
+            val bestImg = imgArr?.lastOrNull {
+                val text = (it as? JsonObject)?.get("#text")?.jsonPrimitive?.contentOrNull
+                !text.isNullOrBlank()
+            }?.let { (it as JsonObject)["#text"]?.jsonPrimitive?.contentOrNull }
+            HomeArtistItem(
+                name = name,
+                playCount = playcount,
+                artworkUrl = bestImg?.takeIf { !it.contains("2a96cbd8b46e442fc41c2b86b821562f") },
+            )
+        }
+        Result.success(artists)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
 
     /** Fires the full initial data-fetch set for the Home screen: recent
      *  tracks, stats, and all-time top tracks in parallel with caching and deduplication. */

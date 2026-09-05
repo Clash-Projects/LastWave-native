@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -354,6 +355,7 @@ fun TrackDetailsSheet(
         sheetState = sheetState,
         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = {
             Surface(
                 shape = RoundedCornerShape(50),
@@ -364,12 +366,15 @@ fun TrackDetailsSheet(
             ) {}
         },
     ) {
+        EdgeToEdgeDialogWindow()
         val currentSpecs = specs ?: TrackSpecs(title = title, artist = artist, album = album, artworkUrl = artworkUrl)
         val numberFormatter = NumberFormat.getNumberInstance(Locale.getDefault())
 
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 640.dp)
+                .align(Alignment.CenterHorizontally)
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 28.dp + safeDrawingBottomPadding())
                 .verticalScroll(rememberScrollState()),

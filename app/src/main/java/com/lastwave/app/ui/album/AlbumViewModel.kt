@@ -2,7 +2,6 @@ package com.lastwave.app.ui.album
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.lastwave.app.data.download.TrackDownloadManager
 import com.lastwave.app.data.model.AlbumPageData
 import com.lastwave.app.data.repository.AlbumRepository
 import com.lastwave.app.playback.MusicPlayer
@@ -28,7 +27,6 @@ sealed interface AlbumUiState {
 class AlbumViewModel @Inject constructor(
     private val repository: AlbumRepository,
     private val musicPlayer: MusicPlayer,
-    private val downloadManager: TrackDownloadManager,
     private val settingsPreferences: SettingsPreferences,
 ) : ViewModel() {
 
@@ -82,18 +80,6 @@ class AlbumViewModel @Inject constructor(
                 shuffled,
                 0,
                 sourceLabel = "${state.data.title} — ${state.data.artist}",
-            )
-        }
-    }
-
-    fun downloadAlbum() {
-        val state = _uiState.value as? AlbumUiState.Success ?: return
-        state.data.tracks.forEach { track ->
-            downloadManager.downloadTrack(
-                title = track.title,
-                artist = track.artist,
-                album = state.data.title,
-                artworkUrl = track.artworkUrl ?: state.data.artworkUrl,
             )
         }
     }

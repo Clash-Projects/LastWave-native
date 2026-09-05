@@ -1,12 +1,15 @@
 package com.lastwave.app.ui.home
 
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -58,6 +61,7 @@ import com.lastwave.app.ui.common.ArtworkImage
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.HeaderActionIcon
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.common.TrackContextMenuSheet
 import com.lastwave.app.ui.common.TrackMenuCapabilities
 import com.lastwave.app.ui.common.TrackMenuTarget
@@ -164,16 +168,19 @@ fun HomeScreen(
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            ExpressiveHeader(
-                title = "LastWave",
-                actions = {
-                    HeaderActionIcon(Icons.Filled.Explore, "Discover", onOpenDiscover)
-                    HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
-                    IconButton(onClick = onOpenSettings) {
-                        ProfileAvatar(avatarUrl = uiState.stats?.avatarUrl, modifier = Modifier.size(30.dp))
-                    }
-                },
-            )
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ExpressiveHeader(
+                    title = "LastWave",
+                    modifier = Modifier.adaptiveContentWidth(maxWidth = 860.dp),
+                    actions = {
+                        HeaderActionIcon(Icons.Filled.Explore, "Discover", onOpenDiscover)
+                        HeaderActionIcon(Icons.Filled.Search, "Search", onOpenSearch)
+                        IconButton(onClick = onOpenSettings) {
+                            ProfileAvatar(avatarUrl = uiState.stats?.avatarUrl, modifier = Modifier.size(30.dp))
+                        }
+                    },
+                )
+            }
         },
     ) { scaffoldPadding ->
         if (uiState.isLoading) {
@@ -186,7 +193,16 @@ fun HomeScreen(
             return@Scaffold
         }
 
-        Column(Modifier.fillMaxSize().padding(scaffoldPadding).safeHorizontalContentPadding()) {
+        Box(
+            modifier = Modifier.fillMaxSize().padding(scaffoldPadding),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .adaptiveContentWidth(maxWidth = 860.dp)
+                    .safeHorizontalContentPadding(),
+            ) {
             HeaderRow(
                 displayUsername = if (uiState.isViewingFriend) uiState.viewingUsername else uiState.username,
                 isViewingFriend = uiState.isViewingFriend,
@@ -323,6 +339,7 @@ fun HomeScreen(
                 }
             }
         }
+    }
     }
 
     menuTrack?.let { track ->
@@ -770,15 +787,43 @@ private fun TrackRow(
     val secondaryTextColor =
         if (isNowPlaying) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
         else MaterialTheme.colorScheme.onSurfaceVariant
+    val cardModifier = if (isNowPlaying) {
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clip(NowPlayingCardShape)
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.70f),
+                        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f),
+                    ),
+                ),
+            )
+            .border(
+                BorderStroke(
+                    1.dp,
+                    Brush.horizontalGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        ),
+                    ),
+                ),
+                shape = NowPlayingCardShape,
+            )
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    } else {
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    }
+
     Surface(
         shape = if (isNowPlaying) NowPlayingCardShape else TrackRowShape,
-        color = if (isNowPlaying) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
-        tonalElevation = if (isNowPlaying) 1.dp else 0.dp,
-        modifier = if (isNowPlaying) {
-            Modifier.fillMaxWidth().padding(vertical = 4.dp).combinedClickable(onClick = onClick, onLongClick = onLongClick)
-        } else {
-            Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLongClick)
-        },
+        color = Color.Transparent,
+        tonalElevation = if (isNowPlaying) 2.dp else 0.dp,
+        modifier = cardModifier,
     ) {
         Row(
             modifier = Modifier
@@ -826,28 +871,53 @@ private fun TrackRow(
             }
             Spacer(Modifier.width(8.dp))
             if (isNowPlaying) {
-                val transition = rememberInfiniteTransition(label = "nowPlayingPulse")
-                val pulseScale = transition.animateFloat(
-                    initialValue = 1f,
+                val infiniteTransition = rememberInfiniteTransition(label = "nowPlayingPulse")
+                val pulseScale by infiniteTransition.animateFloat(
+                    initialValue = 1.0f,
                     targetValue = 1.06f,
-                    animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Reverse),
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1200, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
                     label = "pulseScale",
+                )
+                val dotAlpha by infiniteTransition.animateFloat(
+                    initialValue = 0.45f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(800, easing = LinearEasing),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
+                    label = "dotAlpha",
                 )
                 Surface(
                     shape = BadgePillShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = MaterialTheme.colorScheme.primary,
+                    tonalElevation = 4.dp,
+                    shadowElevation = 2.dp,
                     modifier = Modifier.graphicsLayer {
-                        scaleX = pulseScale.value
-                        scaleY = pulseScale.value
+                        scaleX = pulseScale
+                        scaleY = pulseScale
                     },
                 ) {
-                    Text(
-                        "Now Playing",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Medium,
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .graphicsLayer { alpha = dotAlpha }
+                                .background(MaterialTheme.colorScheme.onPrimary, CircleShape),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Now Playing",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
                 }
             }
             if (badge != null) {

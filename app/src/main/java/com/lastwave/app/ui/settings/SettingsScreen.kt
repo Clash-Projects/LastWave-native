@@ -147,6 +147,7 @@ import com.lastwave.app.data.local.eqBandLabel
 import com.lastwave.app.ui.common.ExpressiveHeader
 import com.lastwave.app.ui.common.safeDrawingBottomPadding
 import com.lastwave.app.ui.common.safeHorizontalContentPadding
+import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.theme.ExpressivePillShape
 import kotlin.math.roundToInt
 
@@ -298,7 +299,15 @@ fun SettingsScreen(
         if (uri != null) viewModel.exportBackup(uri, appVersionName(context))
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .adaptiveContentWidth(maxWidth = 760.dp),
+        ) {
         ExpressiveHeader(title = "Settings", onBack = onBack)
 
         LazyColumn(
@@ -1006,6 +1015,7 @@ fun SettingsScreen(
             }
         }
     }
+    }
 
     // -- Custom color wheel dialog (par 8.4) --
     if (state.showColorWheel) {
@@ -1176,6 +1186,8 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .adaptiveContentWidth(maxWidth = 640.dp)
+                    .align(Alignment.CenterHorizontally)
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 24.dp + safeDrawingBottomPadding()),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -1322,6 +1334,8 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .adaptiveContentWidth(maxWidth = 640.dp)
+                    .align(Alignment.CenterHorizontally)
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 24.dp + safeDrawingBottomPadding()),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -2253,7 +2267,13 @@ private fun ColorWheelSheet(onDismiss: () -> Unit, onApply: (Color) -> Unit) {
     val previewColor = Color.hsl(hue, saturation, lightness)
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(Modifier.padding(20.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 560.dp)
+                .align(Alignment.CenterHorizontally)
+                .padding(20.dp),
+        ) {
             Text("Custom Color", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(16.dp))
             Box(
@@ -2485,6 +2505,8 @@ private fun EqualizerSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 640.dp)
+                .align(Alignment.CenterHorizontally)
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
@@ -2902,6 +2924,8 @@ private fun YouTubeLibraryVisibilitySheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 640.dp)
+                .align(Alignment.CenterHorizontally)
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp + safeDrawingBottomPadding()),
@@ -3030,6 +3054,8 @@ private fun SyncPlaylistsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 640.dp)
+                .align(Alignment.CenterHorizontally)
                 .statusBarsPadding()
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp + safeDrawingBottomPadding()),
@@ -3180,6 +3206,8 @@ private fun LyricsAnimationSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .adaptiveContentWidth(maxWidth = 640.dp)
+                .align(Alignment.CenterHorizontally)
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
