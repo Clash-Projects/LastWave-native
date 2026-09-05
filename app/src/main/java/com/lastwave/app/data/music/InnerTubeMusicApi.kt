@@ -461,14 +461,12 @@ class InnerTubeMusicApi @Inject constructor(
             val recent = async {
                 runCatching { parseSongRenderers(browseRoot(YT_HISTORY_BROWSE_ID, authenticated = true)) }
                     .getOrDefault(emptyList())
-                    .filterNot { it.artist.equals("Unknown artist", ignoreCase = true) }
                     .distinctBy { it.videoId }
                     .take(recentLimit.coerceIn(0, 50))
             }
             val liked = async {
                 runCatching { parseSongRenderers(browseRoot(YT_LIKED_BROWSE_ID, authenticated = true)) }
                     .getOrDefault(emptyList())
-                    .filterNot { it.artist.equals("Unknown artist", ignoreCase = true) }
                     .distinctBy { it.videoId }
                     .take(likedLimit.coerceIn(0, 50))
             }
@@ -477,7 +475,6 @@ class InnerTubeMusicApi @Inject constructor(
                     parseHomeFeedSongs(browseRoot(YT_HOME_BROWSE_ID, authenticated = true))
                 }
                     .getOrDefault(emptyList())
-                    .filterNot { it.artist.equals("Unknown artist", ignoreCase = true) }
                     .distinctBy { it.videoId }
                     .take(feedLimit.coerceIn(0, 60))
             }
@@ -1599,7 +1596,7 @@ class InnerTubeMusicApi @Inject constructor(
         val state = status?.string("status")
         if (state != "OK") {
             val reason = status?.string("reason").orEmpty()
-            if (state != null && state in PERMANENT_PLAYABILITY_STATES) {
+            if (state == "UNPLAYABLE" && reason.isConfirmedUnavailableReason()) {
                 throw ConfirmedUnplayableMediaException(reason.ifBlank { state.orEmpty() })
             }
             throw IOException(reason.ifBlank { "Player status ${state ?: "missing"}" })
@@ -1828,22 +1825,14 @@ class InnerTubeMusicApi @Inject constructor(
             ?.message
             ?.takeIf(String::isNotBlank)
             ?.let { return it }
-        val diagnostic = causes.joinToString(" ") {
-            "${it::class.java.simpleName} ${it.message.orEmpty()}"
-        }.lowercase()
-        val confirmedMarkers = listOf(
-            "agerestricted", "age restricted", "confirm your age",
-            "geographicrestriction", "not available in your country",
-            "contentnotavailable", "video is unavailable", "video unavailable",
-            "privatecontent", "this video is private", "paidcontent",
-            "members-only",
-        )
-        return if (confirmedMarkers.any(diagnostic::contains)) {
-            causes.firstNotNullOfOrNull { it.message?.takeIf(String::isNotBlank) }
-                ?: "Media is unavailable"
-        } else {
-            null
+        return causes.firstNotNullOfOrNull { cause ->
+            cause.message?.takeIf { it.isConfirmedUnavailableReason() }
         }
+    }
+
+    private fun String.isConfirmedUnavailableReason(): Boolean {
+        val reason = lowercase()
+        return CONFIRMED_UNAVAILABLE_REASONS.any(reason::contains)
     }
 
     /** Keeps the stream cache from growing without bound over long sessions:
@@ -1875,14 +1864,14 @@ class InnerTubeMusicApi @Inject constructor(
             prefetchStreams = prefetchStreams,
         )
         val best = results.maxByOrNull { candidate -> matchScore(candidate, title, artist) }
-            ?: throw ConfirmedUnplayableMediaException("No YouTube Music match found for $title")
+            ?: throw IOException("No YouTube Music match found for $title")
         val titleSimilarity = maxOf(
             similarity(best.title, title),
             similarity(baseTitle(best.title), baseTitle(title)),
         )
         val artistSimilarity = similarity(best.artist, artist)
         if (titleSimilarity < 72 || (artist.isNotBlank() && artistSimilarity < 50)) {
-            throw ConfirmedUnplayableMediaException("No reliable YouTube Music match found for $title by $artist")
+            throw IOException("No reliable YouTube Music match found for $title by $artist")
         }
         return best.also {
             if (matchCache.size > MAX_MATCH_CACHE_ENTRIES) matchCache.clear()
@@ -2100,7 +2089,7 @@ class InnerTubeMusicApi @Inject constructor(
                 ?.string("browseId")?.startsWith("UC") == true
         }?.string("text") ?: details.mapNotNull { it.string("text") }
             .firstOrNull { it.isLikelyArtistDetail() }
-            ?: return null
+            ?: "Unknown artist"
         val album = details.firstOrNull { run ->
             run.obj("navigationEndpoint")?.obj("browseEndpoint")
                 ?.string("browseId")?.startsWith("MPRE") == true
@@ -2146,7 +2135,7 @@ class InnerTubeMusicApi @Inject constructor(
                 ?.string("browseId")?.startsWith("UC") == true
         }?.string("text") ?: detailRuns.mapNotNull { it.string("text") }
             .firstOrNull { it.isLikelyArtistDetail() }
-            ?: return null
+            ?: "Unknown artist"
         val album = detailRuns.firstOrNull { run ->
             run.obj("navigationEndpoint")?.obj("browseEndpoint")
                 ?.string("browseId")?.startsWith("MPRE") == true
@@ -2531,12 +2520,16 @@ class InnerTubeMusicApi @Inject constructor(
 
         /** Upper bound for the last-resort direct NewPipe extraction. */
         const val FALLBACK_EXTRACT_TIMEOUT_MS = 12_000L
-        val PERMANENT_PLAYABILITY_STATES = setOf(
-            "UNPLAYABLE",
-            "LOGIN_REQUIRED",
-            "AGE_CHECK_REQUIRED",
-            "CONTENT_CHECK_REQUIRED",
-            "LIVE_STREAM_OFFLINE",
+        val CONFIRMED_UNAVAILABLE_REASONS = listOf(
+            "video has been removed",
+            "video has been deleted",
+            "video was removed",
+            "video was deleted",
+            "this video is private",
+            "this is a private video",
+            "not available in your country",
+            "blocked in your country",
+            "copyright claim",
         )
 
         /** How long a failed player client is skipped by the racer. */

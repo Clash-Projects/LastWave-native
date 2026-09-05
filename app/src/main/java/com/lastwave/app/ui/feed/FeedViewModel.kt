@@ -16,8 +16,14 @@ import com.lastwave.app.data.music.YouTubeMusicTrack
 import com.lastwave.app.data.music.YouTubePlaylistSummary
 import com.lastwave.app.playback.MusicPlayer
 import com.lastwave.app.playback.PlayableTrack
+import com.lastwave.app.data.ytmusic.YtMusicAuthManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,46 +46,67 @@ class FeedViewModel @Inject constructor(
     private val sessionPreferences: SessionPreferences,
     private val musicPlayer: MusicPlayer,
     private val innerTube: InnerTubeMusicApi,
+    private val ytAuth: YtMusicAuthManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(FeedUiState())
     val uiState: StateFlow<FeedUiState> = _uiState.asStateFlow()
+    private var feedJob: Job? = null
 
     init {
-        loadFeed()
-    }
-
-    fun loadFeed() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
-            try {
-                val username = sessionPreferences.session.value.username.takeIf(String::isNotBlank)
-                val data = repository.loadFeed(username)
-                _uiState.update { it.copy(isLoading = false, feedData = data) }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message ?: "Failed to load feed") }
+            ytAuth.awaitLoadedConnection()
+            combine(ytAuth.connection, sessionPreferences.session) { connection, session ->
+                connection to session.username
+            }.distinctUntilChanged().collect { (connection, _) ->
+                feedJob?.cancel()
+                _uiState.value = FeedUiState(
+                    feedData = FeedData(
+                        isYtConnected = connection.isConnected,
+                        ytAccountName = connection.accountName.takeIf { connection.isConnected },
+                    ),
+                )
+                loadFeed()
             }
         }
     }
 
-    fun refresh() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true) }
+    fun loadFeed() = fetchFeed(refreshing = false)
+
+    fun refresh() = fetchFeed(refreshing = true)
+
+    private fun fetchFeed(refreshing: Boolean) {
+        feedJob?.cancel()
+        feedJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = !refreshing || it.isLoading, isRefreshing = refreshing, error = null) }
             try {
+                val connection = ytAuth.awaitLoadedConnection()
                 val username = sessionPreferences.session.value.username.takeIf(String::isNotBlank)
                 val data = repository.loadFeed(username)
+                ensureActive()
+                if (ytAuth.connection.value != connection ||
+                    sessionPreferences.session.value.username.takeIf(String::isNotBlank) != username
+                ) return@launch
                 _uiState.update {
                     it.copy(
+                        isLoading = false,
                         isRefreshing = false,
                         feedData = data,
                         error = null,
                     )
                 }
-            } catch (e: Exception) {
-                _uiState.update { it.copy(isRefreshing = false) }
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Exception) {
+                ensureActive()
+                _uiState.update {
+                    it.copy(isLoading = false, isRefreshing = false, error = "Couldn't update your feed. Please try again.")
+                }
             }
         }
     }
+
+    fun dismissError() = _uiState.update { it.copy(error = null) }
 
     fun playTrack(track: YouTubeMusicTrack, sourceLabel: String = "Feed") {
         musicPlayer.play(track.toPlayableTrack(), sourceLabel = sourceLabel)
